@@ -232,7 +232,34 @@ fi
 AC_SUBST(FREETYPE_CFLAGS)
 AC_SUBST(FREETYPE_LIBS)
 
-PKG_CHECK_MODULES(FONTCONFIG, fontconfig >= 2.0.0)
+AC_ARG_ENABLE(fontconfig,
+              AC_HELP_STRING([--disable-fontconfig],
+                             [Disable FontConfig support.]),
+              enable_fontconfig=$enableval,
+              enable_fontconfig="yes")
+AH_TEMPLATE([DISABLE_FONTCONFIG], [Disable FontConfig support.])
+if test x$enable_fontconfig = xyes; then
+    PKG_CHECK_MODULES(FONTCONFIG, fontconfig >= 2.0.0)
+else
+    AC_DEFINE(DISABLE_FONTCONFIG)
+fi
+
+AC_ARG_ENABLE(mac-fonts,
+              AC_HELP_STRING([--enable-mac-fonts],
+                             [Use Mac system fonts when fonts are not embedded in the PDF.]),
+              enable_mac_fonts=$enableval,
+              enable_mac_fonts="no")
+AH_TEMPLATE([ENABLE_MAC_FONTS], [Enable Mac font support.])
+if test x$enable_mac_fonts = xyes; then
+    KPSE_CHECK_FRAMEWORK([ApplicationServices], [ATSFontRef fontRef])
+    if test x$kpse_cv_have_ApplicationServices = xyes; then
+        AC_DEFINE(ENABLE_MAC_FONTS, 1, [Use Mac system fonts])
+    else
+        AC_MSG_WARN("Mac system font support is not available on this platform.")
+        enable_mac_fonts="no"
+    fi
+fi
+AM_CONDITIONAL(ENABLE_MAC_FONTS, test x$enable_mac_fonts = xyes)
 
 AC_ARG_ENABLE(splash-output,
               AC_HELP_STRING([--disable-splash-output],

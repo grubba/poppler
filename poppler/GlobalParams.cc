@@ -555,9 +555,16 @@ GlobalParams::GlobalParams(const char *customPopplerDataDir)
   UnicodeMap *map;
   int i;
 
-#ifndef _MSC_VER  
+#ifndef _MSC_VER
+#ifndef DISABLE_FONTCONFIG
   FcInit();
   FCcfg = FcConfigGetCurrent();
+#endif
+#endif
+
+#ifdef ENABLE_MAC_FONTS
+  tempFontFiles = NULL;
+  numTempFontFiles = 0;
 #endif
 
 #if MULTITHREADED
@@ -832,6 +839,13 @@ GlobalParams::~GlobalParams() {
   deleteGooList(plugins, Plugin);
 #endif
 
+#ifdef ENABLE_MAC_FONTS
+  while (numTempFontFiles > 0) {
+    --numTempFontFiles;
+    unlink(tempFontFiles[numTempFontFiles]);
+  }
+#endif
+
 #if MULTITHREADED
   gDestroyMutex(&mutex);
   gDestroyMutex(&unicodeMapCacheMutex);
@@ -960,6 +974,7 @@ static GBool findModifier(const char *name, const char *modifier, const char **s
 }
 
 #ifndef _MSC_VER
+#ifndef DISABLE_FONTCONFIG
 static FcPattern *buildFcPattern(GfxFont *font)
 {
   int weight = -1,
@@ -1103,11 +1118,13 @@ static FcPattern *buildFcPattern(GfxFont *font)
   return p;
 }
 #endif
+#endif
 
 /* if you can't or don't want to use Fontconfig, you need to implement
    this function for your platform. For Windows, it's in GlobalParamsWin.cc
 */
 #ifndef _MSC_VER
+#ifndef DISABLE_FONTCONFIG
 DisplayFontParam *GlobalParams::getDisplayFont(GfxFont *font) {
   DisplayFontParam *dfp;
   FcPattern *p=0;
@@ -1166,6 +1183,7 @@ fin:
   unlockGlobalParams;
   return dfp;
 }
+#endif
 #endif
 
 GBool GlobalParams::getPSExpandSmaller() {

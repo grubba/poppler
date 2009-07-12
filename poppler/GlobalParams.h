@@ -33,11 +33,15 @@
 #pragma interface
 #endif
 
+#include "config.h"
+
 #include <assert.h>
 #include "poppler-config.h"
 #include <stdio.h>
 #ifndef _MSC_VER
+#ifndef DISABLE_FONTCONFIG
 #include <fontconfig/fontconfig.h>
+#endif
 #endif
 #include "goo/gtypes.h"
 #include "CharTypes.h"
@@ -170,6 +174,10 @@ public:
 
 #ifdef _MSC_VER
   void setupBaseFonts(char *dir);
+#endif
+
+#ifdef ENABLE_MAC_FONTS
+  GBool loadPlatformFont(const char * fontName);
 #endif
 
   //----- accessors
@@ -351,7 +359,14 @@ private:
   CMapCache *cMapCache;
   
 #ifndef _MSC_VER
+#ifndef DISABLE_FONTCONFIG
   FcConfig *FCcfg;
+#endif
+#endif
+
+#ifdef ENABLE_MAC_FONTS
+  char **tempFontFiles;
+  int numTempFontFiles;
 #endif
 
 #ifdef ENABLE_PLUGINS
