@@ -103,6 +103,9 @@ if(ENABLE_CPP)
   macro_optional_find_package(Iconv)
   set(ENABLE_CPP ${ICONV_FOUND})
   set(HAVE_ICONV ${ICONV_FOUND})
+  if(ICONV_FOUND)
+    include_directories(${ICONV_INCLUDE_DIR})
+  endif(ICONV_FOUND)
 endif(ENABLE_CPP)
 if(ENABLE_ZLIB)
   find_package(ZLIB)
@@ -285,6 +288,22 @@ endif(FONTCONFIG_FOUND)
 if(WITH_FONTCONFIGURATION_MAC)
 set(poppler_SRCS ${poppler_SRCS} poppler/GlobalParamsMac.cc)
 endif(WITH_FONTCONFIGURATION_MAC)
+if(ICONV_FOUND)
+  set(poppler_LIBS ${poppler_LIBS} ${ICONV_LIBRARIES})
+  if(APPLE)
+    # Work-around for /opt/local/include/iconv.h conflicting
+    # with /usr/include/iconv.h and /usr/lib/libiconv.dylib.
+    # Typical symptom:
+    #   Linking CXX shared library libpoppler-cpp.dylib
+    #   Undefined symbols for architecture x86_64:
+    #     "_libiconv", referenced from:
+    #         poppler::ustring::to_utf8() const in poppler-global.cpp.o
+    #         poppler::ustring::from_utf8(char const*, int) in poppler-global.cpp.o
+    # [...]
+    #   ld: symbol(s) not found for architecture x86_64
+    add_definitions(-DLIBICONV_PLUG)
+  endif(APPLE)
+endif(ICONV_FOUND)
 if(JPEG_FOUND)
   set(poppler_SRCS ${poppler_SRCS}
     poppler/DCTStream.cc
