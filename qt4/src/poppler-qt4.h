@@ -1,7 +1,7 @@
 /* poppler-qt.h: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, 2007, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2005-2008, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2005-2009, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2005, Stefan Kebekus <stefan.kebekus@math.uni-koeln.de>
  * Copyright (C) 2006-2009, Pino Toscano <pino@kde.org>
  * Copyright (C) 2009 Shawn Rutledge <shawn.t.rutledge@gmail.com>
@@ -233,6 +233,8 @@ while (it->hasNext()) {
   QList<Poppler::FontInfo> fonts = it->next();
   // do something with the fonts
 }
+// after doing the job, the iterator must be freed
+delete it;
        \endcode
 
        \since 0.12
@@ -333,6 +335,13 @@ while (it->hasNext()) {
 	   The data as a byte array
 	*/
 	QByteArray data();
+
+	/**
+	   Is the embedded file valid?
+	   
+	   \since 0.12
+	*/
+	bool isValid() const;
 
 	/**
 	   A QDataStream for the actual data?
@@ -612,6 +621,16 @@ while (it->hasNext()) {
    The current rendering backend can be changed using setRenderBackend().
    Please note that setting a backend not listed in the available ones
    will always result in null QImage's.
+
+   \section document-cms Color management support
+
+   %Poppler, if compiled with this support, provides functions to handle color
+   profiles.
+
+   To know whether the %Poppler version you are using has support for color
+   management, you can query Poppler::isCmsAvailable(). In case it is not
+   avilable, all the color management-related functions will either do nothing
+   or return null.
 */
     class POPPLER_QT4_EXPORT Document {
 	friend class Page;
@@ -660,9 +679,43 @@ while (it->hasNext()) {
 	*/
 	enum RenderHint {
 	    Antialiasing = 0x00000001,      ///< Antialiasing for graphics
-	    TextAntialiasing = 0x00000002   ///< Antialiasing for text
+	    TextAntialiasing = 0x00000002,  ///< Antialiasing for text
+	    TextHinting = 0x00000004        ///< Hinting for text \since 0.12.1
 	};
 	Q_DECLARE_FLAGS( RenderHints, RenderHint )
+
+	/**
+	  Set a color display profile for the current document.
+
+	  \param outputProfileA is a \c cmsHPROFILE of the LCMS library.
+
+	   \since 0.12
+	*/
+	void setColorDisplayProfile(void *outputProfileA);
+	/**
+	  Set a color display profile for the current document.
+
+	  \param name is the name of the display profile to set.
+
+	   \since 0.12
+	*/
+	void setColorDisplayProfileName(const QString &name);
+	/**
+	  Return the current RGB profile.
+
+	  \return a \c cmsHPROFILE of the LCMS library.
+
+	   \since 0.12
+	*/
+	void* colorRgbProfile() const;
+	/**
+	  Return the current display profile.
+
+	  \return a \c cmsHPROFILE of the LCMS library.
+
+	   \since 0.12
+	*/
+	void *colorDisplayProfile() const;
 
 	/**
 	   Load the document from a file on disk
@@ -890,8 +943,24 @@ QString subject = m_doc->info("Subject");
 	/**
 	   The version of the PDF specification that the document
 	   conforms to
+
+	   \deprecated use getPdfVersion and avoid float point
+	   comparisons/handling
 	*/
-	double pdfVersion() const;
+	Q_DECL_DEPRECATED double pdfVersion() const;
+
+	/**
+	   The version of the PDF specification that the document
+	   conforms to
+
+	   \param major an optional pointer to a variable where store the
+	   "major" number of the version
+	   \param minor an optional pointer to a variable where store the
+	   "minor" number of the version
+
+	   \since 0.12
+	*/
+	void getPdfVersion(int *major, int *minor) const;
   
 	/**
 	   The fonts within the PDF document.
@@ -1158,6 +1227,20 @@ QString subject = m_doc->info("Subject");
               \return whether the conversion succeeded
             */
             virtual bool convert() = 0;
+            
+            enum Error
+            {
+                NoError,
+                FileLockedError,
+                OpenOutputError,
+                NotSupportedInputFileError
+            };
+            
+            /**
+              Returns the last error
+              \since 0.12.1
+            */
+            Error lastError() const;
 
         protected:
             /// \cond PRIVATE
@@ -1340,6 +1423,13 @@ height = dummy.height();
        Conversion from PDF date string format to QDateTime
     */
     POPPLER_QT4_EXPORT QDateTime convertDate( char *dateString );
+
+    /**
+       Whether the color management functions are available.
+
+       \since 0.12
+    */
+    POPPLER_QT4_EXPORT bool isCmsAvailable();
 
     class SoundData;
     /**

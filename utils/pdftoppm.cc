@@ -16,6 +16,10 @@
 // Copyright (C) 2007 Ilmari Heikkinen <ilmari.heikkinen@gmail.com>
 // Copyright (C) 2008 Richard Airlie <richard.airlie@maglabs.net>
 // Copyright (C) 2009 Michael K. Johnson <a1237@danlj.org>
+// Copyright (C) 2009 Shen Liang <shenzhuxi@gmail.com>
+// Copyright (C) 2009 Stefan Thomas <thomas@eload24.com>
+// Copyright (C) 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2010 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -54,6 +58,8 @@ static int sz = 0;
 static GBool useCropBox = gFalse;
 static GBool mono = gFalse;
 static GBool gray = gFalse;
+static GBool png = gFalse;
+static GBool jpeg = gFalse;
 static char enableFreeTypeStr[16] = "";
 static char antialiasStr[16] = "";
 static char vectorAntialiasStr[16] = "";
@@ -99,7 +105,14 @@ static const ArgDesc argDesc[] = {
    "generate a monochrome PBM file"},
   {"-gray",   argFlag,     &gray,          0,
    "generate a grayscale PGM file"},
-
+#if ENABLE_LIBPNG
+  {"-png",    argFlag,     &png,           0,
+   "generate a PNG file"},
+#endif
+#if ENABLE_LIBJPEG
+  {"-jpeg",    argFlag,     &jpeg,           0,
+   "generate a JPEG file"},
+#endif
 #if HAVE_FREETYPE_FREETYPE_H | HAVE_FREETYPE_H
   {"-freetype",   argString,      enableFreeTypeStr, sizeof(enableFreeTypeStr),
    "enable FreeType font rasterizer: yes, no"},
@@ -145,10 +158,25 @@ static void savePageSlice(PDFDoc *doc,
     !useCropBox, gFalse, gFalse,
     x, y, w, h
   );
+
+  SplashBitmap *bitmap = splashOut->getBitmap();
+  
   if (ppmFile != NULL) {
-    splashOut->getBitmap()->writePNMFile(ppmFile);
+    if (png) {
+      bitmap->writeImgFile(splashFormatPng, ppmFile, x_resolution, y_resolution);
+    } else if (jpeg) {
+      bitmap->writeImgFile(splashFormatJpeg, ppmFile, x_resolution, y_resolution);
+    } else {
+      bitmap->writePNMFile(ppmFile);
+    }
   } else {
-    splashOut->getBitmap()->writePNMFile(stdout);
+    if (png) {
+      bitmap->writeImgFile(splashFormatPng, stdout, x_resolution, y_resolution);
+    } else if (jpeg) {
+      bitmap->writeImgFile(splashFormatJpeg, stdout, x_resolution, y_resolution);
+    } else {
+      bitmap->writePNMFile(stdout);
+    }
   }
 }
 
@@ -288,7 +316,7 @@ int main(int argc, char *argv[]) {
     if (ppmRoot != NULL) {
       snprintf(ppmFile, PPM_FILE_SZ, "%.*s-%0*d.%s",
               PPM_FILE_SZ - 32, ppmRoot, pg_num_len, pg,
-              mono ? "pbm" : gray ? "pgm" : "ppm");
+              png ? "png" : jpeg ? "jpg" : mono ? "pbm" : gray ? "pgm" : "ppm");
       savePageSlice(doc, splashOut, pg, x, y, w, h, pg_w, pg_h, ppmFile);
     } else {
       savePageSlice(doc, splashOut, pg, x, y, w, h, pg_w, pg_h, NULL);

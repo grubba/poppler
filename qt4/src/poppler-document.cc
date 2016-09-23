@@ -1,7 +1,7 @@
 /* poppler-document.cc: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, 2008, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2005-2008, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2005-2009, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2006-2009, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -29,12 +29,17 @@
 #include <Stream.h>
 #include <Catalog.h>
 #include <DateInfo.h>
+#include <GfxState.h>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFile>
 #include <QtCore/QByteArray>
 
 #include "poppler-private.h"
+
+#if defined(USE_CMS)
+#include <lcms.h>
+#endif
 
 namespace Poppler {
 
@@ -374,7 +379,15 @@ namespace Poppler {
 
     double Document::pdfVersion() const
     {
-	return m_doc->doc->getPDFVersion();
+	return m_doc->doc->getPDFMajorVersion () + m_doc->doc->getPDFMinorVersion() / 10.0;
+    }
+
+    void Document::getPdfVersion(int *major, int *minor) const
+    {
+	if (major)
+	    *major = m_doc->doc->getPDFMajorVersion();
+	if (minor)
+	    *minor = m_doc->doc->getPDFMinorVersion();
     }
 
     Page *Document::page(const QString &label) const
@@ -424,6 +437,44 @@ namespace Poppler {
         m_doc->setPaperColor(color);
     }
     
+    void Document::setColorDisplayProfile(void* outputProfileA)
+    {
+#if defined(USE_CMS)
+        GfxColorSpace::setDisplayProfile((cmsHPROFILE)outputProfileA);
+#else
+        Q_UNUSED(outputProfileA);
+#endif
+    }
+
+    void Document::setColorDisplayProfileName(const QString &name)
+    {
+#if defined(USE_CMS)
+        GooString *profileName = QStringToGooString( name );
+        GfxColorSpace::setDisplayProfileName(profileName);
+        delete profileName;
+#else
+        Q_UNUSED(name);
+#endif
+    }
+
+    void* Document::colorRgbProfile() const
+    {
+#if defined(USE_CMS)
+        return (void*)GfxColorSpace::getRGBProfile();
+#else
+        return NULL;
+#endif
+    }
+
+    void* Document::colorDisplayProfile() const
+    {
+#if defined(USE_CMS)
+       return (void*)GfxColorSpace::getDisplayProfile();
+#else
+       return NULL;
+#endif
+    }
+
     QColor Document::paperColor() const
     {
     	return m_doc->paperColor;
@@ -462,7 +513,7 @@ namespace Poppler {
 
         // the only way to set antialiasing for Splash is on creation
         if ( m_doc->m_backend == Document::SplashBackend &&
-             ( hint & ( Document::Antialiasing || Document::TextAntialiasing ) ) )
+             ( hint & ( Document::Antialiasing || Document::TextAntialiasing || Document::TextHinting ) ) )
         {
             delete m_doc->m_outputDev;
             m_doc->m_outputDev = NULL;
@@ -554,6 +605,15 @@ namespace Poppler {
             }
         }
         return QDateTime();
+    }
+
+    bool isCmsAvailable()
+    {
+#if defined(USE_CMS)
+        return true;
+#else
+        return false;
+#endif
     }
 
 }

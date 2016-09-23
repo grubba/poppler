@@ -18,11 +18,14 @@
 // Copyright (C) 2006-2009 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2006 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2007, 2008 Brad Hards <bradh@kde.org>
-// Copyright (C) 2008 Koji Otani <sho@bbr.jp>
+// Copyright (C) 2008, 2009 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2008 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2009 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Till Kamppeter <till.kamppeter@gmail.com>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2009 William Bader <williambader@hotmail.com>
+// Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
+// Copyright (C) 2009 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -1007,7 +1010,7 @@ PSOutputDev::PSOutputDev(const char *fileName, XRef *xrefA, Catalog *catalog,
   } else if (fileName[0] == '|') {
     fileTypeA = psPipe;
 #ifdef HAVE_POPEN
-#ifndef WIN32
+#ifndef _WIN32
     signal(SIGPIPE, (SignalFunc)SIG_IGN);
 #endif
     if (!(f = popen(fileName + 1, "w"))) {
@@ -1106,6 +1109,7 @@ void PSOutputDev::init(PSOutputFunc outputFuncA, void *outputStreamA,
       paperHeight = 1;
     }
   }
+  substFonts = globalParams->getPSSubstFonts();
   preload = globalParams->getPSPreload();
   if (imgLLX == 0 && imgURX == 0 && imgLLY == 0 && imgURY == 0) {
     imgLLX = imgLLY = 0;
@@ -1217,7 +1221,7 @@ PSOutputDev::~PSOutputDev() {
 #ifdef HAVE_POPEN
     else if (fileType == psPipe) {
       pclose((FILE *)outputStream);
-#ifndef WIN32
+#ifndef _WIN32
       signal(SIGPIPE, (SignalFunc)SIG_DFL);
 #endif
     }
@@ -1659,14 +1663,16 @@ void PSOutputDev::setupFont(GfxFont *font, Dict *parentResDict) {
   // check for embedded Type 1 font
   } else if (globalParams->getPSEmbedType1() &&
 	     font->getType() == fontType1 &&
-	     font->getEmbeddedFontID(&fontFileID)) {
+	     font->getEmbeddedFontID(&fontFileID) &&
+	     font->getEmbeddedFontName()) {
     psName = font->getEmbeddedFontName()->sanitizedName(gTrue /* ps mode */);
     setupEmbeddedType1Font(&fontFileID, psName);
 
   // check for embedded Type 1C font
   } else if (globalParams->getPSEmbedType1() &&
 	     font->getType() == fontType1C &&
-	     font->getEmbeddedFontID(&fontFileID)) {
+	     font->getEmbeddedFontID(&fontFileID) &&
+	     font->getOrigName()) {
     // use the PDF font name because the embedded font name might
     // not include the subset prefix
     psName = font->getOrigName()->sanitizedName(gTrue /* ps mode */);
@@ -1675,7 +1681,8 @@ void PSOutputDev::setupFont(GfxFont *font, Dict *parentResDict) {
   // check for embedded OpenType - Type 1C font
   } else if (globalParams->getPSEmbedType1() &&
 	     font->getType() == fontType1COT &&
-	     font->getEmbeddedFontID(&fontFileID)) {
+	     font->getEmbeddedFontID(&fontFileID) &&
+	     font->getOrigName()) {
     // use the PDF font name because the embedded font name might
     // not include the subset prefix
     psName = font->getOrigName()->sanitizedName(gTrue /* ps mode */);
@@ -1684,7 +1691,8 @@ void PSOutputDev::setupFont(GfxFont *font, Dict *parentResDict) {
   // check for external Type 1 font file
   } else if (globalParams->getPSEmbedType1() &&
 	     font->getType() == fontType1 &&
-	     font->getExtFontFile()) {
+	     font->getExtFontFile() &&
+	     font->getName()) {
     // this assumes that the PS font name matches the PDF font name
     psName = font->getName()->copy();
     setupExternalType1Font(font->getExtFontFile(), psName);
@@ -1693,7 +1701,8 @@ void PSOutputDev::setupFont(GfxFont *font, Dict *parentResDict) {
   } else if (globalParams->getPSEmbedTrueType() &&
 	     (font->getType() == fontTrueType ||
 	      font->getType() == fontTrueTypeOT) &&
-	     font->getEmbeddedFontID(&fontFileID)) {
+	     font->getEmbeddedFontID(&fontFileID) &&
+	     font->getEmbeddedFontName()) {
     psName = font->getEmbeddedFontName()->sanitizedName(gTrue /* ps mode */);
     setupEmbeddedTrueTypeFont(font, &fontFileID, psName);
 
@@ -1706,7 +1715,8 @@ void PSOutputDev::setupFont(GfxFont *font, Dict *parentResDict) {
   // check for embedded CID PostScript font
   } else if (globalParams->getPSEmbedCIDPostScript() &&
 	     font->getType() == fontCIDType0C &&
-	     font->getEmbeddedFontID(&fontFileID)) {
+	     font->getEmbeddedFontID(&fontFileID) &&
+	     font->getEmbeddedFontName()) {
     psName = font->getEmbeddedFontName()->sanitizedName(gTrue /* ps mode */);
     setupEmbeddedCIDType0Font(font, &fontFileID, psName);
 
@@ -1714,14 +1724,16 @@ void PSOutputDev::setupFont(GfxFont *font, Dict *parentResDict) {
   } else if (globalParams->getPSEmbedCIDTrueType() &&
 	     (font->getType() == fontCIDType2 ||
 	      font->getType() == fontCIDType2OT) &&
-	     font->getEmbeddedFontID(&fontFileID)) {
+	     font->getEmbeddedFontID(&fontFileID) &&
+	     font->getEmbeddedFontName()) {
     psName = font->getEmbeddedFontName()->sanitizedName(gTrue /* ps mode */);
     setupEmbeddedCIDTrueTypeFont(font, &fontFileID, psName, gTrue);
 
   // check for embedded OpenType - CID CFF font
   } else if (globalParams->getPSEmbedCIDPostScript() &&
 	     font->getType() == fontCIDType0COT &&
-	     font->getEmbeddedFontID(&fontFileID)) {
+	     font->getEmbeddedFontID(&fontFileID) &&
+	     font->getEmbeddedFontName()) {
     psName = font->getEmbeddedFontName()->sanitizedName(gTrue /* ps mode */);
     setupEmbeddedOpenTypeCFFFont(font, &fontFileID, psName);
 
@@ -1751,34 +1763,39 @@ void PSOutputDev::setupFont(GfxFont *font, Dict *parentResDict) {
       }
     }
     if (!psName) {
-      if (font->isFixedWidth()) {
-	i = 8;
-      } else if (font->isSerif()) {
-	i = 4;
-      } else {
-	i = 0;
-      }
-      if (font->isBold()) {
-	i += 2;
-      }
-      if (font->isItalic()) {
-	i += 1;
-      }
-      psName = new GooString(psSubstFonts[i].psName);
-      for (code = 0; code < 256; ++code) {
-	if ((charName = ((Gfx8BitFont *)font)->getCharName(code)) &&
-	    charName[0] == 'm' && charName[1] == '\0') {
-	  break;
+      if (substFonts) {
+	if (font->isFixedWidth()) {
+	  i = 8;
+	} else if (font->isSerif()) {
+	  i = 4;
+	} else {
+	  i = 0;
 	}
-      }
-      if (code < 256) {
-	w1 = ((Gfx8BitFont *)font)->getWidth(code);
+	if (font->isBold()) {
+	  i += 2;
+	}
+	if (font->isItalic()) {
+	  i += 1;
+	}
+	psName = new GooString(psSubstFonts[i].psName);
+	for (code = 0; code < 256; ++code) {
+	  if ((charName = ((Gfx8BitFont *)font)->getCharName(code)) &&
+	      charName[0] == 'm' && charName[1] == '\0') {
+	    break;
+	  }
+	}
+	if (code < 256) {
+	  w1 = ((Gfx8BitFont *)font)->getWidth(code);
+	} else {
+	  w1 = 0;
+	}
+	w2 = psSubstFonts[i].mWidth;
+	xs = w1 / w2;
+	if (xs < 0.1) {
+	  xs = 1;
+	}
       } else {
-	w1 = 0;
-      }
-      w2 = psSubstFonts[i].mWidth;
-      xs = w1 / w2;
-      if (xs < 0.1) {
+	psName = new GooString(name);
 	xs = 1;
       }
       if (font->getType() == fontType3) {
@@ -2014,12 +2031,19 @@ void PSOutputDev::setupEmbeddedType1Font(Ref *id, GooString *psName) {
 
   if (writePadding)
   {
-    // write padding and "cleartomark"
-    for (i = 0; i < 8; ++i) {
-      writePS("00000000000000000000000000000000"
-	      "00000000000000000000000000000000\n");
+    if (length3 > 0) {
+      // write fixed-content portion
+      while ((c = strObj.streamGetChar()) != EOF) {
+	writePSChar(c);
+      }
+    } else {
+      // write padding and "cleartomark"
+      for (i = 0; i < 8; ++i) {
+	writePS("00000000000000000000000000000000"
+		"00000000000000000000000000000000\n");
+      }
+      writePS("cleartomark\n");
     }
-    writePS("cleartomark\n");
   }
 
   // ending comment
@@ -2897,7 +2921,7 @@ void PSOutputDev::setupForm(Ref id, Object *strObj) {
 
   writePSFmt("/f_{0:d}_{1:d} {{\n", id.num, id.gen);
   writePS("q\n");
-  writePSFmt("[{0:.4g} {1:.4g} {2:.4g} {3:.4g} {4:.4g} {5:.4g}] cm\n",
+  writePSFmt("[{0:.4gs} {1:.4gs} {2:.4gs} {3:.4gs} {4:.4gs} {5:.4gs}] cm\n",
 	     m[0], m[1], m[2], m[3], m[4], m[5]);
 
   box.x1 = bbox[0];
@@ -3155,6 +3179,7 @@ void PSOutputDev::startPage(int pageNum, GfxState *state) {
       } else {
 	writePSFmt("%%Page: {0:t} {1:d}\n", filteredString, seqPage);
       }
+      delete filteredString;
     } else {
       writePSFmt("%%Page: {0:d} {1:d}\n", pageNum, seqPage);
     }
@@ -3383,7 +3408,7 @@ void PSOutputDev::restoreState(GfxState *state) {
 
 void PSOutputDev::updateCTM(GfxState *state, double m11, double m12,
 			    double m21, double m22, double m31, double m32) {
-  writePSFmt("[{0:.4g} {1:.4g} {2:.4g} {3:.4g} {4:.4g} {5:.4g}] cm\n",
+  writePSFmt("[{0:.4gs} {1:.4gs} {2:.4gs} {3:.4gs} {4:.4gs} {5:.4gs}] cm\n",
 	     m11, m12, m21, m22, m31, m32);
 }
 
@@ -3745,11 +3770,11 @@ void PSOutputDev::eoFill(GfxState *state) {
   writePS("f*\n");
 }
 
-void PSOutputDev::tilingPatternFill(GfxState *state, Object *str,
-				    int paintType, Dict *resDict,
-				    double *mat, double *bbox,
-				    int x0, int y0, int x1, int y1,
-				    double xStep, double yStep) {
+GBool PSOutputDev::tilingPatternFill(GfxState *state, Object *str,
+				     int paintType, Dict *resDict,
+				     double *mat, double *bbox,
+				     int x0, int y0, int x1, int y1,
+				     double xStep, double yStep) {
   PDFRectangle box;
   Gfx *gfx;
 
@@ -3807,6 +3832,8 @@ void PSOutputDev::tilingPatternFill(GfxState *state, Object *str,
   writePSFmt("{0:d} 1 {1:d} {{ {2:.4g} exch {3:.4g} mul m {4:d} 1 {5:d} {{ pop (x) show }} for }} for\n",
 	     y0, y1 - 1, x0 * xStep, yStep, x0, x1 - 1);
   writePS("grestore\n");
+
+  return gTrue;
 }
 
 GBool PSOutputDev::functionShadedFill(GfxState *state,
@@ -3944,8 +3971,7 @@ GBool PSOutputDev::axialShadedFill(GfxState *state, GfxAxialShading *shading, do
   return gTrue;
 }
 
-GBool PSOutputDev::radialShadedFill(GfxState *state,
-				    GfxRadialShading *shading) {
+GBool PSOutputDev::radialShadedFill(GfxState *state, GfxRadialShading *shading, double /*sMin*/, double /*sMax*/) {
   double xMin, yMin, xMax, yMax;
   double x0, y0, r0, x1, y1, r1, t0, t1;
   double xa, ya, ra;
@@ -4729,14 +4755,28 @@ void PSOutputDev::maskToClippingPath(Stream *maskStr, int maskWidth, int maskHei
     rectsOut[rectsOutLen].y1 = maskHeight - rects0[i].y0 - 1;
     ++rectsOutLen;
   }
-  writePSFmt("{0:d} array 0\n", rectsOutLen * 4);
-  for (i = 0; i < rectsOutLen; ++i) {
-    writePSFmt("[{0:d} {1:d} {2:d} {3:d}] pr\n",
-               rectsOut[i].x0, rectsOut[i].y0,
-               rectsOut[i].x1 - rectsOut[i].x0,
-               rectsOut[i].y1 - rectsOut[i].y0);
+  if (rectsOutLen < 65536/4) {
+    writePSFmt("{0:d} array 0\n", rectsOutLen * 4);
+    for (i = 0; i < rectsOutLen; ++i) {
+      writePSFmt("[{0:d} {1:d} {2:d} {3:d}] pr\n",
+		 rectsOut[i].x0, rectsOut[i].y0,
+		 rectsOut[i].x1 - rectsOut[i].x0,
+		 rectsOut[i].y1 - rectsOut[i].y0);
+    }
+    writePSFmt("pop {0:d} {1:d} pdfImClip\n", maskWidth, maskHeight);
+  } else {
+    //  would be over the limit of array size.
+    //  make each rectangle path and clip.
+    writePS("gsave newpath\n");
+    for (i = 0; i < rectsOutLen; ++i) {
+      writePSFmt("{0:.4g} {1:.4g} {2:.4g} {3:.4g} re\n",
+		 ((double)rectsOut[i].x0)/maskWidth,
+		 ((double)rectsOut[i].y0)/maskHeight,
+		 ((double)(rectsOut[i].x1 - rectsOut[i].x0))/maskWidth,
+		 ((double)(rectsOut[i].y1 - rectsOut[i].y0))/maskHeight);
+    }
+    writePS("clip\n");
   }
-  writePSFmt("pop {0:d} {1:d} pdfImClip\n", maskWidth, maskHeight);
   gfree(rectsOut);
   gfree(rects0);
   gfree(rects1);
@@ -4762,7 +4802,9 @@ void PSOutputDev::doImageL2(Object *ref, GfxImageColorMap *colorMap,
   GfxColor color;
   GfxCMYK cmyk;
   int c;
-  int col, i, j, x0, x1, y, maskXor;
+  int col, i, j, x0, x1, y;
+  
+  rectsOutLen = 0;
 
   // color key masking
   if (maskColors && colorMap && !inlineImg) {
@@ -4771,7 +4813,7 @@ void PSOutputDev::doImageL2(Object *ref, GfxImageColorMap *colorMap,
     numComps = colorMap->getNumPixelComps();
     imgStr = new ImageStream(str, width, numComps, colorMap->getBits());
     imgStr->reset();
-    rects0Len = rects1Len = rectsOutLen = 0;
+    rects0Len = rects1Len = 0;
     rectsSize = rectsOutSize = 64;
     rects0 = (PSOutImgClipRect *)gmallocn(rectsSize, sizeof(PSOutImgClipRect));
     rects1 = (PSOutImgClipRect *)gmallocn(rectsSize, sizeof(PSOutImgClipRect));
@@ -4894,14 +4936,28 @@ void PSOutputDev::doImageL2(Object *ref, GfxImageColorMap *colorMap,
       rectsOut[rectsOutLen].y1 = height - rects0[i].y0 - 1;
       ++rectsOutLen;
     }
-    writePSFmt("{0:d} array 0\n", rectsOutLen * 4);
-    for (i = 0; i < rectsOutLen; ++i) {
-      writePSFmt("[{0:d} {1:d} {2:d} {3:d}] pr\n",
-		 rectsOut[i].x0, rectsOut[i].y0,
-		 rectsOut[i].x1 - rectsOut[i].x0,
-		 rectsOut[i].y1 - rectsOut[i].y0);
+    if (rectsOutLen < 65536/4) {
+      writePSFmt("{0:d} array 0\n", rectsOutLen * 4);
+      for (i = 0; i < rectsOutLen; ++i) {
+	writePSFmt("[{0:d} {1:d} {2:d} {3:d}] pr\n",
+		   rectsOut[i].x0, rectsOut[i].y0,
+		   rectsOut[i].x1 - rectsOut[i].x0,
+		   rectsOut[i].y1 - rectsOut[i].y0);
+      }
+      writePSFmt("pop {0:d} {1:d} pdfImClip\n", width, height);
+    } else {
+      //  would be over the limit of array size.
+      //  make each rectangle path and clip.
+      writePS("gsave newpath\n");
+      for (i = 0; i < rectsOutLen; ++i) {
+	writePSFmt("{0:.4g} {1:.4g} {2:.4g} {3:.4g} re\n",
+		   ((double)rectsOut[i].x0)/width,
+		   ((double)rectsOut[i].y0)/height,
+		   ((double)(rectsOut[i].x1 - rectsOut[i].x0))/width,
+		   ((double)(rectsOut[i].y1 - rectsOut[i].y0))/height);
+      }
+      writePS("clip\n");
     }
-    writePSFmt("pop {0:d} {1:d} pdfImClip\n", width, height);
     gfree(rectsOut);
     gfree(rects0);
     gfree(rects1);
@@ -5166,7 +5222,11 @@ void PSOutputDev::doImageL2(Object *ref, GfxImageColorMap *colorMap,
   }
 
   if ((maskColors && colorMap && !inlineImg) || maskStr) {
-    writePS("pdfImClipEnd\n");
+    if (rectsOutLen < 65536/4) {
+	writePS("pdfImClipEnd\n");
+    } else {
+	writePS("grestore\n");
+    }
   }
 }
 

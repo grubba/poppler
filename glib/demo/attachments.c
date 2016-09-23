@@ -189,6 +189,8 @@ attachment_save_callback (const gchar  *buf,
 	GChecksum *cs = (GChecksum *)data;
 
 	g_checksum_update (cs, buf, count);
+
+	return TRUE;
 }
 
 static void
@@ -250,7 +252,7 @@ pgd_attachments_validate_button_clicked (GtkButton   *button,
 		gint i;
 	
 		for (i = 0; i < digest_len; i++) {
-			if (attachment->checksum->str[i] != digest[i]) {
+			if ((guint8)attachment->checksum->str[i] != digest[i]) {
 				valid = FALSE;
 				break;
 			}

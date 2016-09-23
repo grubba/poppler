@@ -15,7 +15,7 @@
 //
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005 Jeff Muizelaar <jeff@infidigm.net>
-// Copyright (C) 2005-2008 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005-2009 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2006-2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2006 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
 // Copyright (C) 2006 Scott Turner <scotty1024@mac.com>
@@ -269,7 +269,7 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
 
   // transtion
   pageDict->lookupNF("Trans", &trans);
-  if (!(trans.isDict() || trans.isNull())) {
+  if (!(trans.isRef() || trans.isDict() || trans.isNull())) {
     error(-1, "Page transition object (page %d) is wrong type (%s)",
 	  num, trans.getTypeName());
     trans.free();
@@ -554,7 +554,7 @@ GBool Page::loadThumb(unsigned char **data_out,
     obj1.free ();
     dict->lookup ("CS", &obj1);
   }
-  colorSpace = GfxColorSpace::parse(&obj1);
+  colorSpace = GfxColorSpace::parse(&obj1, NULL);
   obj1.free();
   if (!colorSpace) {
     fprintf (stderr, "Error: Cannot parse color space\n");

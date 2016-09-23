@@ -18,6 +18,7 @@
 // Copyright (C) 2007 Krzysztof Kowalczyk <kkowalczyk@gmail.com>
 // Copyright (C) 2008 Julien Rebetez <julien@fhtagn.net>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2009 Glenn Ganz <glenn.ganz@uptime.ch>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -403,6 +404,10 @@ ImageStream::ImageStream(Stream *strA, int widthA, int nCompsA, int nBitsA) {
     imgLineSize = (nVals + 7) & ~7;
   } else {
     imgLineSize = nVals;
+  }
+  if (width > INT_MAX / nComps) {
+    // force a call to gmallocn(-1,...), which will throw an exception
+    imgLineSize = -1;
   }
   imgLine = (Guchar *)gmallocn(imgLineSize, sizeof(Guchar));
   imgIdx = nVals;
@@ -2030,7 +2035,7 @@ static const int dctZigZag[64] = {
   63
 };
 
-DCTStream::DCTStream(Stream *strA, GBool colorXformA):
+DCTStream::DCTStream(Stream *strA, int colorXformA):
     FilterStream(strA) {
   int i, j;
 

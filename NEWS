@@ -1,3 +1,73 @@
+Release 0.12.0
+
+	core:
+	 * Fix printf format security warnings
+	 * Improve rendering of radial shadings. Bug #20238
+	 * Better fallback when there's a font type mismatch. Bug #17252
+	 * Do not crash on attachments without data stream. Bug #10386
+	 * Fix infinite loop in JBIG2Decoder. Bug #23025
+	
+	build system:
+	 * Minimizes pkg-config dependencies for Qt frontends
+	 * Add automake 1.11 support
+	 * Use the newest automake found and not the oldest
+	 * Support AM_SILENT_RULES when using automake 1.11
+	
+	utils:
+	 * Add common options to pdftoabw
+
+Release 0.11.3 (0.12 RC 1)
+
+	core:
+	 * Optimization in the Cairo renderer for some fonts
+	 * Do not apply masks when fill color space mode is csPattern in the Cairo renderer. Bug #22216
+	 * Check for overflow when parsing integers. Bug #23078
+	 * Do not save the font file twice for FreeType fonts in the Cairo renderer. Bug #20491
+	 * Use current fill_opacity when drawing images in the Cairo renderer
+	 * Fix alpha rendering in some files in the Splash renderer. Bug #22143, #22152
+	 * Implement tiling patterns in the Cairo renderer
+	 * When converting a cm matrix to PS write 4 significant digits for numbers < 1 not 4 decimals. Bug #23332
+	 * Fix changing of locale, now poppler no longer changes LC_NUMERIC to "C"
+	 * Return PDF version as two integers instead of as a double
+	
+	Qt4:
+	 * Addition of the Color Management API
+	 * Small fix to documentation
+	 * Fix backwards text search
+	
+	utils:
+	 * Add the -png flag to pdftoppm to output to PNG
+
+Release 0.11.2 (0.12 Beta 2)
+
+	core:
+	 * Make DecryptStream return sane values for getPos(). Bug #19706
+	 * Fix bug when printing pdf with multiple page sizes in duplex mode
+	 * Initilize AnnotColot properly when the Array is not correct
+	 * Fix crash on some files with forms. Bug #22485
+	 * Fix crash in files with invalid embedded files. Bug #22551
+	 * Improve FileSpec attribute parsing
+	 * Cairo output device improvements. Bugs #10942, #18017, #14160
+	 * Implement blend modes in cairo backend
+	 * Handle fontType1COT fonts in CairoFontEngine
+	 * Fix generation of PS for some files. Bug #18908
+	 * Don't use byte_lookup table when color space doesn't support getLine methods. Bug #11027
+	 * Fix rendering of PDF files with malformed patterns. Bug #22835
+	 * Add the possibility of disabling font substitution in pdftops. Bug #23030
+	 * Fix some radio buttons not being detected as such
+	
+	glib:
+	 * Improvements to the demo
+	
+	Qt4:
+	 * Improvements to the demo
+	
+	build system:
+	 * Use gtkbuilder rather than libglade for some tests
+	
+	utils:
+	 * Fix bug with noCrop parameter in pdftops 
+
 Release 0.11.1 (0.12 Beta 1)
 
 	core:

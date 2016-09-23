@@ -4,7 +4,7 @@
 //
 // A JPX stream decoder using OpenJPEG
 //
-// Copyright 2008 Albert Astals Cid <aacid@kde.org>
+// Copyright 2008, 2009 Albert Astals Cid <aacid@kde.org>
 //
 // Licensed under GPLv2 or later
 //
@@ -86,11 +86,11 @@ void JPXStream::init()
 }
 
 static void libopenjpeg_error_callback(const char *msg, void * /*client_data*/) {
-  error(-1, (char*)msg);
+  error(-1, "%s", msg);
 }
 
 static void libopenjpeg_warning_callback(const char *msg, void * /*client_data*/) {
-  error(-1, (char*)msg);
+  error(-1, "%s", msg);
 }
 
 void JPXStream::init2(unsigned char *buf, int bufLen, OPJ_CODEC_FORMAT format)

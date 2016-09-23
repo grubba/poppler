@@ -13,6 +13,8 @@
 //
 // Copyright (C) 2006 Takashi Iwai <tiwai@suse.de>
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
+// Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
+// Copyright (C) 2009 Albert Astals Cid <aacid@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -66,7 +68,7 @@ SplashFontEngine::SplashFontEngine(
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
 				   GBool enableFreeType,
-				   GBool noah,
+				   GBool enableFreeTypeHinting,
 #endif
 				   GBool aa) {
   int i;
@@ -84,7 +86,7 @@ SplashFontEngine::SplashFontEngine(
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
   if (enableFreeType) {
-    ftEngine = SplashFTFontEngine::init(aa, noah);
+    ftEngine = SplashFTFontEngine::init(aa, enableFreeTypeHinting);
   } else {
     ftEngine = NULL;
   }
@@ -144,7 +146,7 @@ SplashFontFile *SplashFontEngine::loadType1Font(SplashFontFileID *idA,
   }
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
   // delete the (temporary) font file -- with Unix hard link
   // semantics, this will remove the last link; otherwise it will
   // return an error, leaving the file to be deleted later (if
@@ -173,7 +175,7 @@ SplashFontFile *SplashFontEngine::loadType1CFont(SplashFontFileID *idA,
   }
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
   // delete the (temporary) font file -- with Unix hard link
   // semantics, this will remove the last link; otherwise it will
   // return an error, leaving the file to be deleted later (if
@@ -218,7 +220,7 @@ SplashFontFile *SplashFontEngine::loadCIDFont(SplashFontFileID *idA,
   }
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
   // delete the (temporary) font file -- with Unix hard link
   // semantics, this will remove the last link; otherwise it will
   // return an error, leaving the file to be deleted later (if
@@ -270,7 +272,7 @@ SplashFontFile *SplashFontEngine::loadTrueTypeFont(SplashFontFileID *idA,
     gfree(codeToGID);
   }
 
-#ifndef WIN32
+#ifndef _WIN32
   // delete the (temporary) font file -- with Unix hard link
   // semantics, this will remove the last link; otherwise it will
   // return an error, leaving the file to be deleted later (if

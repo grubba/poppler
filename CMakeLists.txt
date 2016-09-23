@@ -12,8 +12,8 @@ include(MacroEnsureVersion)
 include(MacroBoolTo01)
 
 set(POPPLER_MAJOR_VERSION "0")
-set(POPPLER_MINOR_VERSION "11")
-set(POPPLER_MICRO_VERSION "1")
+set(POPPLER_MINOR_VERSION "12")
+set(POPPLER_MICRO_VERSION "0")
 set(POPPLER_VERSION "${POPPLER_MAJOR_VERSION}.${POPPLER_MINOR_VERSION}.${POPPLER_MICRO_VERSION}")
 
 # command line switches
@@ -28,7 +28,17 @@ option(ENABLE_LIBOPENJPEG "Use libopenjpeg for JPX streams." ON)
 option(ENABLE_LCMS "Use liblcms for color management." ON)
 option(ENABLE_ZLIB "TODO" OFF)
 option(USE_EXCEPTIONS "Throw exceptions to deal with not enough memory and similar problems." OFF)
-option(USE_FIXEDPOINT "Use fixed point arithmetic" OFF)
+option(USE_FIXEDPOINT "Use fixed point arithmetic in the Splash backend" OFF)
+option(USE_FLOAT "Use single precision arithmetic in the Splash backend" OFF)
+if(MSVC)
+  option(WITH_FONTCONFIGURATION_WIN32 "Select win32 font configuration backend" ON)
+  option(WITH_FONTCONFIGURATION_FONTCONFIG "Select fontconfig font configuration backend" OFF)
+else(MSVC)
+  option(WITH_FONTCONFIGURATION_WIN32 "Select win32 font configuration backend" OFF)
+  option(WITH_FONTCONFIGURATION_FONTCONFIG "Select fontconfig font configuration backend" ON)
+endif(MSVC)
+
+set(LIB_SUFFIX "" CACHE STRING "Define suffix of directory name (32/64)")
 
 # Enable these unconditionally.
 set(MULTITHREAD ON)
@@ -37,7 +47,7 @@ set(TEXTOUT_WORD_LIST ON)
 
 # setting the minimum required versions for some components
 set(QT3_MIN_VERSION "3.3.0")
-set(QT4_MIN_VERSION "4.3.0")
+set(QT4_MIN_VERSION "4.4.0")
 set(CAIRO_VERSION "1.8.4")
 
 macro_bool_to_01(ENABLE_SPLASH HAVE_SPLASH)
@@ -143,6 +153,10 @@ set(poppler_SRCS
   goo/GooString.cc
   goo/gmem.cc
   goo/FixedPoint.cc
+  goo/PNGWriter.cc
+  goo/JpegWriter.cc
+  goo/ImgWriter.cc
+  goo/gstrtod.cc
   fofi/FoFiBase.cc
   fofi/FoFiEncodings.cc
   fofi/FoFiTrueType.cc
@@ -258,16 +272,19 @@ if(WIN32)
   # gdi32 is needed under win32
   set(poppler_LIBS ${poppler_LIBS} gdi32)
 endif(WIN32)
+if(PNG_FOUND)
+  set(poppler_LIBS ${poppler_LIBS} ${PNG_LIBRARIES})
+endif(PNG_FOUND)
 
 if(MSVC)
-set(poppler_SRCS ${poppler_SRCS} poppler/GlobalParamsWin.cc)
+add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 add_library(poppler STATIC ${poppler_SRCS})
 else(MSVC)
 add_library(poppler SHARED ${poppler_SRCS})
 endif(MSVC)
 set_target_properties(poppler PROPERTIES VERSION 5.0.0 SOVERSION 5)
 target_link_libraries(poppler ${poppler_LIBS})
-install(TARGETS poppler RUNTIME DESTINATION bin LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)
+install(TARGETS poppler RUNTIME DESTINATION bin LIBRARY DESTINATION lib${LIB_SUFFIX} ARCHIVE DESTINATION lib${LIB_SUFFIX})
 
 if(ENABLE_XPDF_HEADERS)
   install(FILES
@@ -344,6 +361,7 @@ if(ENABLE_XPDF_HEADERS)
     goo/gmem.h
     goo/gfile.h
     goo/FixedPoint.h
+    goo/gstrtod.h
     DESTINATION include/poppler/goo)
   install(FILES
     fofi/FoFiBase.h
@@ -421,21 +439,21 @@ else(PKG_CONFIG_VERSION_0_18)
   set(PC_REQUIRES_PRIVATE "")
 endif(PKG_CONFIG_VERSION_0_18)
 
-poppler_create_install_pkgconfig(poppler.pc lib/pkgconfig)
+poppler_create_install_pkgconfig(poppler.pc lib${LIB_SUFFIX}/pkgconfig)
 if(ENABLE_SPLASH)
-  poppler_create_install_pkgconfig(poppler-splash.pc lib/pkgconfig)
+  poppler_create_install_pkgconfig(poppler-splash.pc lib${LIB_SUFFIX}/pkgconfig)
 endif(ENABLE_SPLASH)
 if(QT3_FOUND)
-  poppler_create_install_pkgconfig(poppler-qt.pc lib/pkgconfig)
+  poppler_create_install_pkgconfig(poppler-qt.pc lib${LIB_SUFFIX}/pkgconfig)
 endif(QT3_FOUND)
 if(QT4_FOUND)
-  poppler_create_install_pkgconfig(poppler-qt4.pc lib/pkgconfig)
+  poppler_create_install_pkgconfig(poppler-qt4.pc lib${LIB_SUFFIX}/pkgconfig)
 endif(QT4_FOUND)
 if(GLIB_FOUND)
-  poppler_create_install_pkgconfig(poppler-glib.pc lib/pkgconfig)
+  poppler_create_install_pkgconfig(poppler-glib.pc lib${LIB_SUFFIX}/pkgconfig)
 endif(GLIB_FOUND)
 if(CAIRO_FOUND)
-  poppler_create_install_pkgconfig(poppler-cairo.pc lib/pkgconfig)
+  poppler_create_install_pkgconfig(poppler-cairo.pc lib${LIB_SUFFIX}/pkgconfig)
 endif(CAIRO_FOUND)
 
 
@@ -453,3 +471,7 @@ show_end_message("use zlib" ENABLE_ZLIB)
 show_end_message("use libopenjpeg" LIBOPENJPEG_FOUND)
 show_end_message("use cms" USE_CMS)
 show_end_message("command line utils" ENABLE_UTILS)
+
+if(USE_FIXEDPOINT AND USE_FLOAT)
+  message("Warning: Single precision and fixed point options should not be enabled at the same time")
+endif(USE_FIXEDPOINT AND USE_FLOAT)

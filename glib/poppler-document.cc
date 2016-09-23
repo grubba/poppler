@@ -40,6 +40,8 @@ enum {
 	PROP_0,
 	PROP_TITLE,
 	PROP_FORMAT,
+	PROP_FORMAT_MAJOR,
+	PROP_FORMAT_MINOR,
 	PROP_AUTHOR,
 	PROP_SUBJECT,
 	PROP_KEYWORDS,
@@ -159,9 +161,6 @@ poppler_document_new_from_file (const char  *uri,
   if (!filename)
     return NULL;
 
-  filename_g = new GooString (filename);
-  g_free (filename);
-
   password_g = NULL;
   if (password != NULL) {
     if (g_utf8_validate (password, -1, NULL)) {
@@ -178,7 +177,26 @@ poppler_document_new_from_file (const char  *uri,
     }
   }
 
+#ifdef G_OS_WIN32
+  wchar_t *filenameW;
+  int length;
+
+  length = MultiByteToWideChar(CP_UTF8, 0, filename, -1, NULL, 0);
+
+  filenameW = new WCHAR[length];
+  if (!filenameW)
+      return NULL;
+
+  length = MultiByteToWideChar(CP_UTF8, 0, filename, -1, filenameW, length);
+
+  newDoc = new PDFDoc(filenameW, length, password_g, password_g);
+  delete filenameW;
+#else
+  filename_g = new GooString (filename);
   newDoc = new PDFDoc(filename_g, password_g, password_g);
+#endif
+  g_free (filename);
+
   delete password_g;
 
   return _poppler_document_new_from_pdfdoc (newDoc, error);
@@ -466,7 +484,11 @@ poppler_document_get_attachments (PopplerDocument *document)
       EmbFile *emb_file;
 
       emb_file = catalog->embeddedFile (i);
-      attachment = _poppler_attachment_new (document, emb_file);
+      if (!emb_file->isOk ()) {
+        delete emb_file;
+	continue;
+      }
+      attachment = _poppler_attachment_new (emb_file);
       delete emb_file;
 
       retval = g_list_prepend (retval, attachment);
@@ -646,8 +668,14 @@ poppler_document_get_property (GObject    *object,
     case PROP_FORMAT:
       str = g_strndup("PDF-", 15); /* allocates 16 chars, pads with \0s */
       g_ascii_formatd (str + 4, 15 + 1 - 4,
-		       "%.2g", document->doc->getPDFVersion ());
+		       "%.2g", document->doc->getPDFMajorVersion () + document->doc->getPDFMinorVersion() / 10.0);
       g_value_take_string (value, str);
+      break;
+    case PROP_FORMAT_MAJOR:
+      g_value_set_uint (value, document->doc->getPDFMajorVersion ());
+      break;
+    case PROP_FORMAT_MINOR:
+      g_value_set_uint (value, document->doc->getPDFMinorVersion());
       break;
     case PROP_AUTHOR:
       document->doc->getDocInfo (&obj);
@@ -773,6 +801,24 @@ poppler_document_class_init (PopplerDocumentClass *klass)
 				"The PDF version of the document",
 				NULL,
 				G_PARAM_READABLE));
+
+  g_object_class_install_property
+	  (G_OBJECT_CLASS (klass),
+	   PROP_FORMAT_MAJOR,
+	   g_param_spec_uint ("format-major",
+			      "PDF Format Major",
+			      "The PDF major version number of the document",
+			      0, G_MAXUINT, 1,
+			      G_PARAM_READABLE));
+
+  g_object_class_install_property
+	  (G_OBJECT_CLASS (klass),
+	   PROP_FORMAT_MINOR,
+	   g_param_spec_uint ("format-minor",
+			      "PDF Format Minor",
+			      "The PDF minor version number of the document",
+			      0, G_MAXUINT, 0,
+			      G_PARAM_READABLE));
 
   g_object_class_install_property
 	  (G_OBJECT_CLASS (klass),

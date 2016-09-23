@@ -20,6 +20,7 @@
 // Copyright (C) 2009 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Till Kamppeter <till.kamppeter@gmail.com>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2009 William Bader <williambader@hotmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -33,7 +34,7 @@
 #pragma interface
 #endif
 
-#include <poppler-config.h>
+#include "poppler-config.h"
 #include <stddef.h>
 #include "Object.h"
 #include "GfxState.h"
@@ -208,15 +209,15 @@ public:
   virtual void stroke(GfxState *state);
   virtual void fill(GfxState *state);
   virtual void eoFill(GfxState *state);
-  virtual void tilingPatternFill(GfxState *state, Object *str,
-				 int paintType, Dict *resDict,
-				 double *mat, double *bbox,
-				 int x0, int y0, int x1, int y1,
-				 double xStep, double yStep);
+  virtual GBool tilingPatternFill(GfxState *state, Object *str,
+				  int paintType, Dict *resDict,
+				  double *mat, double *bbox,
+				  int x0, int y0, int x1, int y1,
+				  double xStep, double yStep);
   virtual GBool functionShadedFill(GfxState *state,
 				   GfxFunctionShading *shading);
   virtual GBool axialShadedFill(GfxState *state, GfxAxialShading *shading, double /*tMin*/, double /*tMax*/);
-  virtual GBool radialShadedFill(GfxState *state, GfxRadialShading *shading);
+  virtual GBool radialShadedFill(GfxState *state, GfxRadialShading *shading, double /*sMin*/, double /*sMax*/);
 
   //----- path clipping
   virtual void clip(GfxState *state);
@@ -358,6 +359,7 @@ private:
                                 // (only psModePSOrigPageSizes output mode)
   int imgLLX, imgLLY,		// imageable area, in pts
       imgURX, imgURY;
+  GBool substFonts;		// substitute missing fonts
   GBool preload;		// load all images into memory, and
 				//   predefine forms
 

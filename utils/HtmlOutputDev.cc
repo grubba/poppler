@@ -24,6 +24,8 @@
 // Copyright (C) 2008 Tomas Are Haavet <tomasare@gmail.com>
 // Copyright (C) 2009 Warren Toomey <wkt@tuhs.org>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2009 Reece Dunn <msclrhd@gmail.com>
+// Copyright (C) 2010 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -51,12 +53,10 @@
 #ifdef ENABLE_LIBJPEG
 #include "DCTStream.h"
 #endif
-#ifdef ENABLE_LIBPNG
-#include "png.h"
-#endif
 #include "GlobalParams.h"
 #include "HtmlOutputDev.h"
 #include "HtmlFonts.h"
+#include "PNGWriter.h"
 
 int HtmlPage::pgNum=0;
 int HtmlOutputDev::imgNum=1;
@@ -647,9 +647,7 @@ void HtmlPage::dumpAsXML(FILE* f,int page){
       fprintf(f,"<text top=\"%d\" left=\"%d\" ",xoutRound(tmp->yMin),xoutRound(tmp->xMin));
       fprintf(f,"width=\"%d\" height=\"%d\" ",xoutRound(tmp->xMax-tmp->xMin),xoutRound(tmp->yMax-tmp->yMin));
       fprintf(f,"font=\"%d\">", tmp->fontpos);
-      if (tmp->fontpos!=-1){
-	str1=fonts->getCSStyle(tmp->fontpos, str);
-      }
+      str1=fonts->getCSStyle(tmp->fontpos, str);
       fputs(str1->getCString(),f);
       delete str;
       delete str1;
@@ -733,12 +731,8 @@ void HtmlPage::dumpComplex(FILE *file, int page){
 	      xoutRound(tmp1->yMin),
 	      xoutRound(tmp1->xMin));
       fputs("<nobr>",pageFile); 
-      if (tmp1->fontpos!=-1){
-	str1=fonts->getCSStyle(tmp1->fontpos, str);  
-      }
-      //printf("%s\n", str1->getCString());
+      str1=fonts->getCSStyle(tmp1->fontpos, str);  
       fputs(str1->getCString(),pageFile);
-      
       delete str;      
       delete str1;
       fputs("</nobr></DIV>\n",pageFile);
@@ -1102,7 +1096,7 @@ void HtmlOutputDev::endPage() {
   Links *linksList = catalog->getPage(pageNum)->getLinks(catalog);
   for (int i = 0; i < linksList->getNumLinks(); ++i)
   {
-      processLink(linksList->getLink(i));
+      doProcessLink(linksList->getLink(i));
   }
   delete linksList;
 
@@ -1316,10 +1310,6 @@ void HtmlOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
     // comes from an example by Guillaume Cottenceau.
     Guchar *p;
     GfxRGB rgb;
-    png_structp png_ptr;
-    png_infop info_ptr;
-    png_byte color_type= PNG_COLOR_TYPE_RGB;
-    png_byte bit_depth= 8;
     png_byte *row = (png_byte *) malloc(3 * width);   // 3 bytes/pixel: RGB
     png_bytep *row_pointer= &row;
 
@@ -1339,42 +1329,12 @@ void HtmlOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
       return;
     }
 
-    // Initialize the PNG stuff
-    png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    if (!png_ptr) {
-      error(-1, "png_create_write_struct failed");
-      return;
-    }
-
-    info_ptr = png_create_info_struct(png_ptr);
-    if (!info_ptr) {
-      error(-1, "png_create_info_struct failed");
-      return;
-    }
-    if (setjmp(png_jmpbuf(png_ptr))) {
-      error(-1, "error during init_io");
-      return;
-    }
-
-    // Write the PNG header
-    png_init_io(png_ptr, f1);
-    if (setjmp(png_jmpbuf(png_ptr))) {
-      error(-1, "error during writing png header");
-      return;
-    }
-
-    // Set up the type of PNG image and the compression level
-    png_set_compression_level(png_ptr, Z_BEST_COMPRESSION);
-
-    png_set_IHDR(png_ptr, info_ptr, width, height,
-                     bit_depth, color_type, PNG_INTERLACE_NONE,
-                     PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
-
-    // Write the image info bytes
-    png_write_info(png_ptr, info_ptr);
-    if (setjmp(png_jmpbuf(png_ptr))) {
-      error(-1, "error during writing png info bytes");
-      return;
+    PNGWriter *writer = new PNGWriter();
+    // TODO can we calculate the resolution of the image?
+    if (!writer->init(f1, width, height, 72, 72)) {
+        delete writer;
+        fclose(f1);
+        return;
     }
 
     // Initialize the image stream
@@ -1396,22 +1356,17 @@ void HtmlOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
          p += colorMap->getNumPixelComps();
       }
 
-      // Write the row to the file
-      png_write_rows(png_ptr, row_pointer, 1);
-      if (setjmp(png_jmpbuf(png_ptr))) {
-        error(-1, "error during png row write");
+      if (!writer->writeRow(row_pointer)) {
+        delete writer;
+        fclose(f1);
         return;
       }
     }
 
-    // Finish off the PNG file
-    png_write_end(png_ptr, info_ptr);
-    if (setjmp(png_jmpbuf(png_ptr))) {
-      error(-1, "error during png end of write");
-      return;
-    }
-
+    writer->close();
+    delete writer;
     fclose(f1);
+
     free(row);
     imgList->append(fName);
     ++imgNum;
@@ -1426,7 +1381,7 @@ void HtmlOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
 
 
 
-void HtmlOutputDev::processLink(Link* link){
+void HtmlOutputDev::doProcessLink(Link* link){
   double _x1,_y1,_x2,_y2;
   int x1,y1,x2,y2;
   

@@ -829,6 +829,7 @@ SplashOutputDev::SplashOutputDev(SplashColorMode colorModeA,
   vectorAntialias = allowAntialias &&
 		      globalParams->getVectorAntialias() &&
 		      colorMode != splashModeMono1;
+  enableFreeTypeHinting = gFalse;
   setupScreenParams(72.0, 72.0);
   reverseVideo = reverseVideoA;
   if (paperColorA != NULL) {
@@ -938,7 +939,7 @@ void SplashOutputDev::startDoc(XRef *xrefA) {
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
 				    globalParams->getEnableFreeType(),
-				    globalParams->getForceNoFTAutoHinting(),
+				    enableFreeTypeHinting,
 #endif
 				    allowAntialias &&
 				      globalParams->getAntialias() &&
@@ -1982,6 +1983,9 @@ void SplashOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
   }
 
   ctm = state->getCTM();
+  for (int i = 0; i < 6; ++i) {
+    if (!isfinite(ctm[i])) return;
+  }
   mat[0] = ctm[0];
   mat[1] = ctm[1];
   mat[2] = -ctm[2];
@@ -2260,6 +2264,9 @@ void SplashOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
   int n, i;
 
   ctm = state->getCTM();
+  for (i = 0; i < 6; ++i) {
+    if (!isfinite(ctm[i])) return;
+  }
   mat[0] = ctm[0];
   mat[1] = ctm[1];
   mat[2] = -ctm[2];
@@ -2527,6 +2534,12 @@ void SplashOutputDev::drawMaskedImage(GfxState *state, Object *ref,
     //----- draw the source image
 
     ctm = state->getCTM();
+    for (i = 0; i < 6; ++i) {
+      if (!isfinite(ctm[i])) {
+        delete maskBitmap;
+        return;
+      }
+    }
     mat[0] = ctm[0];
     mat[1] = ctm[1];
     mat[2] = -ctm[2];
@@ -2638,6 +2651,9 @@ void SplashOutputDev::drawSoftMaskedImage(GfxState *state, Object *ref,
   int n, i;
 
   ctm = state->getCTM();
+  for (i = 0; i < 6; ++i) {
+    if (!isfinite(ctm[i])) return;
+  }
   mat[0] = ctm[0];
   mat[1] = ctm[1];
   mat[2] = -ctm[2];
@@ -2989,10 +3005,10 @@ void SplashOutputDev::setSoftMask(GfxState * /*state*/, double * /*bbox*/,
   if (yMax + ty > bitmap->getHeight()) yMax = bitmap->getHeight() - ty;
   for (y = 0; y < yMax; ++y) {
     for (x = 0; x < xMax; ++x) {
-      tBitmap->getPixel(x, y, color);
       if (alpha) {
-	//~ unimplemented
+	p[x] = tBitmap->getAlpha(x, y);
       } else {
+	tBitmap->getPixel(x, y, color);
 	// convert to luminosity
 	switch (colorMode) {
 	case splashModeMono1:
@@ -3106,3 +3122,8 @@ void SplashOutputDev::setVectorAntialias(GBool vaa) {
   splash->setVectorAntialias(vaa);
 }
 #endif
+
+void SplashOutputDev::setFreeTypeHinting(GBool enable)
+{
+  enableFreeTypeHinting = enable;
+}

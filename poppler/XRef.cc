@@ -18,6 +18,7 @@
 // Copyright (C) 2006, 2008 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2007-2008 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright (C) 2007 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2009 Ilya Gorenbein <igorenbein@finjan.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -76,6 +77,8 @@ public:
   // generation 0.
   ObjectStream(XRef *xref, int objStrNumA);
 
+  GBool isOk() { return ok; }
+
   ~ObjectStream();
 
   // Return the object number of this object stream.
@@ -91,6 +94,7 @@ private:
   int nObjects;			// number of objects in the stream
   Object *objs;			// the objects (length = nObjects)
   int *objNums;			// the object numbers (length = nObjects)
+  GBool ok;
 };
 
 ObjectStream::ObjectStream(XRef *xref, int objStrNumA) {
@@ -104,6 +108,7 @@ ObjectStream::ObjectStream(XRef *xref, int objStrNumA) {
   nObjects = 0;
   objs = NULL;
   objNums = NULL;
+  ok = gFalse;
 
   if (!xref->fetch(objStrNum, 0, &objStr)->isStream()) {
     goto err1;
@@ -129,11 +134,13 @@ ObjectStream::ObjectStream(XRef *xref, int objStrNumA) {
     goto err1;
   }
 
-  if (nObjects >= INT_MAX / (int)sizeof(int)) {
-    error(-1, "Invalid 'nObjects'");
+  // this is an arbitrary limit to avoid integer overflow problems
+  // in the 'new Object[nObjects]' call (Acrobat apparently limits
+  // object streams to 100-200 objects)
+  if (nObjects > 1000000) {
+    error(-1, "Too many objects in an object stream");
     goto err1;
   }
- 
   objs = new Object[nObjects];
   objNums = (int *)gmallocn(nObjects, sizeof(int));
   offsets = (int *)gmallocn(nObjects, sizeof(int));
@@ -190,10 +197,10 @@ ObjectStream::ObjectStream(XRef *xref, int objStrNumA) {
   }
 
   gfree(offsets);
+  ok = gTrue;
 
  err1:
   objStr.free();
-  return;
 }
 
 ObjectStream::~ObjectStream() {
@@ -709,6 +716,9 @@ GBool XRef::constructXRef() {
   char *p;
   int i;
   GBool gotRoot;
+  char* token = NULL;
+  bool oneCycle = true;
+  int offset = 0;
 
   gfree(entries);
   size = 0;
@@ -729,94 +739,115 @@ GBool XRef::constructXRef() {
     // skip whitespace
     while (*p && Lexer::isSpace(*p & 0xff)) ++p;
 
-    // got trailer dictionary
-    if (!strncmp(p, "trailer", 7)) {
-      obj.initNull();
-      parser = new Parser(NULL,
+    oneCycle = true;
+    offset = 0;
+
+    while( ( token = strstr( p, "endobj" ) ) || oneCycle ) {
+      oneCycle = false;
+
+      if( token ) {
+        oneCycle = true;
+        token[0] = '\0'; 
+        offset = token - p;
+      }
+
+      // got trailer dictionary
+      if (!strncmp(p, "trailer", 7)) {
+        obj.initNull();
+        parser = new Parser(NULL,
 		 new Lexer(NULL,
 		   str->makeSubStream(pos + 7, gFalse, 0, &obj)),
 		 gFalse);
-      parser->getObj(&newTrailerDict);
-      if (newTrailerDict.isDict()) {
-	newTrailerDict.dictLookupNF("Root", &obj);
-	if (obj.isRef()) {
-	  rootNum = obj.getRefNum();
-	  rootGen = obj.getRefGen();
-	  if (!trailerDict.isNone()) {
-	    trailerDict.free();
+        parser->getObj(&newTrailerDict);
+        if (newTrailerDict.isDict()) {
+	  newTrailerDict.dictLookupNF("Root", &obj);
+	  if (obj.isRef()) {
+	    rootNum = obj.getRefNum();
+	    rootGen = obj.getRefGen();
+	    if (!trailerDict.isNone()) {
+	      trailerDict.free();
+	    }
+	    newTrailerDict.copy(&trailerDict);
+	    gotRoot = gTrue;
 	  }
-	  newTrailerDict.copy(&trailerDict);
-	  gotRoot = gTrue;
-	}
-	obj.free();
-      }
-      newTrailerDict.free();
-      delete parser;
+	  obj.free();
+        }
+        newTrailerDict.free();
+        delete parser;
 
-    // look for object
-    } else if (isdigit(*p)) {
-      num = atoi(p);
-      if (num > 0) {
-	do {
-	  ++p;
-	} while (*p && isdigit(*p));
-	if (isspace(*p)) {
+      // look for object
+      } else if (isdigit(*p)) {
+        num = atoi(p);
+        if (num > 0) {
 	  do {
 	    ++p;
-	  } while (*p && isspace(*p));
-	  if (isdigit(*p)) {
-	    gen = atoi(p);
+	  } while (*p && isdigit(*p));
+	  if (isspace(*p)) {
 	    do {
 	      ++p;
-	    } while (*p && isdigit(*p));
-	    if (isspace(*p)) {
+	    } while (*p && isspace(*p));
+	    if (isdigit(*p)) {
+	      gen = atoi(p);
 	      do {
-		++p;
-	      } while (*p && isspace(*p));
-	      if (!strncmp(p, "obj", 3)) {
-		if (num >= size) {
-		  newSize = (num + 1 + 255) & ~255;
-		  if (newSize < 0) {
-		    error(-1, "Bad object number");
-		    return gFalse;
+	        ++p;
+	      } while (*p && isdigit(*p));
+	      if (isspace(*p)) {
+	        do {
+		  ++p;
+	        } while (*p && isspace(*p));
+	        if (!strncmp(p, "obj", 3)) {
+		  if (num >= size) {
+		    newSize = (num + 1 + 255) & ~255;
+		    if (newSize < 0) {
+		      error(-1, "Bad object number");
+		      return gFalse;
+		    }
+		    if (newSize >= INT_MAX / (int)sizeof(XRefEntry)) {
+		      error(-1, "Invalid 'obj' parameters.");
+		      return gFalse;
+		    }
+		    entries = (XRefEntry *)
+		        greallocn(entries, newSize, sizeof(XRefEntry));
+		    for (i = size; i < newSize; ++i) {
+		      entries[i].offset = 0xffffffff;
+		      entries[i].type = xrefEntryFree;
+		      entries[i].obj.initNull ();
+		      entries[i].updated = false;
+		    }
+		    size = newSize;
 		  }
-		  if (newSize >= INT_MAX / (int)sizeof(XRefEntry)) {
-		    error(-1, "Invalid 'obj' parameters.");
-		    return gFalse;
+		  if (entries[num].type == xrefEntryFree ||
+		      gen >= entries[num].gen) {
+		    entries[num].offset = pos - start;
+		    entries[num].gen = gen;
+		    entries[num].type = xrefEntryUncompressed;
 		  }
-		  entries = (XRefEntry *)
-		      greallocn(entries, newSize, sizeof(XRefEntry));
-		  for (i = size; i < newSize; ++i) {
-		    entries[i].offset = 0xffffffff;
-		    entries[i].type = xrefEntryFree;
-		    entries[i].obj.initNull ();
-		    entries[i].updated = false;
-		  }
-		  size = newSize;
-		}
-		if (entries[num].type == xrefEntryFree ||
-		    gen >= entries[num].gen) {
-		  entries[num].offset = pos - start;
-		  entries[num].gen = gen;
-		  entries[num].type = xrefEntryUncompressed;
-		}
+	        }
 	      }
 	    }
 	  }
-	}
-      }
-
-    } else if (!strncmp(p, "endstream", 9)) {
-      if (streamEndsLen == streamEndsSize) {
-	streamEndsSize += 64;
-        if (streamEndsSize >= INT_MAX / (int)sizeof(int)) {
-          error(-1, "Invalid 'endstream' parameter.");
-          return gFalse;
         }
-	streamEnds = (Guint *)greallocn(streamEnds,
+
+      } else if (!strncmp(p, "endstream", 9)) {
+        if (streamEndsLen == streamEndsSize) {
+	  streamEndsSize += 64;
+          if (streamEndsSize >= INT_MAX / (int)sizeof(int)) {
+            error(-1, "Invalid 'endstream' parameter.");
+            return gFalse;
+          }
+	  streamEnds = (Guint *)greallocn(streamEnds,
 					streamEndsSize, sizeof(int));
+        }
+        streamEnds[streamEndsLen++] = pos;
       }
-      streamEnds[streamEndsLen++] = pos;
+      if( token ) {
+        p = token + 6;// strlen( "endobj" ) = 6
+        pos += offset + 6;// strlen( "endobj" ) = 6
+        while (*p && Lexer::isSpace(*p & 0xff)) {
+          ++p;
+          ++pos;
+        }
+      }
     }
   }
 
@@ -970,6 +1001,11 @@ Object *XRef::fetch(int num, int gen, Object *obj) {
 	delete objStr;
       }
       objStr = new ObjectStream(this, e->offset);
+      if (!objStr->isOk()) {
+	delete objStr;
+	objStr = NULL;
+	goto err;
+      }
     }
     objStr->getObject(e->gen, num, obj);
     break;

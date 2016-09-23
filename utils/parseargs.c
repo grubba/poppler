@@ -6,21 +6,21 @@
  * Copyright 1996-2003 Glyph & Cog, LLC
  */
 
-//========================================================================
-//
-// Modified under the Poppler project - http://poppler.freedesktop.org
-//
-// Poppler project changes to this file are under the GPLv2 or later license
-//
-// All changes made under the Poppler project to this file are licensed
-// under GPL version 2 or later
-//
-// Copyright (C) 2008 Albert Astals Cid <aacid@kde.org>
-//
-// To see a description of the changes please see the Changelog file that
-// came with your tarball or type make ChangeLog if you are building from git
-//
-//========================================================================
+/*========================================================================
+
+ Modified under the Poppler project - http://poppler.freedesktop.org
+
+ Poppler project changes to this file are under the GPLv2 or later license
+
+ All changes made under the Poppler project to this file are licensed
+ under GPL version 2 or later
+
+ Copyright (C) 2008, 2009 Albert Astals Cid <aacid@kde.org>
+
+ To see a description of the changes please see the Changelog file that
+ came with your tarball or type make ChangeLog if you are building from git
+
+========================================================================*/
 
 #include <stdio.h>
 #include <stddef.h>
@@ -28,6 +28,8 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include "parseargs.h"
+
+#include "goo/gstrtod.h"
 
 static const ArgDesc *findArg(const ArgDesc *args, char *arg);
 static GBool grabArg(const ArgDesc *arg, int i, int *argc, char *argv[]);
@@ -133,7 +135,7 @@ static GBool grabArg(const ArgDesc *arg, int i, int *argc, char *argv[]) {
     break;
   case argFP:
     if (i + 1 < *argc && isFP(argv[i+1])) {
-      *(double *)arg->val = atof(argv[i+1]);
+      *(double *)arg->val = gatof(argv[i+1]);
       n = 2;
     } else {
       ok = gFalse;

@@ -1,12 +1,13 @@
 m4_define([poppler_version_major],[0])
-m4_define([poppler_version_minor],[11])
-m4_define([poppler_version_micro],[1])
+m4_define([poppler_version_minor],[12])
+m4_define([poppler_version_micro],[0])
 m4_define([poppler_version],[poppler_version_major.poppler_version_minor.poppler_version_micro])
 
 AC_PREREQ(2.59)
 AC_INIT([poppler],[poppler_version],[https://bugs.freedesktop.org/enter_bug.cgi?product=poppler])
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([foreign])
+m4_ifdef([AM_SILENT_RULES],[AM_SILENT_RULES([yes])])
 AM_CONFIG_HEADER(config.h)
 AM_CONFIG_HEADER(poppler/poppler-config.h)
 
@@ -42,7 +43,11 @@ win32_libs=""
 create_shared_lib=""
 auto_import_flags=""
 case "$host_os" in
+  cygwin*)
+    create_shared_lib="-no-undefined"
+  ;;
   mingw*)
+    os_win32=yes
     win32_libs="-lgdi32"
     create_shared_lib="-no-undefined"
     auto_import_flags="-Wl,--enable-auto-import"
@@ -63,8 +68,12 @@ AC_ARG_ENABLE(xpdf-headers,
               enable_xpdf_headers="no")
 AM_CONDITIONAL(ENABLE_XPDF_HEADERS, test x$enable_xpdf_headers = xyes)
 
+AC_ARG_ENABLE(single-precision,
+[  --enable-single-precision     use single precision arithmetic (instead of double precision) in the Splash backend],
+AC_DEFINE(USE_FLOAT,      [1], [Use single precision arithmetic]))
+
 AC_ARG_ENABLE(fixedpoint,
-[  --enable-fixedpoint     use fixed point (instead of floating point) arithmetic],
+[  --enable-fixedpoint     use fixed point (instead of double precision) arithmetic in the Splash backend],
 AC_DEFINE(USE_FIXEDPOINT, [1], [Use fixed point arithmetic]))
 
 AC_DEFINE_DIR(POPPLER_DATADIR, "{datarootdir}/poppler", [Poppler data dir])
@@ -100,6 +109,36 @@ if test x$ac_cv_func_nanosleep = xno && test x$ac_cv_lib_rt_nanosleep = xno
 then
    AC_CHECK_LIB(posix4,nanosleep, X_EXTRA_LIBS="$X_EXTRA_LIBS -lposix4")
 fi
+
+
+dnl Test for libopenjpeg
+AC_ARG_ENABLE(libopenjpeg,
+	      AC_HELP_STRING([--disable-libopenjpeg],
+	                     [Don't build against libopenjpeg.]),
+              enable_libopenjpeg=$enableval,
+              enable_libopenjpeg="try")
+if test x$enable_libopenjpeg = xyes; then
+  AC_CHECK_LIB([openjpeg], [opj_cio_open],,
+	       AC_MSG_ERROR("*** libopenjpeg library not found ***"))
+  AC_CHECK_HEADERS([openjpeg.h],,
+		   AC_MSG_ERROR("*** libopenjpeg headers not found ***"))
+elif test x$enable_libopenjpeg = xtry; then
+  AC_CHECK_LIB([openjpeg], [opj_cio_open],
+               [enable_libopenjpeg="yes"],
+	       [enable_libopenjpeg="no"])
+  AC_CHECK_HEADERS([openjpeg.h],,
+		   [enable_libopenjpeg="no"])
+fi
+
+if test x$enable_libopenjpeg = xyes; then
+  LIBOPENJPEG_LIBS="-lopenjpeg"
+  AC_SUBST(LIBOPENJPEG_LIBS)
+  AC_DEFINE(ENABLE_LIBOPENJPEG)
+fi
+
+AM_CONDITIONAL(BUILD_LIBOPENJPEG, test x$enable_libopenjpeg = xyes)
+AH_TEMPLATE([ENABLE_LIBOPENJPEG],
+	    [Use libopenjpeg instead of builtin jpeg2000 decoder.])
 
 
 dnl ##### Checks for library functions.
@@ -144,37 +183,6 @@ fi
 AM_CONDITIONAL(BUILD_ZLIB, test x$enable_zlib = xyes)
 AH_TEMPLATE([ENABLE_ZLIB],
 	    [Use zlib instead of builtin zlib decoder.])
-
-
-dnl Test for libopenjpeg
-AC_ARG_ENABLE(libopenjpeg,
-	      AC_HELP_STRING([--disable-libopenjpeg],
-	                     [Don't build against libopenjpeg.]),
-              enable_libopenjpeg=$enableval,
-              enable_libopenjpeg="try")
-if test x$enable_libopenjpeg = xyes; then
-  AC_CHECK_LIB([openjpeg], [opj_cio_open],,
-	       AC_MSG_ERROR("*** libopenjpeg library not found ***"))
-  AC_CHECK_HEADERS([openjpeg.h],,
-		   AC_MSG_ERROR("*** libopenjpeg headers not found ***"))
-elif test x$enable_libopenjpeg = xtry; then
-  AC_CHECK_LIB([openjpeg], [opj_cio_open],
-               [enable_libopenjpeg="yes"],
-	       [enable_libopenjpeg="no"])
-  AC_CHECK_HEADERS([openjpeg.h],,
-		   [enable_libopenjpeg="no"])
-fi
-
-if test x$enable_libopenjpeg = xyes; then
-  LIBOPENJPEG_LIBS="-lopenjpeg"
-  AC_SUBST(LIBOPENJPEG_LIBS)
-  AC_DEFINE(ENABLE_LIBOPENJPEG)
-fi
-
-AM_CONDITIONAL(BUILD_LIBOPENJPEG, test x$enable_libopenjpeg = xyes)
-AH_TEMPLATE([ENABLE_LIBOPENJPEG],
-	    [Use libopenjpeg instead of builtin jpeg2000 decoder.])
-
 
 
 dnl Test for libjpeg
@@ -232,34 +240,57 @@ fi
 AC_SUBST(FREETYPE_CFLAGS)
 AC_SUBST(FREETYPE_LIBS)
 
-AC_ARG_ENABLE(fontconfig,
-              AC_HELP_STRING([--disable-fontconfig],
-                             [Disable FontConfig support.]),
-              enable_fontconfig=$enableval,
-              enable_fontconfig="yes")
-AH_TEMPLATE([DISABLE_FONTCONFIG], [Disable FontConfig support.])
-if test x$enable_fontconfig = xyes; then
-    PKG_CHECK_MODULES(FONTCONFIG, fontconfig >= 2.0.0)
-else
-    AC_DEFINE(DISABLE_FONTCONFIG)
-fi
-
-AC_ARG_ENABLE(mac-fonts,
-              AC_HELP_STRING([--enable-mac-fonts],
-                             [Use Mac system fonts when fonts are not embedded in the PDF.]),
-              enable_mac_fonts=$enableval,
-              enable_mac_fonts="no")
-AH_TEMPLATE([ENABLE_MAC_FONTS], [Enable Mac font support.])
-if test x$enable_mac_fonts = xyes; then
-    KPSE_CHECK_FRAMEWORK([ApplicationServices], [ATSFontRef fontRef])
-    if test x$kpse_cv_have_ApplicationServices = xyes; then
-        AC_DEFINE(ENABLE_MAC_FONTS, 1, [Use Mac system fonts])
+AC_MSG_CHECKING([which font configuration to use])
+AC_ARG_WITH([font_configuration],
+   [AS_HELP_STRING([--with-font-configuration=fontconfig|win32|mac],
+                   [Select font configuration backend])],
+   [],
+   [if test x$os_win32 = xyes; then
+        # default to win32 on native Windows.
+        with_font_configuration=win32
+    elif test "x`uname`" = xDarwin; then
+        # default to mac on MacOS X derivatives.
+        with_font_configuration=mac
     else
-        AC_MSG_WARN("Mac system font support is not available on this platform.")
-        enable_mac_fonts="no"
+        # default to fontconig everywhere else.
+        with_font_configuration=fontconfig
     fi
-fi
-AM_CONDITIONAL(ENABLE_MAC_FONTS, test x$enable_mac_fonts = xyes)
+   ]
+)
+AC_MSG_RESULT([$with_font_configuration])
+
+case $with_font_configuration in
+  win32)
+     AC_DEFINE([WITH_FONTCONFIGURATION_WIN32],
+               [1],[Use win32 font configuration backend])
+     # Set the minimum required Internet Explorer version to 5.0
+     CPPFLAGS="$CPPFLAGS -D_WIN32_IE=0x0500"
+     ;;
+  mac)
+     KPSE_CHECK_FRAMEWORK([ApplicationServices], [ATSFontRef fontRef])
+     if test x$kpse_cv_have_ApplicationServices = xyes; then
+         AC_DEFINE([WITH_FONTCONFIGURATION_MAC],
+                [1],[Use native MacOS X font configuration backend])
+     else
+         AC_MSG_ERROR(
+                [Mac system font support is not available on this platform.])
+     fi
+     ;;
+  fontconfig)
+     AC_DEFINE([WITH_FONTCONFIGURATION_FONTCONFIG],
+               [1],[Use fontconfig font configuration backend])
+     PKG_CHECK_MODULES(FONTCONFIG, fontconfig >= 2.0.0)
+     ;;
+  *)
+     AC_MSG_ERROR(
+               [Invalid font configuration setting: $with_font_configuration])
+     ;;
+esac
+
+AM_CONDITIONAL(BUILD_WITH_WIN32_FONTCONFIGURATION,
+               test x$with_font_configuration = xwin32)
+AM_CONDITIONAL(BUILD_WITH_MAC_FONTCONFIGURATION,
+               test x$with_font_configuration = xmac)
 
 AC_ARG_ENABLE(splash-output,
               AC_HELP_STRING([--disable-splash-output],
@@ -286,6 +317,9 @@ elif test x$enable_cairo_output = xtry; then
                     [enable_cairo_output="no"])
 fi
 
+AC_SUBST(CAIRO_CFLAGS)
+AC_SUBST(CAIRO_LIBS)
+
 AM_CONDITIONAL(BUILD_CAIRO_OUTPUT, test x$enable_cairo_output = xyes)
 AH_TEMPLATE([HAVE_CAIRO], [Use cairo for rendering.])
 if test x$enable_cairo_output = xyes; then
@@ -293,6 +327,30 @@ if test x$enable_cairo_output = xyes; then
   CAIRO_FEATURE="#define POPPLER_HAS_CAIRO 1"
   CAIRO_REQ="cairo"
   AC_CHECK_HEADERS(fcntl.h sys/mman.h sys/stat.h)
+  AC_LANG_PUSH([C])
+  _SAVE_CFLAGS=$CFLAGS
+  _SAVE_LIBS=$LIBS
+  CFLAGS="$CFLAGS $CAIRO_CFLAGS"
+  LIBS="$LIBS $CAIRO_LIBS"
+  AC_CACHE_CHECK([for cairo blend modes support],
+                 ac_cv_cairo_has_blend_modes,
+		 [AC_COMPILE_IFELSE(
+		   [AC_LANG_SOURCE([[
+#include <cairo.h>
+int main() {
+  cairo_t *cr;
+  cairo_set_operator(cr, CAIRO_OPERATOR_MULTIPLY);
+  return 0;
+}
+                   ]])],
+		   [ac_cv_cairo_has_blend_modes="yes"],
+                   [ac_cv_cairo_has_blend_modes="no"])])
+  CFLAGS=$_SAVE_CFLAGS
+  LIBS=$_SAVE_LIBS
+  AC_LANG_POP([C])
+  if test "$ac_cv_cairo_has_blend_modes" = "yes"; then
+    AC_DEFINE(CAIRO_HAS_BLEND_MODES, [1], [Whether cairo has blend modes support])
+  fi
 else
   CAIRO_FEATURE="#undef POPPLER_HAS_CAIRO"
   CAIRO_REQ=""
@@ -303,7 +361,7 @@ AC_SUBST(CAIRO_REQ)
 POPPLER_GLIB_DISABLE_DEPRECATED=""
 POPPLER_GLIB_DISABLE_SINGLE_INCLUDES=""
 
-GLIB_REQUIRED=2.6
+GLIB_REQUIRED=2.18
 AC_ARG_ENABLE(poppler-glib,
               AC_HELP_STRING([--disable-poppler-glib],
 	                     [Don't compile poppler glib wrapper.]),
@@ -323,7 +381,7 @@ if test x$enable_poppler_glib = xyes; then
 fi
 AM_CONDITIONAL(BUILD_POPPLER_GLIB, test x$enable_poppler_glib = xyes)
 
-m4_ifdef([GTK_DOC_CHECK],[GTK_DOC_CHECK([1.0])])
+GTK_DOC_CHECK([1.0])
 
 dnl
 dnl GDK
@@ -399,17 +457,17 @@ AC_ARG_ENABLE(poppler-qt4,
               enable_poppler_qt4="try")
 if test x$enable_poppler_qt4 = xyes; then
   PKG_CHECK_MODULES(POPPLER_QT4, 
-	            QtCore >= 4.3.0 QtGui >= 4.3.0 QtXml >= 4.3.0)
+	            QtCore >= 4.4.0 QtGui >= 4.4.0 QtXml >= 4.4.0)
   PKG_CHECK_MODULES(POPPLER_QT4_TEST, 
-	            QtTest >= 4.3.0)
+	            QtTest >= 4.4.0)
 elif test x$enable_poppler_qt4 = xtry; then
   PKG_CHECK_MODULES(POPPLER_QT4,
-                    QtCore >= 4.3.0 QtGui >= 4.3.0 QtXml >= 4.3.0,
+                    QtCore >= 4.4.0 QtGui >= 4.4.0 QtXml >= 4.4.0,
                     [enable_poppler_qt4="yes"],
                     [enable_poppler_qt4="no"])
   if test x$enable_poppler_qt4 = xyes; then
     PKG_CHECK_MODULES(POPPLER_QT4_TEST,
-                    QtTest >= 4.3.0,
+                    QtTest >= 4.4.0,
                     [enable_poppler_qt4="yes"],
                     [enable_poppler_qt4="no"])
   fi
@@ -447,9 +505,9 @@ AC_ARG_ENABLE(gtk-test,
               enable_gtk_test=$enableval,
               enable_gtk_test="try")
 if test x$enable_gtk_test = xyes; then
-  PKG_CHECK_MODULES(GTK_TEST, gtk+-2.0 >= 2.12 gdk-pixbuf-2.0 gthread-2.0)
+  PKG_CHECK_MODULES(GTK_TEST, gtk+-2.0 >= 2.14 gdk-pixbuf-2.0 gthread-2.0 gio-2.0)
 elif test x$enable_gtk_test = xtry; then
-  PKG_CHECK_MODULES(GTK_TEST, gtk+-2.0 >= 2.12 gdk-pixbuf-2.0 gthread-2.0,
+  PKG_CHECK_MODULES(GTK_TEST, gtk+-2.0 >= 2.14 gdk-pixbuf-2.0 gthread-2.0 gio-2.0,
                     [enable_gtk_test="yes"],
                     [enable_gtk_test="no"])
 fi
@@ -507,7 +565,7 @@ if test "x$GCC" != xyes; then
 fi
 case "$enable_compile_warnings" in
   no)	;;
-  yes)	CXXFLAGS="-Wall -Wno-write-strings $CXXFLAGS" ;;
+  yes)	CXXFLAGS="-Wall -Wno-write-strings -Woverloaded-virtual -Wnon-virtual-dtor -ansi $CXXFLAGS" ;;
   kde)	CXXFLAGS="-Wnon-virtual-dtor -Wno-long-long -Wundef -ansi \
 		-D_XOPEN_SOURCE=500 -D_BSD_SOURCE -Wcast-align \
 		-Wconversion -Wchar-subscripts -Wall -W -Wpointer-arith \
@@ -559,6 +617,7 @@ poppler-qt4.pc])
 
 echo ""
 echo "Building poppler with support for:"
+echo "  font configuration: $with_font_configuration"
 echo "  splash output:      $enable_splash_output"
 echo "  cairo output:       $enable_cairo_output"
 echo "  abiword output:     $enable_abiword_output"
@@ -577,6 +636,10 @@ echo ""
 
 if test x$enable_splash_output = xno -a x$enable_cairo_output = xno; then
 	echo "  Warning: There is no rendering backend enabled"
+fi
+
+if test x$enable_single_precision = xyes -a x$enable_fixedpoint = xyes; then
+	echo "  Warning: Single precision and fixed point options should not be enabled at the same time"
 fi
 
 if test x$enable_libjpeg != xyes; then

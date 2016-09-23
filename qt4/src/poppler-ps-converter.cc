@@ -1,5 +1,5 @@
-/* poppler-document.cc: qt interface to poppler
- * Copyright (C) 2007, Albert Astals Cid <aacid@kde.org>
+/* poppler-ps-converter.cc: qt interface to poppler
+ * Copyright (C) 2007, 2009, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2008, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -169,14 +169,24 @@ PSConverter::PSOptions PSConverter::psOptions() const
 bool PSConverter::convert()
 {
 	Q_D(PSConverter);
+	d->lastError = NoError;
 
 	Q_ASSERT(!d->pageList.isEmpty());
 	Q_ASSERT(d->paperWidth != -1);
 	Q_ASSERT(d->paperHeight != -1);
 	
+	if (d->document->locked)
+	{
+		d->lastError = FileLockedError;
+		return false;
+	}
+	
 	QIODevice *dev = d->openDevice();
 	if (!dev)
+	{
+		d->lastError = OpenOutputError;
 		return false;
+	}
 
 	QByteArray pstitle8Bit = d->title.toLocal8Bit();
 	char* pstitlechar;

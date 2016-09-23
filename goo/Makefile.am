@@ -13,9 +13,15 @@ poppler_goo_include_HEADERS =			\
 	gtypes.h				\
 	gmem.h					\
 	gfile.h					\
-	FixedPoint.h
+	FixedPoint.h				\
+	PNGWriter.h				\
+	JpegWriter.h				\
+	gstrtod.h
 
 endif
+
+INCLUDES =					\
+	-I$(top_srcdir)
 
 libgoo_la_SOURCES =				\
 	gfile.cc				\
@@ -25,4 +31,8 @@ libgoo_la_SOURCES =				\
 	GooTimer.cc				\
 	GooString.cc				\
 	gmem.cc					\
-	FixedPoint.cc
+	FixedPoint.cc				\
+	PNGWriter.cc				\
+	JpegWriter.cc				\
+	ImgWriter.cc				\
+	gstrtod.cc

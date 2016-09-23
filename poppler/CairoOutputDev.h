@@ -18,7 +18,7 @@
 // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
 // Copyright (C) 2006-2009 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2008 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2008, 2009 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
 //
 // To see a description of the changes please see the Changelog file that
@@ -98,6 +98,11 @@ public:
   // Does this device use drawChar() or drawString()?
   virtual GBool useDrawChar() { return gTrue; }
 
+  // Does this device use tilingPatternFill()?  If this returns false,
+  // tiling pattern fills will be reduced to a series of other drawing
+  // operations.
+  virtual GBool useTilingPatternFill() { return gTrue; }
+
   // Does this device use functionShadedFill(), axialShadedFill(), and
   // radialShadedFill()?  If this returns false, these shaded fills
   // will be reduced to a series of other drawing operations.
@@ -141,6 +146,7 @@ public:
   virtual void updateFillOpacity(GfxState *state);
   virtual void updateStrokeOpacity(GfxState *state);
   virtual void updateFillColorStop(GfxState *state, double offset);
+  virtual void updateBlendMode(GfxState *state);
 
   //----- update text state
   virtual void updateFont(GfxState *state);
@@ -150,7 +156,15 @@ public:
   virtual void stroke(GfxState *state);
   virtual void fill(GfxState *state);
   virtual void eoFill(GfxState *state);
+  virtual GBool tilingPatternFill(GfxState *state, Object *str,
+				  int paintType, Dict *resDict,
+				  double *mat, double *bbox,
+				  int x0, int y0, int x1, int y1,
+				  double xStep, double yStep);
   virtual GBool axialShadedFill(GfxState *state, GfxAxialShading *shading, double tMin, double tMax);
+  virtual GBool axialShadedSupportExtend(GfxState *state, GfxAxialShading *shading);
+  virtual GBool radialShadedFill(GfxState *state, GfxRadialShading *shading, double sMin, double sMax);
+  virtual GBool radialShadedSupportExtend(GfxState *state, GfxRadialShading *shading);
 
   //----- path clipping
   virtual void clip(GfxState *state);
@@ -333,6 +347,19 @@ public:
   // Does this device use drawChar() or drawString()?
   virtual GBool useDrawChar() { return gFalse; }
 
+  // Does this device use tilingPatternFill()?  If this returns false,
+  // tiling pattern fills will be reduced to a series of other drawing
+  // operations.
+  virtual GBool useTilingPatternFill() { return gTrue; }
+
+  // Does this device use functionShadedFill(), axialShadedFill(), and
+  // radialShadedFill()?  If this returns false, these shaded fills
+  // will be reduced to a series of other drawing operations.
+  virtual GBool useShadedFills() { return gTrue; }
+
+  // Does this device use FillColorStop()?
+  virtual GBool useFillColorStop() { return gFalse; }
+
   // Does this device use beginType3Char/endType3Char?  Otherwise,
   // text in Type 3 fonts will be drawn with drawChar/drawString.
   virtual GBool interpretType3Chars() { return gFalse; }
@@ -362,6 +389,7 @@ public:
   virtual void updateStrokeColor(GfxState *state) { }
   virtual void updateFillOpacity(GfxState *state) { }
   virtual void updateStrokeOpacity(GfxState *state) { }
+  virtual void updateBlendMode(GfxState *state) { }
 
   //----- update text state
   virtual void updateFont(GfxState *state) { }
@@ -370,6 +398,17 @@ public:
   virtual void stroke(GfxState *state) { }
   virtual void fill(GfxState *state) { }
   virtual void eoFill(GfxState *state) { }
+  virtual GBool tilingPatternFill(GfxState *state, Object *str,
+				  int paintType, Dict *resDict,
+				  double *mat, double *bbox,
+				  int x0, int y0, int x1, int y1,
+				  double xStep, double yStep) { return gTrue; }
+  virtual GBool axialShadedFill(GfxState *state,
+				GfxAxialShading *shading,
+				double tMin, double tMax) { return gTrue; }
+  virtual GBool radialShadedFill(GfxState *state,
+				 GfxRadialShading *shading,
+				 double sMin, double sMax) { return gTrue; }
 
   //----- path clipping
   virtual void clip(GfxState *state) { }

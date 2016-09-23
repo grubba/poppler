@@ -13,7 +13,7 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2006-2008 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006-2009 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2006 Krzysztof Kowalczyk <kkowalczyk@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
+#include <limits.h>
 #include <ctype.h>
 #include "Lexer.h"
 #include "Error.h"
@@ -57,6 +58,8 @@ static const char specialChars[256] = {
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   // ex
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0    // fx
 };
+
+static const int IntegerSafeLimit = (INT_MAX - 9) / 10;
 
 //------------------------------------------------------------------------
 // Lexer
@@ -150,7 +153,7 @@ int Lexer::lookChar() {
 Object *Lexer::getObj(Object *obj, int objNum) {
   char *p;
   int c, c2;
-  GBool comment, neg, done;
+  GBool comment, neg, done, overflownInteger;
   int numParen;
   int xi;
   double xf, scale;
@@ -180,6 +183,7 @@ Object *Lexer::getObj(Object *obj, int objNum) {
   case '0': case '1': case '2': case '3': case '4':
   case '5': case '6': case '7': case '8': case '9':
   case '-': case '.':
+    overflownInteger = gFalse;
     neg = gFalse;
     xi = 0;
     if (c == '-') {
@@ -193,7 +197,17 @@ Object *Lexer::getObj(Object *obj, int objNum) {
       c = lookChar();
       if (isdigit(c)) {
 	getChar();
-	xi = xi * 10 + (c - '0');
+	if (unlikely(overflownInteger)) {
+	  xf = xf * 10.0 + (c - '0');
+	} else {
+	  if (unlikely(xi > IntegerSafeLimit) &&
+	      (xi > (INT_MAX - (c - '0')) / 10.0)) {
+	    overflownInteger = gTrue;
+	    xf = xi * 10.0 + (c - '0');
+	  } else {
+	    xi = xi * 10 + (c - '0');
+	  }
+	}
       } else if (c == '.') {
 	getChar();
 	goto doReal;
@@ -203,10 +217,16 @@ Object *Lexer::getObj(Object *obj, int objNum) {
     }
     if (neg)
       xi = -xi;
-    obj->initInt(xi);
+    if (unlikely(overflownInteger)) {
+      obj->initError();
+    } else {
+      obj->initInt(xi);
+    }
     break;
   doReal:
-    xf = xi;
+    if (likely(!overflownInteger)) {
+      xf = xi;
+    }
     scale = 0.1;
     while (1) {
       c = lookChar();

@@ -19,6 +19,7 @@
 // Copyright (C) 2007 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2009 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2009 Albert Astals Cid <aacid@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -32,9 +33,10 @@
 #pragma interface
 #endif
 
-#include <poppler-config.h>
+#include "poppler-config.h"
 #include "goo/gtypes.h"
 #include "CharTypes.h"
+#include "Object.h"
 
 class Dict;
 class GooHash;
@@ -189,17 +191,22 @@ public:
   virtual void stroke(GfxState * /*state*/) {}
   virtual void fill(GfxState * /*state*/) {}
   virtual void eoFill(GfxState * /*state*/) {}
-  virtual void tilingPatternFill(GfxState * /*state*/, Object * /*str*/,
-				 int /*paintType*/, Dict * /*resDict*/,
-				 double * /*mat*/, double * /*bbox*/,
-				 int /*x0*/, int /*y0*/, int /*x1*/, int /*y1*/,
-				 double /*xStep*/, double /*yStep*/) {}
+  virtual GBool tilingPatternFill(GfxState * /*state*/, Object * /*str*/,
+				  int /*paintType*/, Dict * /*resDict*/,
+				  double * /*mat*/, double * /*bbox*/,
+				  int /*x0*/, int /*y0*/, int /*x1*/, int /*y1*/,
+				  double /*xStep*/, double /*yStep*/)
+    { return gFalse; }
   virtual GBool functionShadedFill(GfxState * /*state*/,
 				   GfxFunctionShading * /*shading*/)
     { return gFalse; }
   virtual GBool axialShadedFill(GfxState * /*state*/, GfxAxialShading * /*shading*/, double /*tMin*/, double /*tMax*/)
     { return gFalse; }
-  virtual GBool radialShadedFill(GfxState * /*state*/, GfxRadialShading * /*shading*/)
+  virtual GBool axialShadedSupportExtend(GfxState * /*state*/, GfxAxialShading * /*shading*/)
+    { return gFalse; }
+  virtual GBool radialShadedFill(GfxState * /*state*/, GfxRadialShading * /*shading*/, double /*sMin*/, double /*sMax*/)
+    { return gFalse; }
+  virtual GBool radialShadedSupportExtend(GfxState * /*state*/, GfxRadialShading * /*shading*/)
     { return gFalse; }
 
   //----- path clipping
@@ -249,7 +256,6 @@ public:
   //----- grouping operators
 
   virtual void endMarkedContent(GfxState *state);
-  virtual void beginMarkedContent(char *name);
   virtual void beginMarkedContent(char *name, Dict *properties);
   virtual void markPoint(char *name);
   virtual void markPoint(char *name, Dict *properties);

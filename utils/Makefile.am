@@ -12,6 +12,7 @@ endif
 
 INCLUDES =					\
 	-I$(top_srcdir)				\
+	-I$(top_srcdir)/goo			\
 	-I$(top_srcdir)/utils			\
 	-I$(top_srcdir)/poppler			\
 	$(UTILS_CFLAGS)				\
@@ -33,10 +34,6 @@ pdftoabw_LDADD = $(LDADD) $(ABIWORD_LIBS)
 
 pdftoabw_binary = pdftoabw
 
-endif
-
-if BUILD_LIBPNG
-pdftohtml_LDADD = $(LDADD) $(LIBPNG_LIBS)
 endif
 
 AM_LDFLAGS = @auto_import_flags@
