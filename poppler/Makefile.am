@@ -321,12 +321,5 @@ libpoppler_la_SOURCES =		\
 	Sound.cc		\
 	XpdfPluginAPI.cc
 
-if BUILD_WITH_MAC_FONTCONFIGURATION
-
-libpoppler_la_SOURCES += \
-	GlobalParamsMac.cc
-
-endif
-
 EXTRA_DIST = gen-unicode-tables.py	\
              GlobalParamsWin.cc

@@ -134,10 +134,6 @@ public:
   void setBaseDir(const char *dir);
   void setupBaseFonts(char *dir);
 
-#if WITH_FONTCONFIGURATION_MAC
-  GBool loadPlatformFont(const char * fontName);
-#endif
-
   //----- accessors
 
   CharCode getMacRomanCharCode(char *charName);

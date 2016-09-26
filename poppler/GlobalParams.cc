@@ -30,6 +30,7 @@
 // Copyright (C) 2010 Jakub Wilk <ubanus@users.sf.net>
 // Copyright (C) 2011 Pino Toscano <pino@kde.org>
 // Copyright (C) 2011 Koji Otani <sho@bbr.jp>
+// Copyright (C) 2016 Henrik Grubbström <grubba@grubba.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -254,6 +255,9 @@ public:
 
 #ifdef WIN32
   void scanWindowsFonts(GooString *winFontDir);
+#endif
+#ifdef WITH_FONTCONFIGURATION_MAC
+  void addMacFont(SysFontInfo *fi) {fonts->append(fi);}
 #endif
 #ifdef WITH_FONTCONFIGURATION_FONTCONFIG
   void addFcFont(SysFontInfo *si) {fonts->append(si);}
@@ -1289,6 +1293,8 @@ fin:
 
 #elif WITH_FONTCONFIGURATION_WIN32
 #include "GlobalParamsWin.cc"
+#elif WITH_FONTCONFIGURATION_MAC
+#include "GlobalParamsMac.cc"
 #else
 static struct {
   const char *name;
