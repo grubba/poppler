@@ -50,7 +50,8 @@ static GooString *findMacTTFFile(ATSFontRef fontRef,
 GooString *GlobalParams::findSystemFontFile(GfxFont *font,
 					    SysFontType *type,
 					    int *fontNum,
-					    GooString * /* substituteFontName */) {
+					    GooString * /* substituteFontName */,
+					    GooString * /* base14Name */) {
   SysFontInfo *fi = NULL;
   GooString *fontName = font->getName();
   const char *cfontName = fontName->getCString();
@@ -60,7 +61,7 @@ GooString *GlobalParams::findSystemFontFile(GfxFont *font,
   fontName = fontName->copy();
   lockGlobalParams;
 
-  if ((fi = sysFonts->find(fontName, gTrue))) {
+  if ((fi = sysFonts->find(fontName, font->isFixedWidth(), gTrue))) {
     path = fi->path->copy();
     *type = fi->type;
     *fontNum = fi->fontNum;
@@ -214,13 +215,14 @@ GooString *GlobalParams::findSystemFontFile(GfxFont *font,
 		  strstr(cfontName, "Ultra") != NULL ||
 		  strstr(cfontName, "Heavy") != NULL ||
 		  strstr(cfontName, "Black") != NULL);
-    GBool ital = (strstr(cfontName, "Italic") != NULL ||
-		  strstr(cfontName, "Oblique") != NULL);
+    GBool ital = (strstr(cfontName, "Italic") != NULL);
+    GBool oblique = (strstr(cfontName, "Oblique") != NULL);
+    GBool fixedWidth = (strstr(cfontName, "Fixed") != NULL);
 
-    fi = new SysFontInfo(fontName->copy(), bold, italic,
+    fi = new SysFontInfo(fontName->copy(), bold, italic, oblique, fixedWidth,
 			 path->copy(), *type, *fontNum);
     sysFonts->addMacFont(fi);
-  } else if ((fi = sysFonts->find(fontName, gFalse))) {
+  } else if ((fi = sysFonts->find(fontName, font->isFixedWidth(), gFalse))) {
     path = fi->path->copy();
     *type = fi->type;
     *fontNum = fi->fontNum;
