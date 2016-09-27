@@ -49,7 +49,8 @@ static GooString *findMacTTFFile(ATSFontRef fontRef,
 
 GooString *GlobalParams::findSystemFontFile(GfxFont *font,
 					    SysFontType *type,
-					    int *fontNum) {
+					    int *fontNum,
+					    GooString * /* substituteFontName */) {
   SysFontInfo *fi = NULL;
   GooString *fontName = font->getName();
   const char *cfontName = fontName->getCString();
