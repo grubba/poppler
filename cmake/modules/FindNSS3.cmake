@@ -13,7 +13,7 @@
 include(FindPackageHandleStandardArgs)
 
 if (NOT WIN32)
-  find_package(PkgConfig REQUIRED)
+  find_package(PkgConfig)
 
   pkg_check_modules(NSS3 "nss>=3.19")
 
