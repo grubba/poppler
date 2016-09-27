@@ -1437,6 +1437,7 @@ void FormFieldSignature::parseInfo()
 
 void FormFieldSignature::hashSignedDataBlock(SignatureHandler *handler, Goffset block_len)
 {
+#ifdef ENABLE_NSS3
   const int BLOCK_SIZE = 4096;
   unsigned char signed_data_buffer[BLOCK_SIZE];
 
@@ -1457,7 +1458,7 @@ void FormFieldSignature::hashSignedDataBlock(SignatureHandler *handler, Goffset 
       i += BLOCK_SIZE;
     }
   }
-
+#endif
 }
 
 
