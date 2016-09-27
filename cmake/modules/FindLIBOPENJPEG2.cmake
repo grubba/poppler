@@ -22,7 +22,7 @@ else ()
   set(LIBOPENJPEG2_INCLUDE_DIRS)
   set(LIBOPENJPEG2_LIBRARIES)
 
-  find_package(PkgConfig REQUIRED)
+  find_package(PkgConfig)
   pkg_check_modules(LIBOPENJPEG2 libopenjp2)
   if (LIBOPENJPEG2_FOUND)
     add_definitions(-DUSE_OPENJPEG2)

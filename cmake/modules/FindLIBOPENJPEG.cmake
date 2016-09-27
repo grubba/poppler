@@ -23,7 +23,7 @@ else (LIBOPENJPEG_LIBRARIES AND LIBOPENJPEG_INCLUDE_DIR)
   set(LIBOPENJPEG_LIBRARIES)
   set(LIBOPENJPEG_INCLUDE_DIR)
 
-  find_package(PkgConfig REQUIRED)
+  find_package(PkgConfig)
   pkg_check_modules(LIBOPENJPEG libopenjpeg)
 
   if(LIBOPENJPEG_FOUND)
