@@ -220,7 +220,7 @@ GooString *GlobalParams::findSystemFontFile(GfxFont *font,
     GBool fixedWidth = (strstr(cfontName, "Fixed") != NULL);
 
     fi = new SysFontInfo(fontName->copy(), bold, italic, oblique, fixedWidth,
-			 path->copy(), *type, *fontNum);
+			 path->copy(), *type, *fontNum, NULL);
     sysFonts->addMacFont(fi);
   } else if ((fi = sysFonts->find(fontName, font->isFixedWidth(), gFalse))) {
     path = fi->path->copy();
