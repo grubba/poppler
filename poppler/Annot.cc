@@ -783,50 +783,38 @@ AnnotAppearance::~AnnotAppearance() {
   appearDict.free();
 }
 
-void AnnotAppearance::getAppearanceStream(AnnotAppearance::AnnotAppearanceType type, const char *state, Object *dest) {
+void AnnotAppearance::getAppearanceStream(AnnotAppearanceType type, const char *state, Object *dest) {
   Object apData, stream;
   apData.initNull();
 
   // Obtain dictionary or stream associated to appearance type
-  if (type == appearRollover) {
-    appearDict.dictLookupNF("R", &apData);
-  } else if (type == appearDown) {
-    appearDict.dictLookupNF("D", &apData);
-  }
-  if (apData.isNull()) { // Normal appearance, also used as fallback
+  switch (type) {
+  case appearRollover:
+    if (appearDict.dictLookupNF("R", &apData)->isNull())
+      appearDict.dictLookupNF("N", &apData);
+    break;
+  case appearDown:
+    if (appearDict.dictLookupNF("D", &apData)->isNull())
+      appearDict.dictLookupNF("N", &apData);
+    break;
+  case appearNormal:
     appearDict.dictLookupNF("N", &apData);
-  }
-
-  // Search state if it's a subdictionary
-  if (apData.isDict() && state) {
-    Object obj1;
-    apData.dictLookupNF(state, &obj1);
-    apData.free();
-    obj1.copy(&apData);
-    obj1.free();
+    break;
   }
 
   dest->initNull();
-  // Sanity check on the value we are about to return: it must be a ref to stream
-  if (apData.isRef()) {
-    apData.fetch(xref, &stream);
-    if (stream.isStream()) {
-      apData.copy(dest);
-    } else {
-      error(errSyntaxWarning, -1, "AP points to a non-stream object");
-    }
-    stream.free();
-  }
+  if (apData.isDict() && state)
+    apData.dictLookupNF(state, dest);
+  else if (apData.isRef())
+    apData.copy(dest);
   apData.free();
 }
 
 GooString * AnnotAppearance::getStateKey(int i) {
   Object obj1;
   GooString * res = NULL;
-  appearDict.dictLookupNF("N", &obj1);
-  if (obj1.isDict()) {
+  if (appearDict.dictLookupNF("N", &obj1)->isDict())
     res = new GooString(obj1.dictGetKey(i));
-  }
   obj1.free();
   return res;
 }
@@ -834,10 +822,8 @@ GooString * AnnotAppearance::getStateKey(int i) {
 int AnnotAppearance::getNumStates() {
   Object obj1;
   int res = 0;
-  appearDict.dictLookupNF("N", &obj1);
-  if (obj1.isDict()) {
+  if (appearDict.dictLookupNF("N", &obj1)->isDict())
     res = obj1.dictGetLength();
-  }
   obj1.free();
   return res;
 }
@@ -1185,6 +1171,7 @@ void Annot::initialize(PDFDoc *docA, Dict *dict) {
   }
   obj1.free();
 
+  // Note: This value is overwritten by Annots ctor
   if (dict->lookupNF("P", &obj1)->isRef()) {
     Ref ref = obj1.getRef();
 
@@ -1416,13 +1403,22 @@ void Annot::setColor(AnnotColor *new_color) {
   }
 }
 
-void Annot::setPage(Ref *pageRef, int pageIndex)
-{
+void Annot::setPage(int pageIndex, GBool updateP) {
+  Page *pageobj = doc->getPage(pageIndex);
   Object obj1;
 
-  obj1.initRef(pageRef->num, pageRef->gen);
-  update("P", &obj1);
-  page = pageIndex;
+  if (pageobj) {
+    Ref pageRef = pageobj->getRef();
+    obj1.initRef(pageRef.num, pageRef.gen);
+    page = pageIndex;
+  } else {
+    obj1.initNull();
+    page = 0;
+  }
+
+  if (updateP) {
+    update("P", &obj1);
+  }
 }
 
 void Annot::setAppearanceState(const char *state) {
@@ -1482,6 +1478,11 @@ void Annot::readArrayNum(Object *pdfArray, int key, double *value) {
     ok = gFalse;
   }
   valueObject.free();
+}
+
+void Annot::removeReferencedObjects() {
+  // Remove appearance streams (if any)
+  invalidateAppearance();
 }
 
 void Annot::incRefCnt() {
@@ -1932,6 +1933,18 @@ void AnnotMarkup::setDate(GooString *new_date) {
   Object obj1;
   obj1.initString(date->copy());
   update ("CreationDate", &obj1);
+}
+
+void AnnotMarkup::removeReferencedObjects() {
+  Page *pageobj = doc->getPage(page);
+  assert(pageobj != NULL); // We're called when removing an annot from a page
+
+  // Remove popup
+  if (popup) {
+    pageobj->removeAnnot(popup);
+  }
+
+  Annot::removeReferencedObjects();
 }
 
 //------------------------------------------------------------------------
@@ -6400,7 +6413,7 @@ Annot3D::Activation::Activation(Dict *dict) {
 // Annots
 //------------------------------------------------------------------------
 
-Annots::Annots(PDFDoc *docA, Object *annotsObj) {
+Annots::Annots(PDFDoc *docA, int page, Object *annotsObj) {
   Annot *annot;
   Object obj1;
   int i;
@@ -6421,6 +6434,7 @@ Annots::Annots(PDFDoc *docA, Object *annotsObj) {
         annot = createAnnot (obj1.getDict(), &obj2);
         if (annot) {
           if (annot->isOk()) {
+            annot->setPage(page, gFalse); // Don't change /P
             appendAnnot(annot);
           }
           annot->decRefCnt();

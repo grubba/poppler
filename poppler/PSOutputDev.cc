@@ -15,7 +15,7 @@
 //
 // Copyright (C) 2005 Martin Kretzschmar <martink@gnome.org>
 // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
-// Copyright (C) 2006-2009, 2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006-2009, 2011, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2006 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2007, 2008 Brad Hards <bradh@kde.org>
 // Copyright (C) 2008, 2009 Koji Otani <sho@bbr.jp>
@@ -258,7 +258,7 @@ static const char *prolog[] = {
   "} def",
   "~3n",
   "/opm { dup /pdfOPM exch def",
-  "      setoverprintmode } def",
+  "      /setoverprintmode where{pop setoverprintmode}{pop}ifelse  } def",
   "~23n",
   "/cs { /pdfFillXform exch def dup /pdfFillCS exch def",
   "      setcolorspace } def",
@@ -292,7 +292,7 @@ static const char *prolog[] = {
   "} def",
   "~3s",
   "/opm { dup /pdfOPM exch def",
-  "      setoverprintmode } def",
+  "      /setoverprintmode where{pop setoverprintmode}{pop}ifelse } def",
   "~23s",
   "/k { 4 copy 4 array astore /pdfFill exch def setcmykcolor",
   "     /pdfLastFill true def /pdfLastStroke false def } def",
@@ -390,7 +390,7 @@ static const char *prolog[] = {
   "~3sn",
   "  /pdfOPM where {",
   "    pop",
-  "    pdfOPM setoverprintmode",
+  "    pdfOPM /setoverprintmode where{pop setoverprintmode}{pop}ifelse ",
   "  } if",
   "~23sn",
   "} def",
@@ -1469,11 +1469,8 @@ void PSOutputDev::writeHeader(int firstPage, int lastPage,
     }
     writePSFmt("%%BoundingBox: {0:d} {1:d} {2:d} {3:d}\n",
 	       (int)floor(x1), (int)floor(y1), (int)ceil(x2), (int)ceil(y2));
-    if (floor(x1) != ceil(x1) || floor(y1) != ceil(y1) ||
-	floor(x2) != ceil(x2) || floor(y2) != ceil(y2)) {
-      writePSFmt("%%HiResBoundingBox: {0:.6g} {1:.6g} {2:.6g} {3:.6g}\n",
+    writePSFmt("%%HiResBoundingBox: {0:.6g} {1:.6g} {2:.6g} {3:.6g}\n",
 		 x1, y1, x2, y2);
-    }
     writePS("%%DocumentSuppliedResources: (atend)\n");
     writePS("%%EndComments\n");
     break;
@@ -3049,7 +3046,7 @@ GBool PSOutputDev::checkPageSlice(Page *page, double /*hDPI*/, double /*vDPI*/,
   double m0, m1, m2, m3, m4, m5;
   int nStripes, stripeH, stripeY;
   int c, w, h, x, y, comp, i;
-  int numComps;
+  int numComps, initialNumComps;
 #endif
   char hexBuf[32*2 + 2];	// 32 values X 2 chars/value + line ending + null
   Guchar digit;
@@ -3132,6 +3129,7 @@ GBool PSOutputDev::checkPageSlice(Page *page, double /*hDPI*/, double /*vDPI*/,
   stripeH = (sliceH + nStripes - 1) / nStripes;
 
   // render the stripes
+  initialNumComps = numComps;
   for (stripeY = sliceY; stripeY < sliceH; stripeY += stripeH) {
 
     // rasterize a stripe
@@ -3151,6 +3149,7 @@ GBool PSOutputDev::checkPageSlice(Page *page, double /*hDPI*/, double /*vDPI*/,
 
     // draw the rasterized image
     bitmap = splashOut->getBitmap();
+    numComps = initialNumComps;
     w = bitmap->getWidth();
     h = bitmap->getHeight();
     writePS("gsave\n");
@@ -3519,6 +3518,7 @@ void PSOutputDev::startPage(int pageNum, GfxState *state) {
     saveState(NULL);
   }
 
+  xScale = yScale = 1;
   switch (mode) {
 
   case psModePSOrigPageSizes:
@@ -3629,8 +3629,6 @@ void PSOutputDev::startPage(int pageNum, GfxState *state) {
       } else {
 	yScale = xScale;
       }
-    } else {
-      xScale = yScale = 1;
     }
     // deal with odd bounding boxes or clipping
     if (clipLLX0 < clipURX0 && clipLLY0 < clipURY0) {
@@ -3692,7 +3690,6 @@ void PSOutputDev::startPage(int pageNum, GfxState *state) {
     if (tx != 0 || ty != 0) {
       writePSFmt("{0:.6g} {1:.6g} translate\n", tx, ty);
     }
-    xScale = yScale = 1;
     break;
 
   case psModeForm:
@@ -3700,7 +3697,6 @@ void PSOutputDev::startPage(int pageNum, GfxState *state) {
     writePS("begin xpdf begin\n");
     writePS("pdfStartPage\n");
     tx = ty = 0;
-    xScale = yScale = 1;
     rotate = 0;
     break;
   }
@@ -3984,6 +3980,26 @@ void PSOutputDev::addCustomColor(GfxSeparationColorSpace *sepCS) {
   GfxColor color;
   GfxCMYK cmyk;
 
+  if (!sepCS->getName()->cmp("Black")) {
+    processColors |= psProcessBlack;
+    return;
+  }
+  if (!sepCS->getName()->cmp("Cyan")) {
+    processColors |= psProcessCyan;
+    return;
+  }
+  if (!sepCS->getName()->cmp("Yellow")) {
+    processColors |= psProcessYellow;
+    return;
+  }
+  if (!sepCS->getName()->cmp("Magenta")) {
+    processColors |= psProcessMagenta;
+    return;
+  }
+  if (!sepCS->getName()->cmp("All")) 
+    return;
+  if (!sepCS->getName()->cmp("None")) 
+    return;
   for (cc = customColors; cc; cc = cc->next) {
     if (!cc->name->cmp(sepCS->getName())) {
       return;
@@ -5820,7 +5836,7 @@ void PSOutputDev::doImageL2(Object *ref, GfxImageColorMap *colorMap,
     }
 #endif
     if ((level == psLevel2Sep || level == psLevel3Sep) && colorMap &&
-	colorMap->getColorSpace()->getMode() == csSeparation) {
+	colorMap->getColorSpace()->getMode() == csSeparation && colorMap->getBits() == 8) {
       color.c[0] = gfxColorComp1;
       sepCS = (GfxSeparationColorSpace *)colorMap->getColorSpace();
       sepCS->getCMYK(&color, &cmyk);
@@ -6079,15 +6095,6 @@ void PSOutputDev::doImageL3(Object *ref, GfxImageColorMap *colorMap,
       n = (1 << colorMap->getBits()) - 1;
       writePSFmt("{0:.4g} {1:.4g}", colorMap->getDecodeLow(0) * n,
 		 colorMap->getDecodeHigh(0) * n);
-    } else if (colorMap->getColorSpace()->getMode() == csDeviceN) {
-      numComps = ((GfxDeviceNColorSpace *)colorMap->getColorSpace())->
-	           getAlt()->getNComps();
-      for (i = 0; i < numComps; ++i) {
-	if (i > 0) {
-	  writePS(" ");
-	}
-	writePS("0 1");
-      }
     } else {
       numComps = colorMap->getNumPixelComps();
       for (i = 0; i < numComps; ++i) {
@@ -6188,7 +6195,7 @@ void PSOutputDev::doImageL3(Object *ref, GfxImageColorMap *colorMap,
   } else {
 
     if ((level == psLevel2Sep || level == psLevel3Sep) && colorMap &&
-	colorMap->getColorSpace()->getMode() == csSeparation) {
+	colorMap->getColorSpace()->getMode() == csSeparation && colorMap->getBits() == 8) {
       color.c[0] = gfxColorComp1;
       sepCS = (GfxSeparationColorSpace *)colorMap->getColorSpace();
       sepCS->getCMYK(&color, &cmyk);
@@ -6215,11 +6222,6 @@ void PSOutputDev::doImageL3(Object *ref, GfxImageColorMap *colorMap,
       str = new FixedLengthEncoder(str, len);
     } else if (useCompressed) {
       str = str->getUndecodedStream();
-    }
-
-    // recode DeviceN data
-    if (colorMap && colorMap->getColorSpace()->getMode() == csDeviceN) {
-      str = new DeviceNRecoder(str, width, height, colorMap);
     }
 
     // add RunLengthEncode and ASCIIHex/85 encode filters
@@ -6508,9 +6510,9 @@ void PSOutputDev::dumpColorSpaceL2(GfxColorSpace *colorSpace,
         writePS(" ");
       }
       writePS("]\n");
-      dumpColorSpaceL2(deviceNCS->getAlt(), gFalse, updateColors, map01);
+      dumpColorSpaceL2(deviceNCS->getAlt(), gFalse, updateColors, gFalse);
       writePS("\n");
-      cvtFunction(deviceNCS->getTintTransformFunc());
+      cvtFunction(deviceNCS->getTintTransformFunc(), map01 && deviceNCS->getAlt()->getMode() == csLab);
       writePS("]\n");
       if (genXform) {
         writePS(" {}");
@@ -6973,7 +6975,7 @@ void PSOutputDev::psXObject(Stream *psStream, Stream *level1Stream) {
 
 //~ can nextFunc be reset to 0 -- maybe at the start of each page?
 //~   or maybe at the start of each color space / pattern?
-void PSOutputDev::cvtFunction(Function *func) {
+void PSOutputDev::cvtFunction(Function *func, GBool invertPSFunction) {
   SampledFunction *func0;
   ExponentialFunction *func2;
   StitchingFunction *func3;
@@ -7063,7 +7065,14 @@ void PSOutputDev::cvtFunction(Function *func) {
       // [e01] [efrac] y(0) ... y(i-1) y(i)
     }
     // [e01] [efrac] y(0) ... y(n-1)
-    writePSFmt("{0:d} {1:d} roll pop pop }}\n", n+2, n);
+    writePSFmt("{0:d} {1:d} roll pop pop \n", n+2, n);
+    if (invertPSFunction) {
+      for (i = 0; i < n; ++i) {
+        writePSFmt("{0:d} -1 roll ", n);
+        writePSFmt("{0:.6g} sub {1:.6g} div ", func0->getRangeMin(i), func0->getRangeMax(i) - func0->getRangeMin(i));
+      }
+    }
+    writePS("}\n");
     break;
 
   case 2:			// exponential
@@ -7085,7 +7094,14 @@ void PSOutputDev::cvtFunction(Function *func) {
       }
     }
     // x y(0) .. y(n-1)
-    writePSFmt("{0:d} {1:d} roll pop }}\n", n+1, n);
+    writePSFmt("{0:d} {1:d} roll pop \n", n+1, n);
+    if (invertPSFunction && func2->getHasRange()) {
+      for (i = 0; i < n; ++i) {
+        writePSFmt("{0:d} -1 roll ", n);
+        writePSFmt("{0:.6g} sub {1:.6g} div ", func2->getRangeMin(i), func2->getRangeMax(i) - func2->getRangeMin(i));
+      }
+    }
+    writePS("}\n");
     break;
 
   case 3:			// stitching
@@ -7114,13 +7130,39 @@ void PSOutputDev::cvtFunction(Function *func) {
     for (i = 0; i < func3->getNumFuncs() - 1; ++i) {
       writePS("} ifelse\n");
     }
+    if (invertPSFunction && func3->getHasRange()) {
+      n = func3->getOutputSize();
+      for (i = 0; i < n; ++i) {
+        writePSFmt("{0:d} -1 roll ", n);
+        writePSFmt("{0:.6g} sub {1:.6g} div ", func3->getRangeMin(i), func3->getRangeMax(i) - func3->getRangeMin(i));
+      }
+    }
     writePS("}\n");
     break;
 
   case 4:			// PostScript
     func4 = (PostScriptFunction *)func;
-    writePS(func4->getCodeString()->getCString());
-    writePS("\n");
+    if (invertPSFunction) {
+      GooString *codeString = new GooString(func4->getCodeString());
+      for (i = codeString->getLength() -1; i > 0; i--) {
+        if (codeString->getChar(i) == '}') {
+          codeString->del(i);
+          break;
+        }
+      }
+      writePS(codeString->getCString());
+      writePS("\n");
+      delete codeString;
+      n = func4->getOutputSize();
+      for (i = 0; i < n; ++i) {
+        writePSFmt("{0:d} -1 roll ", n);
+        writePSFmt("{0:.6g} sub {1:.6g} div ", func4->getRangeMin(i), func4->getRangeMax(i) - func4->getRangeMin(i));
+      }
+      writePS("}\n");
+    } else {
+      writePS(func4->getCodeString()->getCString());
+      writePS("\n");
+    }
     break;
   }
 }

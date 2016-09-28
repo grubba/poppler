@@ -11,11 +11,12 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2005-2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005-2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2005 Marco Pesenti Gritti <mpg@redhat.com>
 // Copyright (C) 2010-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
 // Copyright (C) 2011, 2012 William Bader <williambader@hotmail.com>
+// Copyright (C) 2012 Markus Trippelsdorf <markus@trippelsdorf.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -337,9 +338,6 @@ void Splash::pipeRun(SplashPipe *pipe) {
   SplashColorPtr cSrc;
   Guchar cResult0, cResult1, cResult2, cResult3;
   int t;
-#if SPLASH_CMYK
-  SplashColor cSrc2, cDest2;
-#endif
 
   //----- source color
 
@@ -521,25 +519,6 @@ void Splash::pipeRun(SplashPipe *pipe) {
     //----- blend function
 
     if (state->blendFunc) {
-#if SPLASH_CMYK
-      if (bitmap->mode == splashModeCMYK8) {
-	// convert colors to additive
-	cSrc2[0] = 0xff - cSrc[0];
-	cSrc2[1] = 0xff - cSrc[1];
-	cSrc2[2] = 0xff - cSrc[2];
-	cSrc2[3] = 0xff - cSrc[3];
-	cDest2[0] = 0xff - cDest[0];
-	cDest2[1] = 0xff - cDest[1];
-	cDest2[2] = 0xff - cDest[2];
-	cDest2[3] = 0xff - cDest[3];
-	(*state->blendFunc)(cSrc2, cDest2, cBlend, bitmap->mode);
-	// convert result back to subtractive
-	cBlend[0] = 0xff - cBlend[0];
-	cBlend[1] = 0xff - cBlend[1];
-	cBlend[2] = 0xff - cBlend[2];
-	cBlend[3] = 0xff - cBlend[3];
-      } else
-#endif
       (*state->blendFunc)(cSrc, cDest, cBlend, bitmap->mode);
     }
 
@@ -3375,7 +3354,8 @@ void Splash::blitMask(SplashBitmap *src, int xDest, int yDest,
 
 SplashError Splash::drawImage(SplashImageSource src, void *srcData,
 			      SplashColorMode srcMode, GBool srcAlpha,
-			      int w, int h, SplashCoord *mat) {
+			      int w, int h, SplashCoord *mat,
+			      GBool tilingPattern) {
   GBool ok;
   SplashBitmap *scaledImg;
   SplashClipResult clipRes;
@@ -3456,6 +3436,9 @@ SplashError Splash::drawImage(SplashImageSource src, void *srcData,
       }
       scaledImg = scaleImage(src, srcData, srcMode, nComps, srcAlpha, w, h,
 			     scaledWidth, scaledHeight);
+      if (scaledImg == NULL) {
+        return splashErrBadArg;
+      }
       blitImage(scaledImg, srcAlpha, x0, y0, clipRes);
       delete scaledImg;
     }
@@ -3491,6 +3474,9 @@ SplashError Splash::drawImage(SplashImageSource src, void *srcData,
       }
       scaledImg = scaleImage(src, srcData, srcMode, nComps, srcAlpha, w, h,
 			     scaledWidth, scaledHeight);
+      if (scaledImg == NULL) {
+        return splashErrBadArg;
+      }
       vertFlipImage(scaledImg, scaledWidth, scaledHeight, nComps);
       blitImage(scaledImg, srcAlpha, x0, y0, clipRes);
       delete scaledImg;
@@ -3499,7 +3485,7 @@ SplashError Splash::drawImage(SplashImageSource src, void *srcData,
   // all other cases
   } else {
     return arbitraryTransformImage(src, srcData, srcMode, nComps, srcAlpha,
-			    w, h, mat);
+			    w, h, mat, tilingPattern);
   }
 
   return splashOk;
@@ -3509,7 +3495,8 @@ SplashError Splash::arbitraryTransformImage(SplashImageSource src, void *srcData
 				     SplashColorMode srcMode, int nComps,
 				     GBool srcAlpha,
 				     int srcWidth, int srcHeight,
-				     SplashCoord *mat) {
+				     SplashCoord *mat,
+				     GBool tilingPattern) {
   SplashBitmap *scaledImg;
   SplashClipResult clipRes, clipRes2;
   SplashPipe pipe;
@@ -3558,44 +3545,53 @@ SplashError Splash::arbitraryTransformImage(SplashImageSource src, void *srcData
   }
 
   // compute the scale factors
-  if (mat[0] >= 0) {
-    t0 = imgCoordMungeUpper(mat[0] + mat[4]) - imgCoordMungeLower(mat[4]);
+  if (splashAbs(mat[0]) >= splashAbs(mat[1])) {
+    scaledWidth = xMax - xMin;
+    scaledHeight = yMax - yMin;
   } else {
-    t0 = imgCoordMungeUpper(mat[4]) - imgCoordMungeLower(mat[0] + mat[4]);
+    scaledWidth = yMax - yMin;
+    scaledHeight = xMax - xMin;
   }
-  if (mat[1] >= 0) {
-    t1 = imgCoordMungeUpper(mat[1] + mat[5]) - imgCoordMungeLower(mat[5]);
-  } else {
-    t1 = imgCoordMungeUpper(mat[5]) - imgCoordMungeLower(mat[1] + mat[5]);
+  if (scaledHeight <= 1 || scaledHeight <= 1 || tilingPattern) {
+    if (mat[0] >= 0) {
+      t0 = imgCoordMungeUpper(mat[0] + mat[4]) - imgCoordMungeLower(mat[4]);
+    } else {
+      t0 = imgCoordMungeUpper(mat[4]) - imgCoordMungeLower(mat[0] + mat[4]);
+    }
+    if (mat[1] >= 0) {
+      t1 = imgCoordMungeUpper(mat[1] + mat[5]) - imgCoordMungeLower(mat[5]);
+    } else {
+      t1 = imgCoordMungeUpper(mat[5]) - imgCoordMungeLower(mat[1] + mat[5]);
+    }
+    scaledWidth = t0 > t1 ? t0 : t1;
+    if (mat[2] >= 0) {
+      t0 = imgCoordMungeUpper(mat[2] + mat[4]) - imgCoordMungeLower(mat[4]);
+      if (splashAbs(mat[1]) >= 1) {
+        th = imgCoordMungeUpper(mat[2]) - imgCoordMungeLower(mat[0] * mat[3] / mat[1]);
+	    if (th > t0) t0 = th;
+      }
+    } else {
+      t0 = imgCoordMungeUpper(mat[4]) - imgCoordMungeLower(mat[2] + mat[4]);
+      if (splashAbs(mat[1]) >= 1) {
+        th = imgCoordMungeUpper(mat[0] * mat[3] / mat[1]) - imgCoordMungeLower(mat[2]);
+        if (th > t0) t0 = th;
+      }
+    }
+    if (mat[3] >= 0) {
+      t1 = imgCoordMungeUpper(mat[3] + mat[5]) - imgCoordMungeLower(mat[5]);
+      if (splashAbs(mat[0]) >= 1) {
+        th = imgCoordMungeUpper(mat[3]) - imgCoordMungeLower(mat[1] * mat[2] / mat[0]);
+	    if (th > t1) t1 = th;
+      }
+    } else {
+      t1 = imgCoordMungeUpper(mat[5]) - imgCoordMungeLower(mat[3] + mat[5]);
+      if (splashAbs(mat[0]) >= 1) {
+        th = imgCoordMungeUpper(mat[1] * mat[2] / mat[0]) - imgCoordMungeLower(mat[3]);
+	    if (th > t1) t1 = th;
+      }
+    }
+    scaledHeight = t0 > t1 ? t0 : t1;
   }
-  scaledWidth = t0 > t1 ? t0 : t1;
-  if (mat[2] >= 0) {
-    t0 = imgCoordMungeUpper(mat[2] + mat[4]) - imgCoordMungeLower(mat[4]);
-    if (splashAbs(mat[1]) >= 1) {
-      th = imgCoordMungeUpper(mat[2]) - imgCoordMungeLower(mat[0] * mat[3] / mat[1]);
-	  if (th > t0) t0 = th;
-    }
-  } else {
-    t0 = imgCoordMungeUpper(mat[4]) - imgCoordMungeLower(mat[2] + mat[4]);
-    if (splashAbs(mat[1]) >= 1) {
-      th = imgCoordMungeUpper(mat[0] * mat[3] / mat[1]) - imgCoordMungeLower(mat[2]);
-      if (th > t0) t0 = th;
-    }
-  }
-  if (mat[3] >= 0) {
-    t1 = imgCoordMungeUpper(mat[3] + mat[5]) - imgCoordMungeLower(mat[5]);
-    if (splashAbs(mat[0]) >= 1) {
-      th = imgCoordMungeUpper(mat[3]) - imgCoordMungeLower(mat[1] * mat[2] / mat[0]);
-	  if (th > t1) t1 = th;
-    }
-  } else {
-    t1 = imgCoordMungeUpper(mat[5]) - imgCoordMungeLower(mat[3] + mat[5]);
-    if (splashAbs(mat[0]) >= 1) {
-      th = imgCoordMungeUpper(mat[1] * mat[2] / mat[0]) - imgCoordMungeLower(mat[3]);
-	  if (th > t1) t1 = th;
-    }
-  }
-  scaledHeight = t0 > t1 ? t0 : t1;
   if (scaledWidth == 0) {
     scaledWidth = 1;
   }
@@ -3625,6 +3621,10 @@ SplashError Splash::arbitraryTransformImage(SplashImageSource src, void *srcData
   }
   scaledImg = scaleImage(src, srcData, srcMode, nComps, srcAlpha,
 			 srcWidth, srcHeight, scaledWidth, scaledHeight);
+  
+  if (scaledImg == NULL) {
+    return splashErrBadArg;
+  }
 
   // construct the three sections
   i = 0;
@@ -3803,22 +3803,27 @@ SplashBitmap *Splash::scaleImage(SplashImageSource src, void *srcData,
   SplashBitmap *dest;
 
   dest = new SplashBitmap(scaledWidth, scaledHeight, 1, srcMode, srcAlpha);
-  if (scaledHeight < srcHeight) {
-    if (scaledWidth < srcWidth) {
-      scaleImageYdXd(src, srcData, srcMode, nComps, srcAlpha,
-		     srcWidth, srcHeight, scaledWidth, scaledHeight, dest);
+  if (dest->getDataPtr() != NULL) {
+    if (scaledHeight < srcHeight) {
+      if (scaledWidth < srcWidth) {
+	scaleImageYdXd(src, srcData, srcMode, nComps, srcAlpha,
+		      srcWidth, srcHeight, scaledWidth, scaledHeight, dest);
+      } else {
+	scaleImageYdXu(src, srcData, srcMode, nComps, srcAlpha,
+		      srcWidth, srcHeight, scaledWidth, scaledHeight, dest);
+      }
     } else {
-      scaleImageYdXu(src, srcData, srcMode, nComps, srcAlpha,
-		     srcWidth, srcHeight, scaledWidth, scaledHeight, dest);
+      if (scaledWidth < srcWidth) {
+	scaleImageYuXd(src, srcData, srcMode, nComps, srcAlpha,
+		      srcWidth, srcHeight, scaledWidth, scaledHeight, dest);
+      } else {
+	scaleImageYuXu(src, srcData, srcMode, nComps, srcAlpha,
+		      srcWidth, srcHeight, scaledWidth, scaledHeight, dest);
+      }
     }
   } else {
-    if (scaledWidth < srcWidth) {
-      scaleImageYuXd(src, srcData, srcMode, nComps, srcAlpha,
-		     srcWidth, srcHeight, scaledWidth, scaledHeight, dest);
-    } else {
-      scaleImageYuXu(src, srcData, srcMode, nComps, srcAlpha,
-		     srcWidth, srcHeight, scaledWidth, scaledHeight, dest);
-    }
+    delete dest;
+    dest = NULL;
   }
   return dest;
 }

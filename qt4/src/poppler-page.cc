@@ -1,7 +1,7 @@
 /* poppler-page.cc: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2005-2011, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2005-2012, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2005, Stefan Kebekus <stefan.kebekus@math.uni-koeln.de>
  * Copyright (C) 2006-2011, Pino Toscano <pino@kde.org>
  * Copyright (C) 2008 Carlos Garcia Campos <carlosgc@gnome.org>
@@ -12,6 +12,7 @@
  * Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
  * Copyright (C) 2012 Tobias Koenig <tokoe@kdab.com>
  * Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
+ * Copyright (C) 2012 Adam Reichold <adamreichold@myopera.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -207,6 +208,25 @@ Link* PageData::convertLinkActionToLink(::LinkAction * a, DocumentData *parentDo
   return popplerLink;
 }
 
+TextPage *PageData::prepareTextSearch(const QString &text, Page::SearchMode caseSensitive, Page::Rotation rotate, GBool *sCase, QVector<Unicode> *u)
+{
+  const QChar * str = text.unicode();
+  const int len = text.length();
+  u->resize(len);
+  for (int i = 0; i < len; ++i) (*u)[i] = str[i].unicode();
+
+  if (caseSensitive == Page::CaseSensitive) *sCase = gTrue;
+  else *sCase = gFalse;
+
+  const int rotation = (int)rotate * 90;
+
+  // fetch ourselves a textpage
+  TextOutputDev td(NULL, gTrue, 0, gFalse, gFalse);
+  parentDoc->doc->displayPage( &td, index + 1, 72, 72, rotation, false, true, false );
+  TextPage *textPage=td.takeText();
+  
+  return textPage;
+} 
 
 Page::Page(DocumentData *doc, int index) {
   m_page = new PageData();
@@ -376,32 +396,19 @@ QString Page::text(const QRectF &r) const
 
 bool Page::search(const QString &text, double &sLeft, double &sTop, double &sRight, double &sBottom, SearchDirection direction, SearchMode caseSensitive, Rotation rotate) const
 {
-  const QChar * str = text.unicode();
-  int len = text.length();
-  QVector<Unicode> u(len);
-  for (int i = 0; i < len; ++i) u[i] = str[i].unicode();
-
   GBool sCase;
-  if (caseSensitive == CaseSensitive) sCase = gTrue;
-  else sCase = gFalse;
+  QVector<Unicode> u;
+  TextPage *textPage = m_page->prepareTextSearch(text, caseSensitive, rotate, &sCase, &u);
 
   bool found = false;
-
-  int rotation = (int)rotate * 90;
-
-  // fetch ourselves a textpage
-  TextOutputDev td(NULL, gTrue, 0, gFalse, gFalse);
-  m_page->parentDoc->doc->displayPage( &td, m_page->index + 1, 72, 72, rotation, false, true, false );
-  TextPage *textPage=td.takeText();
-
   if (direction == FromTop)
-    found = textPage->findText( u.data(), len, 
+    found = textPage->findText( u.data(), u.size(), 
             gTrue, gTrue, gFalse, gFalse, sCase, gFalse, gFalse, &sLeft, &sTop, &sRight, &sBottom );
   else if ( direction == NextResult )
-    found = textPage->findText( u.data(), len, 
+    found = textPage->findText( u.data(), u.size(), 
             gFalse, gTrue, gTrue, gFalse, sCase, gFalse, gFalse, &sLeft, &sTop, &sRight, &sBottom );
   else if ( direction == PreviousResult )
-    found = textPage->findText( u.data(), len, 
+    found = textPage->findText( u.data(), u.size(), 
             gFalse, gTrue, gTrue, gFalse, sCase, gTrue, gFalse, &sLeft, &sTop, &sRight, &sBottom );
 
   textPage->decRefCnt();
@@ -425,6 +432,33 @@ bool Page::search(const QString &text, QRectF &rect, SearchDirection direction, 
   rect.setBottom( sBottom );
 
   return found;
+}
+
+QList<QRectF> Page::search(const QString &text, SearchMode caseSensitive, Rotation rotate) const
+{
+  GBool sCase;
+  QVector<Unicode> u;
+  TextPage *textPage = m_page->prepareTextSearch(text, caseSensitive, rotate, &sCase, &u);
+
+  QList<QRectF> results;
+  double sLeft = 0.0, sTop = 0.0, sRight = 0.0, sBottom = 0.0;
+  
+  while(textPage->findText( u.data(), u.size(), 
+        gFalse, gTrue, gTrue, gFalse, sCase, gFalse, gFalse, &sLeft, &sTop, &sRight, &sBottom ))
+  {
+      QRectF result;
+      
+      result.setLeft(sLeft);
+      result.setTop(sTop);
+      result.setRight(sRight);
+      result.setBottom(sBottom);
+      
+      results.append(result);
+  }
+  
+  textPage->decRefCnt();
+
+  return results;
 }
 
 QList<TextBox*> Page::textList(Rotation rotate) const
