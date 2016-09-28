@@ -1716,6 +1716,33 @@ poppler_fonts_iter_get_name (PopplerFontsIter *iter)
 }
 
 /**
+ * poppler_fonts_iter_get_substitute_name:
+ * @iter: a #PopplerFontsIter
+ *
+ * The name of the substitute font of the font associated with @iter or %NULL if
+ * the font is embedded
+ *
+ * Returns: the name of the substitute font or %NULL y font is emebedded
+ *
+ * Since: 0.20
+ */
+const char *
+poppler_fonts_iter_get_substitute_name (PopplerFontsIter *iter)
+{
+	GooString *name;
+	FontInfo *info;
+
+	info = (FontInfo *)iter->items->get (iter->index);
+
+	name = info->getSubstituteName();
+	if (name != NULL) {
+		return name->getCString();
+	} else {
+		return NULL;
+	}
+}
+
+/**
  * poppler_fonts_iter_get_file_name:
  * @iter: a #PopplerFontsIter
  *
@@ -1758,6 +1785,32 @@ poppler_fonts_iter_get_font_type (PopplerFontsIter *iter)
 	info = (FontInfo *)iter->items->get (iter->index);
 
 	return (PopplerFontType)info->getType ();
+}
+
+/**
+ * poppler_fonts_iter_get_encoding:
+ * @iter: a #PopplerFontsIter
+ *
+ * Returns the encoding of the font associated with @iter
+ *
+ * Returns: the font encoding
+ *
+ * Since: 0.20
+ */
+const char *
+poppler_fonts_iter_get_encoding (PopplerFontsIter *iter)
+{
+	GooString *encoding;
+	FontInfo *info;
+
+	info = (FontInfo *)iter->items->get (iter->index);
+
+	encoding = info->getEncoding();
+	if (encoding != NULL) {
+		return encoding->getCString();
+	} else {
+		return NULL;
+	}
 }
 
 /**

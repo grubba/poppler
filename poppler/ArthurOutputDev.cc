@@ -14,7 +14,7 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Brad Hards <bradh@frogmouth.net>
-// Copyright (C) 2005-2009, 2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005-2009, 2011, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2008, 2010 Pino Toscano <pino@kde.org>
 // Copyright (C) 2009, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
@@ -42,7 +42,6 @@
 #include "GfxState.h"
 #include "GfxFont.h"
 #include "Link.h"
-#include "CharCodeToUnicode.h"
 #include "FontEncodingTables.h"
 #include <fofi/FoFiTrueType.h>
 #include "ArthurOutputDev.h"
@@ -116,7 +115,6 @@ void ArthurOutputDev::startDoc(XRef *xrefA) {
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
   globalParams->getEnableFreeType(),
-  !globalParams->getDisableFreeTypeHinting(),
   isHintingEnabled,
   isSlightHinting,
 #endif

@@ -19,7 +19,8 @@
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 Stefan Thomas <thomas@eload24.com>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
-// Copyright (C) 2011 William Bader <williambader@hotmail.com>
+// Copyright (C) 2011, 2012 William Bader <williambader@hotmail.com>
+// Copyright (C) 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -785,6 +786,7 @@ public:
 
 private:
 
+  void ccittReset(GBool unfiltered);
   int encoding;			// 'K' parameter
   GBool endOfLine;		// 'EndOfLine' parameter
   GBool byteAlign;		// 'EncodedByteAlign' parameter
@@ -861,6 +863,7 @@ public:
 
 private:
 
+  void dctReset(GBool unfiltered);  
   GBool progressive;		// set if in progressive mode
   GBool interleaved;		// set if in interleaved mode
   int width, height;		// image size
@@ -1176,14 +1179,43 @@ private:
 };
 
 //------------------------------------------------------------------------
-// CMKYGrayEncoder
+// CMYKGrayEncoder
 //------------------------------------------------------------------------
 
-class CMKYGrayEncoder: public FilterStream {
+class CMYKGrayEncoder: public FilterStream {
 public:
 
-  CMKYGrayEncoder(Stream *strA);
-  virtual ~CMKYGrayEncoder();
+  CMYKGrayEncoder(Stream *strA);
+  virtual ~CMYKGrayEncoder();
+  virtual StreamKind getKind() { return strWeird; }
+  virtual void reset();
+  virtual int getChar()
+    { return (bufPtr >= bufEnd && !fillBuf()) ? EOF : (*bufPtr++ & 0xff); }
+  virtual int lookChar()
+    { return (bufPtr >= bufEnd && !fillBuf()) ? EOF : (*bufPtr & 0xff); }
+  virtual GooString *getPSFilter(int /*psLevel*/, const char * /*indent*/) { return NULL; }
+  virtual GBool isBinary(GBool /*last = gTrue*/) { return gFalse; }
+  virtual GBool isEncoder() { return gTrue; }
+
+private:
+
+  char buf[2];
+  char *bufPtr;
+  char *bufEnd;
+  GBool eof;
+
+  GBool fillBuf();
+};
+
+//------------------------------------------------------------------------
+// RGBGrayEncoder
+//------------------------------------------------------------------------
+
+class RGBGrayEncoder: public FilterStream {
+public:
+
+  RGBGrayEncoder(Stream *strA);
+  virtual ~RGBGrayEncoder();
   virtual StreamKind getKind() { return strWeird; }
   virtual void reset();
   virtual int getChar()

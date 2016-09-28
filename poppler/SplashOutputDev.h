@@ -14,12 +14,13 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Takashi Iwai <tiwai@suse.de>
-// Copyright (C) 2009-2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
 // Copyright (C) 2011 Andreas Hartmetz <ahartmetz@gmail.com>
 // Copyright (C) 2011 Andrea Canciani <ranma42@gmail.com>
 // Copyright (C) 2011 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2012 Albert Astals Cid <aacid@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -349,6 +350,9 @@ public:
 
   void setFreeTypeHinting(GBool enable, GBool enableSlightHinting);
 
+protected:
+  void doUpdateFont(GfxState *state);
+
 private:
   GBool univariateShadedFill(GfxState *state, SplashUnivariatePattern *pattern, double tMin, double tMax);
 
@@ -359,10 +363,9 @@ private:
   SplashPattern *getColor(GfxCMYK *cmyk);
 #endif
   void setOverprintMask(GfxColorSpace *colorSpace, GBool overprintFlag,
-			int overprintMode, GfxColor *singleColor);
+			int overprintMode, GfxColor *singleColor, GBool grayIndexed = gFalse);
   SplashPath *convertPath(GfxState *state, GfxPath *path,
 			  GBool dropEmptySubpaths);
-  void doUpdateFont(GfxState *state);
   void drawType3Glyph(GfxState *state, T3FontCache *t3Font,
 		      T3FontCacheTag *tag, Guchar *data);
   static GBool imageMaskSrc(void *data, SplashColorPtr line);
@@ -383,7 +386,6 @@ private:
   GBool bitmapUpsideDown;
   GBool allowAntialias;
   GBool vectorAntialias;
-  GBool enableAutoHinting;
   GBool enableFreeTypeHinting;
   GBool enableSlightHinting;
   GBool reverseVideo;		// reverse video mode

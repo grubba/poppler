@@ -24,6 +24,7 @@
 // Copyright (C) 2008 Hugo Mercier <hmercier31@gmail.com>
 // Copyright (C) 2009 Ilya Gorenbein <igorenbein@finjan.com>
 // Copyright (C) 2011 José Aliste <jaliste@src.gnome.org>
+// Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -122,6 +123,31 @@ AnnotLineEndingStyle parseAnnotLineEndingStyle(GooString *string) {
   } else {
     return annotLineEndingNone;
   }  
+}
+
+const char* convertAnnotLineEndingStyle(AnnotLineEndingStyle style) {
+  switch (style) {
+    case annotLineEndingSquare:
+      return "Square";
+    case annotLineEndingCircle:
+      return "Circle";
+    case annotLineEndingDiamond:
+      return "Diamond";
+    case annotLineEndingOpenArrow:
+      return "OpenArrow";
+    case annotLineEndingClosedArrow:
+      return "ClosedArrow";
+    case annotLineEndingButt:
+      return "Butt";
+    case annotLineEndingROpenArrow:
+      return "ROpenArrow";
+    case annotLineEndingRClosedArrow:
+      return "RClosedArrow";
+    case annotLineEndingSlash:
+      return "Slash";
+    default:
+      return "None";
+  }
 }
 
 static AnnotExternalDataType parseAnnotExternalData(Dict* dict) {
@@ -368,6 +394,11 @@ AnnotQuadrilaterals::AnnotQuadrilaterals(Array *array, PDFRectangle *rect) {
   }
 }
 
+AnnotQuadrilaterals::AnnotQuadrilaterals(AnnotQuadrilaterals::AnnotQuadrilateral **quads, int quadsLength) {
+  quadrilaterals = quads;
+  quadrilateralsLength = quadsLength;
+}
+
 AnnotQuadrilaterals::~AnnotQuadrilaterals() {
   if (quadrilaterals) {
     for(int i = 0; i < quadrilateralsLength; i++)
@@ -526,6 +557,16 @@ AnnotBorderArray::AnnotBorderArray(Array *array) {
   }
 }
 
+void AnnotBorderArray::writeToObject(XRef *xref, Object *obj1) const {
+  Object obj2;
+
+  obj1->initArray(xref);
+  obj1->arrayAdd(obj2.initReal( horizontalCorner ));
+  obj1->arrayAdd(obj2.initReal( verticalCorner ));
+  obj1->arrayAdd(obj2.initReal( width ));
+  // TODO: Dash array
+}
+
 //------------------------------------------------------------------------
 // AnnotBorderBS
 //------------------------------------------------------------------------
@@ -655,6 +696,19 @@ void AnnotColor::adjustColor(int adjust) {
     for (i = 0; i < length; ++i) {
       values[i] = 0.5 * values[i];
     }
+  }
+}
+
+void AnnotColor::writeToObject(XRef *xref, Object *obj1) const {
+  Object obj2;
+  int i;
+
+  if (length == 0) {
+    obj1->initNull(); // Transparent (no color)
+  } else {
+    obj1->initArray(xref);
+    for (i = 0; i < length; ++i)
+      obj1->arrayAdd( obj2.initReal( values[i] ) );
   }
 }
 
@@ -1020,18 +1074,52 @@ void Annot::getRect(double *x1, double *y1, double *x2, double *y2) const {
   *y2 = rect->y2;
 }
 
+void Annot::setRect(PDFRectangle *rect) {
+    setRect(rect->x1, rect->y1, rect->x2, rect->y2);
+}
+
+void Annot::setRect(double x1, double y1, double x2, double y2) {
+  Object obj1, obj2;
+
+  if (x1 < x2) {
+    rect->x1 = x1;
+    rect->x2 = x2;
+  } else {
+    rect->x1 = x2;
+    rect->x2 = x1;
+  }
+
+  if (y1 < y2) {
+    rect->y1 = y1;
+    rect->y2 = y2;
+  } else {
+    rect->y1 = y2;
+    rect->y2 = y1;
+  }
+
+  obj1.initArray (xref);
+  obj1.arrayAdd (obj2.initReal (rect->x1));
+  obj1.arrayAdd (obj2.initReal (rect->y1));
+  obj1.arrayAdd (obj2.initReal (rect->x2));
+  obj1.arrayAdd (obj2.initReal (rect->y2));
+
+  update("Rect", &obj1);
+}
+
 GBool Annot::inRect(double x, double y) const {
   return rect->contains(x, y);
 }
 
 void Annot::update(const char *key, Object *value) {
-  /* Set M to current time */
-  delete modified;
-  modified = timeToDateString(NULL);
+  /* Set M to current time, unless we are updating M itself */
+  if (strcmp(key, "M") != 0) {
+    delete modified;
+    modified = timeToDateString(NULL);
 
-  Object obj1;
-  obj1.initString (modified->copy());
-  annotObj.dictSet("M", &obj1);
+    Object obj1;
+    obj1.initString (modified->copy());
+    annotObj.dictSet("M", &obj1);
+  }
 
   annotObj.dictSet(const_cast<char*>(key), value);
   
@@ -1057,16 +1145,59 @@ void Annot::setContents(GooString *new_content) {
   update ("Contents", &obj1);
 }
 
+void Annot::setName(GooString *new_name) {
+  delete name;
+
+  if (new_name) {
+    name = new GooString(new_name);
+  } else {
+    name = new GooString();
+  }
+
+  Object obj1;
+  obj1.initString(name->copy());
+  update ("NM", &obj1);
+}
+
+void Annot::setModified(GooString *new_modified) {
+  delete modified;
+
+  if (new_modified)
+    modified = new GooString(new_modified);
+  else
+    modified = new GooString();
+
+  Object obj1;
+  obj1.initString(modified->copy());
+  update ("M", &obj1);
+}
+
+void Annot::setFlags(Guint new_flags) {
+  Object obj1;
+  flags = new_flags;
+  obj1.initInt(flags);
+  update ("F", &obj1);
+}
+
+void Annot::setBorder(AnnotBorderArray *new_border) {
+  delete border;
+
+  if (new_border) {
+    Object obj1;
+    new_border->writeToObject(xref, &obj1);
+    update ("Border", &obj1);
+    border = new_border;
+  } else {
+    border = NULL;
+  }
+}
+
 void Annot::setColor(AnnotColor *new_color) {
   delete color;
 
   if (new_color) {
-    Object obj1, obj2;
-    const double *values = new_color->getValues();
-
-    obj1.initArray(xref);
-    for (int i = 0; i < (int)new_color->getSpace(); i++)
-      obj1.arrayAdd(obj2.initReal (values[i]));
+    Object obj1;
+    new_color->writeToObject(xref, &obj1);
     update ("C", &obj1);
     color = new_color;
   } else {
@@ -1442,7 +1573,7 @@ AnnotMarkup::~AnnotMarkup() {
 }
 
 void AnnotMarkup::initialize(PDFDoc *docA, Dict *dict, Object *obj) {
-  Object obj1;
+  Object obj1, obj2;
 
   if (dict->lookup("T", &obj1)->isString()) {
     label = obj1.getString()->copy();
@@ -1451,8 +1582,8 @@ void AnnotMarkup::initialize(PDFDoc *docA, Dict *dict, Object *obj) {
   }
   obj1.free();
 
-  if (dict->lookup("Popup", &obj1)->isDict()) {
-    popup = new AnnotPopup(docA, obj1.getDict(), obj);
+  if (dict->lookup("Popup", &obj1)->isDict() && dict->lookupNF("Popup", &obj2)->isRef()) {
+    popup = new AnnotPopup(docA, obj1.getDict(), &obj2);
   } else {
     popup = NULL;
   }
@@ -1552,6 +1683,19 @@ void AnnotMarkup::setOpacity(double opacityA) {
   opacity = opacityA;
   obj1.initReal(opacity);
   update ("CA", &obj1);
+}
+
+void AnnotMarkup::setDate(GooString *new_date) {
+  delete date;
+
+  if (new_date)
+    date = new GooString(new_date);
+  else
+    date = new GooString();
+
+  Object obj1;
+  obj1.initString(date->copy());
+  update ("CreationDate", &obj1);
 }
 
 //------------------------------------------------------------------------
@@ -2225,6 +2369,90 @@ void AnnotFreeText::initialize(PDFDoc *docA, Dict *dict) {
   obj1.free();
 }
 
+void AnnotFreeText::setAppearanceString(GooString *new_string) {
+  delete appearanceString;
+
+  if (new_string) {
+    appearanceString = new GooString(new_string);
+  } else {
+    appearanceString = new GooString();
+  }
+
+  Object obj1;
+  obj1.initString(appearanceString->copy());
+  update ("DA", &obj1);
+}
+
+void AnnotFreeText::setQuadding(AnnotFreeTextQuadding new_quadding) {
+  Object obj1;
+  quadding = new_quadding;
+  obj1.initInt((int)quadding);
+  update ("Q", &obj1);
+}
+
+void AnnotFreeText::setStyleString(GooString *new_string) {
+  delete styleString;
+
+  if (new_string) {
+    styleString = new GooString(new_string);
+    //append the unicode marker <FE FF> if needed
+    if (!styleString->hasUnicodeMarker()) {
+      styleString->insert(0, 0xff);
+      styleString->insert(0, 0xfe);
+    }
+  } else {
+    styleString = new GooString();
+  }
+
+  Object obj1;
+  obj1.initString(styleString->copy());
+  update ("DS", &obj1);
+}
+
+void AnnotFreeText::setCalloutLine(AnnotCalloutLine *line) {
+  delete calloutLine;
+
+  Object obj1;
+  if (line == NULL) {
+    obj1.initNull();
+    calloutLine = NULL;
+  } else {
+    double x1 = line->getX1(), y1 = line->getY1();
+    double x2 = line->getX2(), y2 = line->getY2();
+    Object obj2;
+    obj1.initArray(xref);
+    obj1.arrayAdd( obj2.initReal(x1) );
+    obj1.arrayAdd( obj2.initReal(y1) );
+    obj1.arrayAdd( obj2.initReal(x2) );
+    obj1.arrayAdd( obj2.initReal(y2) );
+
+    AnnotCalloutMultiLine *mline = dynamic_cast<AnnotCalloutMultiLine*>(line);
+    if (mline) {
+      double x3 = mline->getX3(), y3 = mline->getY3();
+      obj1.arrayAdd( obj2.initReal(x3) );
+      obj1.arrayAdd( obj2.initReal(y3) );
+      calloutLine = new AnnotCalloutMultiLine(x1, y1, x2, y2, x3, y3);
+    } else {
+      calloutLine = new AnnotCalloutLine(x1, y1, x2, y2);
+    }
+  }
+
+  update("CL", &obj1);
+}
+
+void AnnotFreeText::setIntent(AnnotFreeTextIntent new_intent) {
+  Object obj1;
+
+  intent = new_intent;
+  if (new_intent == intentFreeText)
+    obj1.initName("FreeText");
+  else if (new_intent == intentFreeTextCallout)
+    obj1.initName("FreeTextCallout");
+  else // intentFreeTextTypeWriter
+    obj1.initName("FreeTextTypeWriter");
+  update ("IT", &obj1);
+}
+
 //------------------------------------------------------------------------
 // AnnotLine
 //------------------------------------------------------------------------
@@ -2401,6 +2629,88 @@ void AnnotLine::initialize(PDFDoc *docA, Dict *dict) {
   obj1.free();
 }
 
+void AnnotLine::setVertices(double x1, double y1, double x2, double y2) {
+  Object obj1, obj2;
+
+  delete coord1;
+  coord1 = new AnnotCoord(x1, y1);
+  delete coord2;
+  coord2 = new AnnotCoord(x2, y2);
+
+  obj1.initArray(xref);
+  obj1.arrayAdd( obj2.initReal(x1) );
+  obj1.arrayAdd( obj2.initReal(y1) );
+  obj1.arrayAdd( obj2.initReal(x2) );
+  obj1.arrayAdd( obj2.initReal(y2) );
+
+  update("L", &obj1);
+}
+
+void AnnotLine::setStartEndStyle(AnnotLineEndingStyle start, AnnotLineEndingStyle end) {
+  Object obj1, obj2;
+
+  startStyle = start;
+  endStyle = end;
+
+  obj1.initArray(xref);
+  obj1.arrayAdd( obj2.initName(convertAnnotLineEndingStyle( startStyle )) );
+  obj1.arrayAdd( obj2.initName(convertAnnotLineEndingStyle( endStyle )) );
+
+  update("LE", &obj1);
+}
+
+void AnnotLine::setInteriorColor(AnnotColor *new_color) {
+  delete interiorColor;
+
+  if (new_color) {
+    Object obj1;
+    new_color->writeToObject(xref, &obj1);
+    update ("IC", &obj1);
+    interiorColor = new_color;
+  } else {
+    interiorColor = NULL;
+  }
+}
+
+void AnnotLine::setLeaderLineLength(double len) {
+  Object obj1;
+
+  leaderLineLength = len;
+  obj1.initReal(len);
+  update ("LL", &obj1);
+}
+
+void AnnotLine::setLeaderLineExtension(double len) {
+  Object obj1;
+
+  leaderLineExtension = len;
+  obj1.initReal(len);
+  update ("LLE", &obj1);
+
+  // LL is required if LLE is present
+  obj1.initReal(leaderLineLength);
+  update ("LL", &obj1);
+}
+
+void AnnotLine::setCaption(bool new_cap) {
+  Object obj1;
+
+  caption = new_cap;
+  obj1.initBool(new_cap);
+  update ("Cap", &obj1);
+}
+
+void AnnotLine::setIntent(AnnotLineIntent new_intent) {
+  Object obj1;
+
+  intent = new_intent;
+  if (new_intent == intentLineArrow)
+    obj1.initName("LineArrow");
+  else // intentLineDimension
+    obj1.initName("LineDimension");
+  update ("IT", &obj1);
+}
+
 void AnnotLine::draw(Gfx *gfx, GBool printing) {
   Object obj;
   double ca = 1;
@@ -2563,7 +2873,49 @@ AnnotTextMarkup::~AnnotTextMarkup() {
   }
 }
 
+void AnnotTextMarkup::setType(AnnotSubtype new_type) {
+  Object obj1;
 
+  switch (new_type) {
+    case typeHighlight:
+      obj1.initName("Highlight");
+      break;
+    case typeUnderline:
+      obj1.initName("Underline");
+      break;
+    case typeSquiggly:
+      obj1.initName("Squiggly");
+      break;
+    case typeStrikeOut:
+      obj1.initName("StrikeOut");
+      break;
+    default:
+      assert(!"Invalid subtype");
+  }
+
+  type = new_type;
+  update("Subtype", &obj1);
+}
+
+void AnnotTextMarkup::setQuadrilaterals(AnnotQuadrilaterals *quadPoints) {
+  Object obj1, obj2;
+  obj1.initArray (xref);
+
+  for (int i = 0; i < quadPoints->getQuadrilateralsLength(); ++i) {
+    obj1.arrayAdd (obj2.initReal (quadPoints->getX1(i)));
+    obj1.arrayAdd (obj2.initReal (quadPoints->getY1(i)));
+    obj1.arrayAdd (obj2.initReal (quadPoints->getX2(i)));
+    obj1.arrayAdd (obj2.initReal (quadPoints->getY2(i)));
+    obj1.arrayAdd (obj2.initReal (quadPoints->getX3(i)));
+    obj1.arrayAdd (obj2.initReal (quadPoints->getY3(i)));
+    obj1.arrayAdd (obj2.initReal (quadPoints->getX4(i)));
+    obj1.arrayAdd (obj2.initReal (quadPoints->getY4(i)));
+  }
+
+  quadrilaterals = new AnnotQuadrilaterals(obj1.getArray(), rect);
+
+  annotObj.dictSet ("QuadPoints", &obj1);
+}
 
 void AnnotTextMarkup::draw(Gfx *gfx, GBool printing) {
   Object obj;
@@ -4158,6 +4510,20 @@ void AnnotStamp::initialize(PDFDoc *docA, Dict* dict) {
 
 }
 
+void AnnotStamp::setIcon(GooString *new_icon) {
+  delete icon;
+
+  if (new_icon) {
+    icon = new GooString (new_icon);
+  } else {
+    icon = new GooString();
+  }
+
+  Object obj1;
+  obj1.initName (icon->getCString());
+  update("Name", &obj1);
+}
+
 //------------------------------------------------------------------------
 // AnnotGeometry
 //------------------------------------------------------------------------
@@ -4225,6 +4591,37 @@ void AnnotGeometry::initialize(PDFDoc *docA, Dict* dict) {
   }
   obj1.free();
 
+}
+
+void AnnotGeometry::setType(AnnotSubtype new_type) {
+  Object obj1;
+
+  switch (new_type) {
+    case typeSquare:
+      obj1.initName("Square");
+      break;
+    case typeCircle:
+      obj1.initName("Circle");
+      break;
+    default:
+      assert(!"Invalid subtype");
+  }
+
+  type = new_type;
+  update("Subtype", &obj1);
+}
+
+void AnnotGeometry::setInteriorColor(AnnotColor *new_color) {
+  delete interiorColor;
+
+  if (new_color) {
+    Object obj1;
+    new_color->writeToObject(xref, &obj1);
+    update ("IC", &obj1);
+    interiorColor = new_color;
+  } else {
+    interiorColor = NULL;
+  }
 }
 
 void AnnotGeometry::draw(Gfx *gfx, GBool printing) {
@@ -4475,6 +4872,79 @@ void AnnotPolygon::initialize(PDFDoc *docA, Dict* dict) {
   obj1.free();
 }
 
+void AnnotPolygon::setType(AnnotSubtype new_type) {
+  Object obj1;
+
+  switch (new_type) {
+    case typePolygon:
+      obj1.initName("Polygon");
+      break;
+    case typePolyLine:
+      obj1.initName("PolyLine");
+      break;
+    default:
+      assert(!"Invalid subtype");
+  }
+
+  type = new_type;
+  update("Subtype", &obj1);
+}
+
+void AnnotPolygon::setVertices(AnnotPath *path) {
+  Object obj1, obj2;
+  delete vertices;
+
+  obj1.initArray(xref);
+
+  for (int i = 0; i < path->getCoordsLength(); i++) {
+    obj1.arrayAdd (obj2.initReal (path->getX(i)));
+    obj1.arrayAdd (obj2.initReal (path->getY(i)));
+  }
+
+  vertices = new AnnotPath(obj1.getArray());
+
+  update("Vertices", &obj1);
+}
+
+void AnnotPolygon::setStartEndStyle(AnnotLineEndingStyle start, AnnotLineEndingStyle end) {
+  Object obj1, obj2;
+
+  startStyle = start;
+  endStyle = end;
+
+  obj1.initArray(xref);
+  obj1.arrayAdd( obj2.initName(convertAnnotLineEndingStyle( startStyle )) );
+  obj1.arrayAdd( obj2.initName(convertAnnotLineEndingStyle( endStyle )) );
+
+  update("LE", &obj1);
+}
+
+void AnnotPolygon::setInteriorColor(AnnotColor *new_color) {
+  delete interiorColor;
+
+  if (new_color) {
+    Object obj1;
+    new_color->writeToObject(xref, &obj1);
+    update ("IC", &obj1);
+    interiorColor = new_color;
+  } else {
+    interiorColor = NULL;
+  }
+}
+
+void AnnotPolygon::setIntent(AnnotPolygonIntent new_intent) {
+  Object obj1;
+
+  intent = new_intent;
+  if (new_intent == polygonCloud)
+    obj1.initName("PolygonCloud");
+  else if (new_intent == polylineDimension)
+    obj1.initName("PolyLineDimension");
+  else // polygonDimension
+    obj1.initName("PolygonDimension");
+  update ("IT", &obj1);
+}
+
 //------------------------------------------------------------------------
 // AnnotCaret
 //------------------------------------------------------------------------
@@ -4521,6 +4991,13 @@ void AnnotCaret::initialize(PDFDoc *docA, Dict* dict) {
 
 }
 
+void AnnotCaret::setSymbol(AnnotCaretSymbol new_symbol) {
+  Object obj1;
+  obj1.initName( new_symbol == symbolP ? "P" : "None" );
+  symbol = new_symbol;
+  update("Sy", &obj1);
+}
+
 //------------------------------------------------------------------------
 // AnnotInk
 //------------------------------------------------------------------------
@@ -4534,21 +5011,7 @@ AnnotInk::AnnotInk(PDFDoc *docA, PDFRectangle *rect, AnnotPath **paths, int n_pa
 
   Object obj2;
   obj2.initArray (doc->getXRef());
-
-  for (int i = 0; i < n_paths; ++i) {
-    AnnotPath *path = paths[i];
-    Object obj3;
-    obj3.initArray (doc->getXRef());
-
-    for (int j = 0; j < path->getCoordsLength(); ++j) {
-      Object obj4;
-
-      obj3.arrayAdd (obj4.initReal (path->getX(j)));
-      obj3.arrayAdd (obj4.initReal (path->getY(j)));
-    }
-
-    obj2.arrayAdd (&obj3);
-  }
+  writeInkList(paths, n_paths, obj2.getArray());
 
   annotObj.dictSet ("InkList", &obj2);
 
@@ -4562,27 +5025,14 @@ AnnotInk::AnnotInk(PDFDoc *docA, Dict *dict, Object *obj) :
 }
 
 AnnotInk::~AnnotInk() {
-  if (inkList) {
-    for (int i = 0; i < inkListLength; ++i)
-      delete inkList[i];
-    gfree(inkList);
-  }
+  freeInkList();
 }
 
 void AnnotInk::initialize(PDFDoc *docA, Dict* dict) {
   Object obj1;
 
   if (dict->lookup("InkList", &obj1)->isArray()) {
-    Array *array = obj1.getArray();
-    inkListLength = array->getLength();
-    inkList = (AnnotPath **) gmallocn ((inkListLength), sizeof(AnnotPath *));
-    memset(inkList, 0, inkListLength * sizeof(AnnotPath *));
-    for (int i = 0; i < inkListLength; i++) {
-      Object obj2;
-      if (array->get(i, &obj2)->isArray())
-        inkList[i] = new AnnotPath(obj2.getArray());
-      obj2.free();
-    }
+    parseInkList(obj1.getArray());
   } else {
     inkListLength = 0;
     inkList = NULL;
@@ -4590,6 +5040,51 @@ void AnnotInk::initialize(PDFDoc *docA, Dict* dict) {
     ok = gFalse;
   }
   obj1.free();
+}
+
+void AnnotInk::writeInkList(AnnotPath **paths, int n_paths, Array *dest_array) {
+  Object obj1, obj2;
+  for (int i = 0; i < n_paths; ++i) {
+    AnnotPath *path = paths[i];
+    obj1.initArray (xref);
+    for (int j = 0; j < path->getCoordsLength(); ++j) {
+      obj1.arrayAdd (obj2.initReal (path->getX(j)));
+      obj1.arrayAdd (obj2.initReal (path->getY(j)));
+    }
+    dest_array->add (&obj1);
+  }
+}
+
+void AnnotInk::parseInkList(Array *array) {
+  inkListLength = array->getLength();
+  inkList = (AnnotPath **) gmallocn ((inkListLength), sizeof(AnnotPath *));
+  memset(inkList, 0, inkListLength * sizeof(AnnotPath *));
+  for (int i = 0; i < inkListLength; i++) {
+    Object obj2;
+    if (array->get(i, &obj2)->isArray())
+      inkList[i] = new AnnotPath(obj2.getArray());
+    obj2.free();
+  }
+}
+
+void AnnotInk::freeInkList() {
+  if (inkList) {
+    for (int i = 0; i < inkListLength; ++i)
+      delete inkList[i];
+    gfree(inkList);
+  }
+}
+
+void AnnotInk::setInkList(AnnotPath **paths, int n_paths) {
+  Object obj1;
+
+  freeInkList();
+
+  obj1.initArray (xref);
+  writeInkList(paths, n_paths, obj1.getArray());
+
+  parseInkList(obj1.getArray());
+  annotObj.dictSet ("InkList", &obj1);
 }
 
 //------------------------------------------------------------------------

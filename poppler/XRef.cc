@@ -15,12 +15,13 @@
 //
 // Copyright (C) 2005 Dan Sheridan <dan.sheridan@postman.org.uk>
 // Copyright (C) 2005 Brad Hards <bradh@frogmouth.net>
-// Copyright (C) 2006, 2008, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006, 2008, 2010, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2007-2008 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright (C) 2007 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009, 2010 Ilya Gorenbein <igorenbein@finjan.com>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2012 Thomas Freitag <Thomas.Freitag@kabelmail.de>
+// Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -261,7 +262,6 @@ void XRef::init() {
   entries = NULL;
   capacity = 0;
   size = 0;
-  last = -1;
   streamEnds = NULL;
   streamEndsLen = 0;
   objStrs = new PopplerCache(5);
@@ -545,9 +545,6 @@ GBool XRef::readXRefTable(Parser *parser, Guint *pos, std::vector<Guint> *follow
 	  entries[0] = entries[1];
 	  entries[1].offset = 0xffffffff;
 	}
-	if (i > last) {
-	  last = i;
-	}
       }
     }
   }
@@ -766,9 +763,6 @@ GBool XRef::readXRefStreamSection(Stream *xrefStr, int *w, int first, int n) {
       default:
 	return gFalse;
       }
-      if (i > last) {
-	last = i;
-      }
     }
   }
 
@@ -887,9 +881,6 @@ GBool XRef::constructXRef(GBool *wasReconstructed) {
 		    entries[num].offset = pos - start;
 		    entries[num].gen = gen;
 		    entries[num].type = xrefEntryUncompressed;
-		  if (num > last) {
-		    last = num;
-		  }
 		}
 	        }
 	      }
@@ -1230,6 +1221,20 @@ Ref XRef::addIndirectObject (Object* o) {
   r.num = entryIndexToUse;
   r.gen = e->gen;
   return r;
+}
+
+void XRef::removeIndirectObject(Ref r) {
+  if (r.num < 0 || r.num >= size) {
+    error(errInternal, -1,"XRef::removeIndirectObject on unknown ref: {0:d}, {1:d}\n", r.num, r.gen);
+    return;
+  }
+  XRefEntry *e = getEntry(r.num);
+  if (e->type == xrefEntryFree)
+    return;
+  e->obj.free();
+  e->type = xrefEntryFree;
+  e->gen++;
+  e->updated = true;
 }
 
 void XRef::writeToFile(OutStream* outStr, GBool writeAllEntries) {

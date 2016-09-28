@@ -17,7 +17,7 @@
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2006-2008 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2007 Brad Hards <bradh@kde.org>
-// Copyright (C) 2009-2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Till Kamppeter <till.kamppeter@gmail.com>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009, 2011 William Bader <williambader@hotmail.com>
@@ -98,6 +98,7 @@ public:
 	      GBool duplexA = gTrue,
 	      int imgLLXA = 0, int imgLLYA = 0,
 	      int imgURXA = 0, int imgURYA = 0,
+	      GBool forceRasterizeA = gFalse,
 	      GBool manualCtrlA = gFalse,
 	      PSOutCustomCodeCbk customCodeCbkA = NULL,
 	      void *customCodeCbkDataA = NULL);
@@ -111,6 +112,7 @@ public:
 	      GBool duplexA = gTrue,
 	      int imgLLXA = 0, int imgLLYA = 0,
 	      int imgURXA = 0, int imgURYA = 0,
+	      GBool forceRasterizeA = gFalse,
 	      GBool manualCtrlA = gFalse,
 	      PSOutCustomCodeCbk customCodeCbkA = NULL,
 	      void *customCodeCbkDataA = NULL);
@@ -203,6 +205,7 @@ public:
   virtual void updateStrokeColor(GfxState *state);
   virtual void updateFillOverprint(GfxState *state);
   virtual void updateStrokeOverprint(GfxState *state);
+  virtual void updateOverprintMode(GfxState *state);
   virtual void updateTransfer(GfxState *state);
 
   //----- update text state
@@ -473,6 +476,7 @@ private:
   GBool t3FillColorOnly;	// operators should only use the fill color
   GBool t3Cacheable;		// cleared if char is not cacheable
   GBool t3NeedsRestore;		// set if a 'q' operator was issued
+  GBool forceRasterize;		// forces the page to be rasterized into a image before printing
   GBool displayText;		// displayText
 
 #if OPI_SUPPORT

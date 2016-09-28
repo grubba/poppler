@@ -18,7 +18,7 @@
 // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
 // Copyright (C) 2006-2011 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2008, 2009, 2011 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2008, 2009, 2011, 2012 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
 // Copyright (C) 2010, 2011 Thomas Freitag <Thomas.Freitag@alfa.de>
 //
@@ -108,7 +108,7 @@ public:
   // Does this device use functionShadedFill(), axialShadedFill(), and
   // radialShadedFill()?  If this returns false, these shaded fills
   // will be reduced to a series of other drawing operations.
-#if CAIRO_VERSION == CAIRO_VERSION_ENCODE(1, 11, 2)
+#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
   virtual GBool useShadedFills(int type) { return type <= 7; }
 #else
   virtual GBool useShadedFills(int type) { return type < 4; }
@@ -168,7 +168,7 @@ public:
   virtual GBool axialShadedSupportExtend(GfxState *state, GfxAxialShading *shading);
   virtual GBool radialShadedFill(GfxState *state, GfxRadialShading *shading, double sMin, double sMax);
   virtual GBool radialShadedSupportExtend(GfxState *state, GfxRadialShading *shading);
-#if CAIRO_VERSION == CAIRO_VERSION_ENCODE(1, 11, 2)
+#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
   virtual GBool gouraudTriangleShadedFill(GfxState *state, GfxGouraudTriangleShading *shading);
   virtual GBool patchMeshShadedFill(GfxState *state, GfxPatchMeshShading *shading);
 #endif

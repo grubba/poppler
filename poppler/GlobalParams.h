@@ -20,9 +20,11 @@
 // Copyright (C) 2007 Krzysztof Kowalczyk <kkowalczyk@gmail.com>
 // Copyright (C) 2009 Jonathan Kew <jonathan_kew@sil.org>
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
-// Copyright (C) 2009, 2011 William Bader <williambader@hotmail.com>
+// Copyright (C) 2009, 2011, 2012 William Bader <williambader@hotmail.com>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2011 Pino Toscano <pino@kde.org>
+// Copyright (C) 2012 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -145,8 +147,10 @@ public:
   FILE *findCMapFile(GooString *collection, GooString *cMapName);
   FILE *findToUnicodeFile(GooString *name);
   GooString *findFontFile(GooString *fontName);
+  GooString *findBase14FontFile(GooString *base14Name, GfxFont *font);
   GooString *findSystemFontFile(GfxFont *font, SysFontType *type,
-			      int *fontNum, GooString *substituteFontName = NULL);
+			      int *fontNum, GooString *substituteFontName = NULL, 
+		              GooString *base14Name = NULL);
   GooString *findCCFontFile(GooString *collection);
   GBool getPSExpandSmaller();
   GBool getPSShrinkLarger();
@@ -168,13 +172,11 @@ public:
   GBool getPSUncompressPreloadedImages();
   double getPSRasterResolution();
   GBool getPSRasterMono();
-  GBool getPSAlwaysRasterize();
   GooString *getTextEncodingName();
   EndOfLineKind getTextEOL();
   GBool getTextPageBreaks();
   GBool getTextKeepTinyChars();
   GBool getEnableFreeType();
-  GBool getDisableFreeTypeHinting();
   GBool getAntialias();
   GBool getVectorAntialias();
   GBool getAntialiasPrinting();
@@ -216,7 +218,6 @@ public:
   void setPSEmbedTrueType(GBool embed);
   void setPSEmbedCIDPostScript(GBool embed);
   void setPSEmbedCIDTrueType(GBool embed);
-  void setPSSubstFonts(GBool substFonts);
   void setPSFontPassthrough(GBool passthrough);
   void setPSPreload(GBool preload);
   void setPSOPI(GBool opi);
@@ -225,7 +226,6 @@ public:
   void setPSUncompressPreloadedImages(GBool uncomp);
   void setPSRasterResolution(double res);
   void setPSRasterMono(GBool mono);
-  void setPSAlwaysRasterize(GBool always);
   void setTextEncoding(char *encodingName);
   GBool setTextEOL(char *s);
   void setTextPageBreaks(GBool pageBreaks);
@@ -288,8 +288,9 @@ private:
   GooHash *cMapDirs;		// list of CMap dirs, indexed by collection
 				//   name [GooList[GooString]]
   GooList *toUnicodeDirs;		// list of ToUnicode CMap dirs [GooString]
-#ifdef _WIN32
   GBool baseFontsInitialized;
+#ifdef _WIN32
+  GooHash *substFiles;	// windows font substitutes (for CID fonts)
 #endif
   GooHash *fontFiles;		// font files: font name mapped to path
 				//   [GString]
@@ -315,7 +316,6 @@ private:
   GBool psEmbedTrueType;	// embed TrueType fonts?
   GBool psEmbedCIDPostScript;	// embed CID PostScript fonts?
   GBool psEmbedCIDTrueType;	// embed CID TrueType fonts?
-  GBool psSubstFonts;		// substitute missing fonts?
   GBool psFontPassthrough;	// pass all fonts through as-is?
   GBool psPreload;		// preload PostScript images and forms into
 				//   memory
@@ -327,7 +327,6 @@ private:
   GBool psRasterMono;		// true to do PostScript rasterization
 				//   in monochrome (gray); false to do it
 				//   in color (RGB/CMYK)
-  GBool psAlwaysRasterize;	// force PostScript rasterization
   GooString *textEncoding;	// encoding (unicodeMap) to use for text
 				//   output
   EndOfLineKind textEOL;	// type of EOL marker to use for text

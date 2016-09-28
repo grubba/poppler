@@ -6,10 +6,11 @@
  * Copyright (C) 2006-2011, Pino Toscano <pino@kde.org>
  * Copyright (C) 2008 Carlos Garcia Campos <carlosgc@gnome.org>
  * Copyright (C) 2009 Shawn Rutledge <shawn.t.rutledge@gmail.com>
- * Copyright (C) 2010, Guillermo Amaral <gamaral@kdab.com>
+ * Copyright (C) 2010, 2012, Guillermo Amaral <gamaral@kdab.com>
  * Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
  * Copyright (C) 2010 Matthias Fauconneau <matthias.fauconneau@gmail.com>
  * Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+ * Copyright (C) 2012 Tobias Koenig <tokoe@kdab.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -44,6 +45,7 @@
 #include <Link.h>
 #include <FileSpec.h>
 #include <ArthurOutputDev.h>
+#include <Rendition.h>
 #if defined(HAVE_SPLASH)
 #include <SplashOutputDev.h>
 #include <splash/SplashBitmap.h>
@@ -56,6 +58,7 @@
 #include "poppler-annotation-helper.h"
 #include "poppler-annotation-private.h"
 #include "poppler-form.h"
+#include "poppler-media.h"
 
 namespace Poppler {
 
@@ -171,15 +174,43 @@ Link* PageData::convertLinkActionToLink(::LinkAction * a, DocumentData *parentDo
     break;
 
     case actionMovie:
-/*      TODO this (Movie link)
-          m_type = Movie;
-          LinkMovie * m = (LinkMovie *) a;
-          // copy Movie parameters (2 IDs and a const char *)
-          Ref * r = m->getAnnotRef();
-          m_refNum = r->num;
-          m_refGen = r->gen;
-          copyString( m_uri, m->getTitle()->getCString() );
-*/  break;
+    {
+      ::LinkMovie *lm = (::LinkMovie *)a;
+
+      const QString title = ( lm->hasAnnotTitle() ? UnicodeParsedString( lm->getAnnotTitle() ) : QString() );
+
+      Ref reference;
+      reference.num = reference.gen = -1;
+      if ( lm->hasAnnotRef() )
+        reference = *lm->getAnnotRef();
+
+      LinkMovie::Operation operation = LinkMovie::Play;
+      switch ( lm->getOperation() )
+      {
+        case ::LinkMovie::operationTypePlay:
+          operation = LinkMovie::Play;
+          break;
+        case ::LinkMovie::operationTypePause:
+          operation = LinkMovie::Pause;
+          break;
+        case ::LinkMovie::operationTypeResume:
+          operation = LinkMovie::Resume;
+          break;
+        case ::LinkMovie::operationTypeStop:
+          operation = LinkMovie::Stop;
+          break;
+      };
+
+      popplerLink = new LinkMovie( linkArea, operation, title, reference );
+    }
+    break;
+
+    case actionRendition:
+    {
+      ::LinkRendition *lrn = (::LinkRendition *)a;
+      popplerLink = new LinkRendition( linkArea, lrn->getMedia() );
+    }
+    break;
 
     case actionUnknown:
     break;
@@ -975,6 +1006,26 @@ QList<Annotation*> Page::annotations() const
 
                 break;
             }
+            case Annot::typeScreen:
+            {
+                AnnotScreen * screenann = static_cast< AnnotScreen * >( ann );
+
+                if (!screenann->getAction())
+                  continue;
+
+                ScreenAnnotation * s = new ScreenAnnotation();
+                annotation = s;
+
+                // -> screen
+                s->setAction( static_cast<Poppler::LinkRendition *>(m_page->convertLinkActionToLink( screenann->getAction(), QRectF() ) ) );
+
+                // -> screenTitle
+                GooString * screentitle = screenann->getTitle();
+                if ( screentitle )
+                    s->setScreenTitle( UnicodeParsedString( screentitle ) );
+
+                break;
+            }
             // special case for ignoring unknwon annotations
             case Annot::typeUnknown:
                 continue;
@@ -1029,6 +1080,8 @@ QList<Annotation*> Page::annotations() const
            //annotation->rUnscaledHeight = (r[3] > r[1]) ? r[3] - r[1] : r[1] - r[3];
         }
         annotation->setBoundary( boundaryRect );
+        // -> PDF object reference
+        annotation->d_ptr->pdfObjectReference = ann->getRef();
         // -> contents
         annotation->setContents( UnicodeParsedString( ann->getContents() ) );
         // -> uniqueName

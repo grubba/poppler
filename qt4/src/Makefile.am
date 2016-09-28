@@ -1,7 +1,6 @@
 INCLUDES =					\
 	-I$(top_srcdir)				\
 	-I$(top_srcdir)/poppler			\
-	-I$(top_srcdir)/qt			\
 	$(FONTCONFIG_CFLAGS)			\
 	$(POPPLER_QT4_CFLAGS)
 
@@ -16,6 +15,7 @@ poppler_include_HEADERS =			\
 	poppler-form.h				\
 	poppler-optcontent.h			\
 	poppler-export.h			\
+	poppler-media.h				\
 	poppler-page-transition.h
 
 lib_LTLIBRARIES = libpoppler-qt4.la
@@ -40,6 +40,7 @@ libpoppler_qt4_la_SOURCES =			\
 	poppler-qiodeviceoutstream.cc		\
 	poppler-private.cc			\
 	poppler-movie.cc			\
+	poppler-media.cc			\
 	poppler-annotation-helper.h		\
 	poppler-page-private.h			\
 	poppler-link-extractor-private.h	\
@@ -61,7 +62,7 @@ libpoppler_qt4_la_LIBADD = 			\
 	$(FONTCONFIG_LIBS)				\
 	$(POPPLER_QT4_LIBS)
 
-libpoppler_qt4_la_LDFLAGS = -version-info 10:0:7 @create_shared_lib@ @auto_import_flags@
+libpoppler_qt4_la_LDFLAGS = -version-info 12:0:9 @create_shared_lib@ @auto_import_flags@
 
 # This rule lets GNU make create any *.moc from the equivalent *.h
 .h.moc:

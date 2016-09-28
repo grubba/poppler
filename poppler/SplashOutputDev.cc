@@ -15,12 +15,12 @@
 //
 // Copyright (C) 2005 Takashi Iwai <tiwai@suse.de>
 // Copyright (C) 2006 Stefan Schweizer <genstef@gentoo.org>
-// Copyright (C) 2006-2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006-2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2006 Krzysztof Kowalczyk <kkowalczyk@gmail.com>
 // Copyright (C) 2006 Scott Turner <scotty1024@mac.com>
 // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
-// Copyright (C) 2009-2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 William Bader <williambader@hotmail.com>
 // Copyright (C) 2010 Patrick Spendrin <ps_ml@gmx.de>
@@ -53,7 +53,6 @@
 #include "Page.h"
 #include "PDFDoc.h"
 #include "Link.h"
-#include "CharCodeToUnicode.h"
 #include "FontEncodingTables.h"
 #include "fofi/FoFiTrueType.h"
 #include "splash/SplashBitmap.h"
@@ -1162,7 +1161,6 @@ SplashOutputDev::SplashOutputDev(SplashColorMode colorModeA,
   vectorAntialias = allowAntialias &&
 		      globalParams->getVectorAntialias() &&
 		      colorMode != splashModeMono1;
-  enableAutoHinting = !globalParams->getDisableFreeTypeHinting();
   enableFreeTypeHinting = gFalse;
   enableSlightHinting = gFalse;
   setupScreenParams(72.0, 72.0);
@@ -1277,7 +1275,6 @@ void SplashOutputDev::startDoc(PDFDoc *docA) {
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
 				    globalParams->getEnableFreeType(),
-				    enableAutoHinting,
 				    enableFreeTypeHinting,
 				    enableSlightHinting,
 #endif
@@ -1551,7 +1548,6 @@ SplashPattern *SplashOutputDev::getColor(GfxCMYK *cmyk) {
   color[1] = colToByte(cmyk->m);
   color[2] = colToByte(cmyk->y);
   color[3] = colToByte(cmyk->k);
-  // return createOverprintPattern(colorSpace, color, gFalse);
   return new SplashSolidColor(color);
 }
 #endif
@@ -1559,17 +1555,26 @@ SplashPattern *SplashOutputDev::getColor(GfxCMYK *cmyk) {
 void SplashOutputDev::setOverprintMask(GfxColorSpace *colorSpace,
 				       GBool overprintFlag,
 				       int overprintMode,
-				       GfxColor *singleColor) {
+				       GfxColor *singleColor,
+				       GBool grayIndexed) {
 #if SPLASH_CMYK
   Guint mask;
   GfxCMYK cmyk;
+  GBool additive = gFalse;
+  int i;
 
+  if (colorSpace->getMode() == csIndexed) {
+    setOverprintMask(((GfxIndexedColorSpace *)colorSpace)->getBase(),
+		     overprintFlag,
+		     overprintMode,
+		     singleColor,
+		     grayIndexed);
+		return;
+	}
   if (overprintFlag && globalParams->getOverprintPreview()) {
     mask = colorSpace->getOverprintMask();
     if (singleColor && overprintMode &&
-	(colorSpace->getMode() == csDeviceCMYK ||
-	 (colorSpace->getMode() == csICCBased &&
-	  colorSpace->getNComps() == 4))) {
+	colorSpace->getMode() == csDeviceCMYK) {
       colorSpace->getCMYK(singleColor, &cmyk);
       if (cmyk.c == 0) {
 	mask &= ~1;
@@ -1584,10 +1589,30 @@ void SplashOutputDev::setOverprintMask(GfxColorSpace *colorSpace,
 	mask &= ~8;
       }
     }
+    if (grayIndexed) {
+      mask &= ~7;
+    } else if (colorSpace->getMode() == csSeparation) {
+      GfxSeparationColorSpace *deviceSep = (GfxSeparationColorSpace *)colorSpace;
+      additive = deviceSep->getName()->cmp("All") != 0 && mask == 0x0f && !deviceSep->isNonMarking();
+    } else if (colorSpace->getMode() == csDeviceN) {
+      GfxDeviceNColorSpace *deviceNCS = (GfxDeviceNColorSpace *)colorSpace;
+      additive = mask == 0x0f && !deviceNCS->isNonMarking();
+      for (i = 0; i < deviceNCS->getNComps() && additive; i++) {
+        if (deviceNCS->getColorantName(i)->cmp("Cyan") == 0) {
+          additive = gFalse;
+        } else if (deviceNCS->getColorantName(i)->cmp("Magenta") == 0) {
+          additive = gFalse;
+        } else if (deviceNCS->getColorantName(i)->cmp("Yellow") == 0) {
+          additive = gFalse;
+        } else if (deviceNCS->getColorantName(i)->cmp("Black") == 0) {
+          additive = gFalse;
+        }
+      }
+    }
   } else {
     mask = 0xffffffff;
   }
-  splash->setOverprintMask(mask);
+  splash->setOverprintMask(mask, additive);
 #endif
 }
 
@@ -2952,12 +2977,10 @@ void SplashOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
   GfxRGB rgb;
 #if SPLASH_CMYK
   GfxCMYK cmyk;
+  GBool grayIndexed = gFalse;
 #endif
   Guchar pix;
   int n, i;
-
-  setOverprintMask(colorMap->getColorSpace(), state->getFillOverprint(),
-		   state->getOverprintMode(), NULL);
 
   ctm = state->getCTM();
   for (i = 0; i < 6; ++i) {
@@ -3033,16 +3056,18 @@ void SplashOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
 	imgData.lookup[4*i+2] = colToByte(cmyk.y);
 	imgData.lookup[4*i+3] = colToByte(cmyk.k);
       }
-#ifndef USE_CMS
-	  if (colorMap->getColorSpace()->getMode() == csIndexed) {
-		  if (((GfxIndexedColorSpace *) colorMap->getColorSpace())->getBase()->getMode() == csICCBased)
-			  grayIndexed = gFalse;
-	  }
-#endif
       break;
 #endif
     }
   }
+
+#if SPLASH_CMYK
+  setOverprintMask(colorMap->getColorSpace(), state->getFillOverprint(),
+		   state->getOverprintMode(), NULL, grayIndexed);
+#else		   
+  setOverprintMask(colorMap->getColorSpace(), state->getFillOverprint(),
+		   state->getOverprintMode(), NULL);
+#endif		   
 
   if (colorMode == splashModeMono1) {
     srcMode = splashModeMono8;
@@ -3650,7 +3675,7 @@ void SplashOutputDev::paintTransparencyGroup(GfxState *state, double *bbox) {
   // paint the transparency group onto the parent bitmap
   // - the clip path was set in the parent's state)
   if (tx < bitmap->getWidth() && ty < bitmap->getHeight()) {
-    splash->setOverprintMask(0xffffffff);
+    splash->setOverprintMask(0xffffffff, gFalse);
     splash->composite(tBitmap, 0, 0, tx, ty,
 		      tBitmap->getWidth(), tBitmap->getHeight(),
 		      gFalse, !isolated);
@@ -3837,7 +3862,6 @@ void SplashOutputDev::setVectorAntialias(GBool vaa) {
 
 void SplashOutputDev::setFreeTypeHinting(GBool enable, GBool enableSlightHintingA)
 {
-  enableAutoHinting = gFalse;
   enableFreeTypeHinting = enable;
   enableSlightHinting = enableSlightHintingA;
 }
@@ -4089,6 +4113,8 @@ GBool SplashOutputDev::univariateShadedFill(GfxState *state, SplashUnivariatePat
   state->closePath();
   path = convertPath(state, state->getPath(), gTrue);
 
+  setOverprintMask(pattern->getShading()->getColorSpace(), state->getFillOverprint(),
+		   state->getOverprintMode(), state->getFillColor());
   retVal = (splash->shadedFill(path, pattern->getShading()->getHasBBox(), pattern) == splashOk);
   state->clearPath();
   setVectorAntialias(vaa);

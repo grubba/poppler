@@ -33,12 +33,16 @@ class UnknownBackendError(Exception):
 
 class Backend:
 
-    def __init__(self, name):
+    def __init__(self, name, diff_ext = None):
         self._name = name
+        self._diff_ext = diff_ext
         self._utilsdir = Config().utils_dir
 
     def get_name(self):
         return self._name
+
+    def get_diff_ext(self):
+        return self._diff_ext
 
     def __should_have_checksum(self, entry):
         if not entry.startswith(self._name):
@@ -132,6 +136,21 @@ class Backend:
 
         return retval
 
+    def get_ref_names(self, refs_path):
+        retval = []
+        md5_path = os.path.join(refs_path, self._name)
+        md5_file = open(md5_path + '.md5', 'r')
+        for line in md5_file.readlines():
+            md5sum, ref_path = line.strip('\n').split(' ', 1)
+            basename = os.path.basename(ref_path)
+            if not self.__should_have_checksum(basename):
+                continue
+
+            retval.append(basename)
+        md5_file.close()
+
+        return retval
+
     def has_md5(self, test_path):
         return os.path.exists(os.path.join(test_path, self._name + '.md5'))
 
@@ -152,8 +171,19 @@ class Backend:
     def has_results(self, test_path):
         return self.has_md5(test_path) or self.is_crashed(test_path) or self.is_failed(test_path)
 
+    def get_stderr(self, test_path):
+        return os.path.join(test_path, self._name + '.stderr')
+
     def has_stderr(self, test_path):
-        return os.path.exists(os.path.join(test_path, self._name + '.stderr'))
+        return os.path.exists(self.get_stderr(test_path))
+
+    def has_diff(self, test_result):
+        if not self._diff_ext:
+            return False
+        basename = os.path.basename(test_result)
+        if not basename.startswith(self._name):
+            return False
+        return os.path.exists(test_result + self._diff_ext)
 
     def __create_stderr_file(self, stderr, out_path):
         if not stderr:
@@ -216,7 +246,7 @@ class Backend:
         ref = Image.open(ref_path)
         result = Image.open(result_path)
         diff = ImageChops.difference(ref, result)
-        diff.save(result_path + '.diff', 'png')
+        diff.save(result_path + '.diff.png', 'png')
 
     def _create_diff(self, ref_path, result_path):
         raise NotImplementedError

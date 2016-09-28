@@ -16,6 +16,7 @@
 // Copyright (C) 2006 Dominic Lachowicz <cinamod@hotmail.com>
 // Copyright (C) 2007-2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+// Copyright (C) 2012 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -181,14 +182,15 @@ int main(int argc, char *argv[]) {
       }
     } else {
       // print the font info
-      printf("name                                 type              emb sub uni object ID\n");
-      printf("------------------------------------ ----------------- --- --- --- ---------\n");
+      printf("name                                 type              encoding         emb sub uni object ID\n");
+      printf("------------------------------------ ----------------- ---------------- --- --- --- ---------\n");
       if (fonts) {
         for (int i = 0; i < fonts->getLength(); ++i) {
           FontInfo *font = (FontInfo *)fonts->get(i);
-          printf("%-36s %-17s %-3s %-3s %-3s",
+          printf("%-36s %-17s %-16s %-3s %-3s %-3s",
                  font->getName() ? font->getName()->getCString() : "[none]",
                  fontTypeNames[font->getType()],
+                 font->getEncoding()->getCString(),
                  font->getEmbedded() ? "yes" : "no",
                  font->getSubset() ? "yes" : "no",
                  font->getToUnicode() ? "yes" : "no");

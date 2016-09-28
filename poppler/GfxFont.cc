@@ -13,7 +13,7 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2005, 2006, 2008-2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005, 2006, 2008-2010, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2006 Takashi Iwai <tiwai@suse.de>
 // Copyright (C) 2007 Julien Rebetez <julienr@svn.gnome.org>
@@ -26,7 +26,10 @@
 // Copyright (C) 2009 Peter Kerzum <kerzum@yandex-team.ru>
 // Copyright (C) 2009, 2010 David Benjamin <davidben@mit.edu>
 // Copyright (C) 2011 Axel Strübing <axel.struebing@freenet.de>
-// Copyright (C) 2011 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2011, 2012 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2012 Yi Yang <ahyangyi@gmail.com>
+// Copyright (C) 2012 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+// Copyright (C) 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -55,6 +58,7 @@
 #include "CharCodeToUnicode.h"
 #include "FontEncodingTables.h"
 #include "BuiltinFontTables.h"
+#include "UnicodeTypeTable.h"
 #include <fofi/FoFiIdentifier.h>
 #include <fofi/FoFiType1.h>
 #include <fofi/FoFiType1C.h>
@@ -238,6 +242,7 @@ GfxFont::GfxFont(const char *tagA, Ref idA, GooString *nameA,
   stretch = StretchNotDefined;
   weight = WeightNotDefined;
   refCnt = 1;
+  encodingName = new GooString("");
   hasToUnicode = gFalse;
 }
 
@@ -249,6 +254,9 @@ GfxFont::~GfxFont() {
   }
   if (embFontName) {
     delete embFontName;
+  }
+  if (encodingName) {
+    delete encodingName;
   }
 }
 
@@ -686,7 +694,7 @@ GfxFontLoc *GfxFont::locateFont(XRef *xref, GBool ps) {
   //----- external font file for Base-14 font
   if (!ps && !isCIDFont() && ((Gfx8BitFont *)this)->base14) {
     base14Name = new GooString(((Gfx8BitFont *)this)->base14->base14Name);
-    if ((path = globalParams->findFontFile(base14Name))) {
+    if ((path = globalParams->findBase14FontFile(base14Name, this))) {
       if ((fontLoc = getExternalFont(path, gFalse))) {
 	delete base14Name;
 	return fontLoc;
@@ -1134,6 +1142,22 @@ Gfx8BitFont::Gfx8BitFont(XRef *xref, const char *tagA, Ref idA, GooString *nameA
     }
   }
 
+  if (baseEncFromFontFile) {
+    encodingName->Set("Builtin");
+  } else if (baseEnc == winAnsiEncoding) {
+    encodingName->Set("WinAnsi");
+  } else if (baseEnc == macRomanEncoding) {
+    encodingName->Set("MacRoman");
+  } else if (baseEnc == macExpertEncoding) {
+    encodingName->Set("MacExpert");
+  } else if (baseEnc == symbolEncoding) {
+    encodingName->Set("Symbol");
+  } else if (baseEnc == zapfDingbatsEncoding) {
+    encodingName->Set("ZapfDingbats");
+  } else {
+    encodingName->Set("Standard");
+  }
+
   // copy the base encoding
   for (i = 0; i < 256; ++i) {
     enc[i] = (char *)baseEnc[i];
@@ -1159,6 +1183,7 @@ Gfx8BitFont::Gfx8BitFont(XRef *xref, const char *tagA, Ref idA, GooString *nameA
   if (obj1.isDict()) {
     obj1.dictLookup("Differences", &obj2);
     if (obj2.isArray()) {
+      encodingName->Set("Custom");
       hasEncoding = gTrue;
       code = 0;
       for (i = 0; i < obj2.arrayGetLength(); ++i) {
@@ -1227,6 +1252,17 @@ Gfx8BitFont::Gfx8BitFont(XRef *xref, const char *tagA, Ref idA, GooString *nameA
 
   // construct the char code -> Unicode mapping object
   ctu = CharCodeToUnicode::make8BitToUnicode(toUnicode);
+
+  // pass 1a: Expand ligatures in the Alphabetic Presentation Form
+  // block (eg "fi", "ffi") to normal form
+  for (code = 0; code < 256; ++code) {
+    if (unicodeIsAlphabeticPresentationForm(toUnicode[code])) {
+      Unicode *normalized = unicodeNormalizeNFKC(&toUnicode[code], 1, &len, NULL);
+      if (len > 1)
+        ctu->setMapping((CharCode)code, normalized, len);
+      gfree(normalized);
+    }
+  }
 
   // pass 2: try to fill in the missing chars, looking for ligatures, numeric
   // references and variants
@@ -1773,11 +1809,12 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, GooString *nameA,
   if (!(ctu = readToUnicodeCMap(fontDict, 16, NULL))) {
     ctuUsesCharCode = gFalse;
 
-    // the "Adobe-Identity" and "Adobe-UCS" collections don't have
-    // cidToUnicode files
-    if (collection->cmp("Adobe-Identity") &&
-	collection->cmp("Adobe-UCS")) {
-
+    // use an identity mapping for the "Adobe-Identity" and
+    // "Adobe-UCS" collections
+    if (!collection->cmp("Adobe-Identity") ||
+	!collection->cmp("Adobe-UCS")) {
+      ctu = CharCodeToUnicode::makeIdentityMapping();
+    } else {
       // look for a user-supplied .cidToUnicode file
       if (!(ctu = globalParams->getCIDToUnicode(collection))) {
 	// I'm not completely sure that this is the best thing to do
@@ -1833,6 +1870,11 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, GooString *nameA,
     goto err2;
   }
   obj1.free();
+  if (cMap->getCMapName()) {
+    encodingName->Set(cMap->getCMapName()->getCString());
+  } else {
+    encodingName->Set("Custom");
+  }
 
   // CIDToGIDMap (for embedded TrueType fonts)
   if (type == fontCIDType2 || type == fontCIDType2OT) {
@@ -2192,36 +2234,37 @@ int *GfxCIDFont::getCodeToGIDMap(FoFiTrueType *ff, int *mapsizep) {
   static struct CMapListEntry {
     const char *collection;
     const char *scriptTag;
+    const char *languageTag;
     const char *toUnicodeMap;
     const char **CMaps;
   } CMapList[] = {
     {
       "Adobe-CNS1",
-      "kana",
+      "hani", "CHN ",
       "Adobe-CNS1-UCS2",
       adobe_cns1_cmaps,
     },
     {
       "Adobe-GB1",
-      "kana",
+      "hani", "CHN ",
       "Adobe-GB1-UCS2",
       adobe_gb1_cmaps,
     },
     {
       "Adobe-Japan1",
-      "kana",
+      "kana", "JAN ",
       "Adobe-Japan1-UCS2",
       adobe_japan1_cmaps,
     },
     {
       "Adobe-Japan2",
-      "kana",
+      "kana", "JAN ",
       "Adobe-Japan2-UCS2",
       adobe_japan2_cmaps,
     },
     {
       "Adobe-Korea1",
-      "kana",
+      "hang", "KOR ",
       "Adobe-Korea1-UCS2",
       adobe_korea1_cmaps,
     },
@@ -2319,7 +2362,7 @@ int *GfxCIDFont::getCodeToGIDMap(FoFiTrueType *ff, int *mapsizep) {
 	cMap->decRefCnt();
       }
     }
-    ff->setupGSUB(lp->scriptTag);
+    ff->setupGSUB(lp->scriptTag, lp->languageTag);
   } else {
     error(errSyntaxError, -1, "Unknown character collection {0:t}\n",
       getCollection());

@@ -34,6 +34,7 @@ typedef struct {
 	GtkWidget            *darea;
 	GtkWidget            *fg_color_button;
 	GtkWidget            *bg_color_button;
+	GtkWidget            *copy_button;
 
 	PopplerPage          *page;
 	cairo_surface_t      *surface;
@@ -76,6 +77,7 @@ pgd_selections_clear_selections (PgdSelectionsDemo *demo)
 		cairo_region_destroy (demo->selected_region);
 		demo->selected_region = NULL;
 	}
+	gtk_widget_set_sensitive(demo->copy_button, FALSE);
 }
 
 static void
@@ -125,7 +127,7 @@ pgd_selections_update_selection_region (PgdSelectionsDemo *demo)
 }
 
 static void
-pgd_selections_update_seleted_text (PgdSelectionsDemo *demo)
+pgd_selections_update_selected_text (PgdSelectionsDemo *demo)
 {
 	GList *region;
 	gchar *text;
@@ -146,6 +148,7 @@ pgd_selections_update_seleted_text (PgdSelectionsDemo *demo)
 	if (text) {
 		demo->selected_text = g_utf8_normalize (text, -1, G_NORMALIZE_NFKC);
 		g_free (text);
+		gtk_widget_set_sensitive(demo->copy_button, TRUE);
 	}
 }
 
@@ -316,7 +319,7 @@ pgd_selections_drawing_area_button_release (GtkWidget         *area,
 		return FALSE;
 
 	if (demo->start.x != -1)
-		pgd_selections_update_seleted_text (demo);
+		pgd_selections_update_selected_text (demo);
 
 	demo->start.x = -1;
 
@@ -427,6 +430,15 @@ pgd_selections_render (GtkButton         *button,
 
 	gtk_widget_set_size_request (demo->darea, page_width, page_height);
 	gtk_widget_queue_draw (demo->darea);
+}
+
+static void
+pgd_selections_copy (GtkButton         *button,
+		     PgdSelectionsDemo *demo)
+{
+	GtkClipboard *clipboard = gtk_clipboard_get_for_display(gdk_display_get_default(),
+								GDK_SELECTION_CLIPBOARD);
+	gtk_clipboard_set_text (clipboard, demo->selected_text, -1);
 }
 
 static void
@@ -598,6 +610,14 @@ pgd_selections_properties_selector_create (PgdSelectionsDemo *demo)
 
 	gtk_box_pack_start (GTK_BOX (hbox), color_hbox, FALSE, TRUE, 0);
 	gtk_widget_show (color_hbox);
+
+	demo->copy_button = gtk_button_new_with_label ("Copy");
+	g_signal_connect (G_OBJECT (demo->copy_button), "clicked",
+			  G_CALLBACK (pgd_selections_copy),
+			  (gpointer)demo);
+	gtk_box_pack_end (GTK_BOX (hbox), demo->copy_button, FALSE, TRUE, 0);
+	gtk_widget_set_sensitive(demo->copy_button, FALSE);
+	gtk_widget_show (demo->copy_button);
 
 	button = gtk_button_new_with_label ("Render");
 	g_signal_connect (G_OBJECT (button), "clicked",

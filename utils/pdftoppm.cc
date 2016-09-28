@@ -19,7 +19,7 @@
 // Copyright (C) 2009 Shen Liang <shenzhuxi@gmail.com>
 // Copyright (C) 2009 Stefan Thomas <thomas@eload24.com>
 // Copyright (C) 2009-2011 Albert Astals Cid <aacid@kde.org>
-// Copyright (C) 2010 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2010, 2012 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2010 Jonathan Liu <net147@gmail.com>
 // Copyright (C) 2010 William Bader <williambader@hotmail.com>
@@ -389,11 +389,15 @@ int main(int argc, char *argv[]) {
       resolution = (72.0 * scaleTo) / (pg_w > pg_h ? pg_w : pg_h);
       x_resolution = y_resolution = resolution;
     } else {
-      if (x_scaleTo != 0) {
+      if (x_scaleTo > 0) {
         x_resolution = (72.0 * x_scaleTo) / pg_w;
+        if (y_scaleTo == -1)
+          y_resolution = x_resolution;
       }
-      if (y_scaleTo != 0) {
+      if (y_scaleTo > 0) {
         y_resolution = (72.0 * y_scaleTo) / pg_h;
+        if (x_scaleTo == -1)
+          x_resolution = y_resolution;
       }
     }
     pg_w = pg_w * (x_resolution / 72.0);

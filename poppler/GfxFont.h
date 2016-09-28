@@ -20,7 +20,7 @@
 // Copyright (C) 2007 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2011 Axel Strübing <axel.struebing@freenet.de>
-// Copyright (C) 2011 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2011, 2012 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -260,6 +260,9 @@ public:
   // Does this font have a toUnicode map?
   GBool hasToUnicodeCMap() { return hasToUnicode; }
 
+  // Return the name of the encoding
+  GooString *getEncodingName() { return encodingName; }
+
 protected:
 
   virtual ~GfxFont();
@@ -288,6 +291,7 @@ protected:
   int refCnt;
   GBool ok;
   GBool hasToUnicode;
+  GooString *encodingName;
 };
 
 //------------------------------------------------------------------------

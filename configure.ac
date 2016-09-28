@@ -1,6 +1,6 @@
 m4_define([poppler_version_major],[0])
-m4_define([poppler_version_minor],[18])
-m4_define([poppler_version_micro],[0])
+m4_define([poppler_version_minor],[19])
+m4_define([poppler_version_micro],[1])
 m4_define([poppler_version],[poppler_version_major.poppler_version_minor.poppler_version_micro])
 
 AC_PREREQ(2.59)
@@ -148,37 +148,38 @@ then
 fi
 
 
-dnl Test for libopenjpeg
+dnl Test for libopenjpeg. Versions prior to 1.4 do not provide a pkgconfig file.
 AC_ARG_ENABLE(libopenjpeg,
 	      AC_HELP_STRING([--disable-libopenjpeg],
 	                     [Don't build against libopenjpeg.]),
               enable_libopenjpeg=$enableval,
               enable_libopenjpeg="try")
 if test x$enable_libopenjpeg = xyes; then
-  AC_CHECK_LIB([openjpeg], [opj_cio_open],,
-	       AC_MSG_ERROR("*** libopenjpeg library not found ***"))
-  AC_CHECK_HEADERS([openjpeg.h],,
-		   AC_MSG_ERROR("*** libopenjpeg headers not found ***"))
+  PKG_CHECK_MODULES(LIBOPENJPEG, libopenjpeg,
+  		    [],
+    		    [AC_CHECK_LIB([openjpeg], [opj_cio_open],
+  			LIBOPENJPEG_LIBS="-lopenjpeg",
+		        AC_MSG_ERROR("*** libopenjpeg library not found ***"))
+		     AC_CHECK_HEADERS([openjpeg.h],,
+		     	AC_MSG_ERROR("*** libopenjpeg headers not found ***"))])
 elif test x$enable_libopenjpeg = xtry; then
-  AC_CHECK_LIB([openjpeg], [opj_cio_open],
-               [enable_libopenjpeg="yes"],
-	       [enable_libopenjpeg="no"])
-  AC_CHECK_HEADERS([openjpeg.h],,
-		   [enable_libopenjpeg="no"])
+  PKG_CHECK_MODULES(LIBOPENJPEG, libopenjpeg,
+                    [enable_libopenjpeg="yes"],
+  		    [AC_CHECK_LIB([openjpeg], [opj_cio_open],
+		        [enable_libopenjpeg="yes"
+  			 LIBOPENJPEG_LIBS="-lopenjpeg"],
+	                [enable_libopenjpeg="no"])
+		     AC_CHECK_HEADERS([openjpeg.h],,
+		         [enable_libopenjpeg="no"])])
 fi
 
 if test x$enable_libopenjpeg = xyes; then
-  LIBOPENJPEG_LIBS="-lopenjpeg"
+  AC_SUBST(LIBOPENJPEG_CFLAGS)
   AC_SUBST(LIBOPENJPEG_LIBS)
   AC_DEFINE(ENABLE_LIBOPENJPEG)
-  AC_TRY_COMPILE([
-#include <openjpeg.h>
-], [
-  int foo = OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG;
-], have_openjpeg_flag="yes", am_cv_proto_iconv_arg1="no")
-  if test x$have_openjpeg_flag = xyes; then
-    AC_DEFINE(WITH_OPENJPEG_IGNORE_PCLR_CMAP_CDEF_FLAG, 1, [OpenJPEG with the OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG flag.])
-  fi
+  PKG_CHECK_EXISTS(libopenjpeg >= 1.5,
+      [AC_DEFINE(WITH_OPENJPEG_IGNORE_PCLR_CMAP_CDEF_FLAG, 1, [OpenJPEG with the OPJ_DPARAMETERS_IGNORE_PCLR_CMAP_CDEF_FLAG flag.])],
+      [])
 fi
 
 AM_CONDITIONAL(BUILD_LIBOPENJPEG, test x$enable_libopenjpeg = xyes)
@@ -523,13 +524,15 @@ AC_SUBST(POPPLER_QT4_LIBS)
 AC_SUBST(POPPLER_QT4_TEST_LIBS)
 
 if test x$enable_poppler_qt4 = xyes; then
+  AC_CHECK_TOOL(MOCQT4, moc)
   AC_MSG_CHECKING([for Qt4 moc])
-  MOCQT4=`which moc`
   mocversion=`$MOCQT4 -v 2>&1`
   mocversiongrep=`echo $mocversion | grep "Qt 4"`
   if test x"$mocversiongrep" != x"$mocversion"; then
+    AC_MSG_RESULT([no])
     # moc was not the qt4 one, try with moc-qt4
-    MOCQT4=`which moc-qt4`
+    AC_CHECK_TOOL(MOCQT4, moc-qt4)
+    AC_MSG_CHECKING([for Qt4 moc-qt4])
     mocversion=`$MOCQT4 -v 2>&1`
     mocversiongrep=`echo $mocversion | grep "Qt 4"`
     if test x"$mocversiongrep" != x"$mocversion"; then
@@ -599,15 +602,69 @@ AC_ARG_ENABLE(cms,
               enable_cms=$enableval,
               enable_cms="try")
 if test x$enable_cms = xyes; then
-  PKG_CHECK_MODULES(LCMS, lcms)
+  PKG_CHECK_MODULES(LCMS, lcms2, [lcms2=yes], [lcms2=no])
+  if test x$lcms2 = xno; then
+      PKG_CHECK_MODULES(LCMS, lcms)
+  fi
 elif test x$enable_cms = xtry; then
-  PKG_CHECK_MODULES(LCMS, lcms, [enable_cms=yes], [enable_cms=no])
+  PKG_CHECK_MODULES(LCMS, lcms2,[lcms2=yes],[lcms2=no])
+  if test x$lcms2 = xyes; then
+    enable_cms=yes
+  else
+      PKG_CHECK_MODULES(LCMS, lcms,[enable_cms=yes],[enable_cms=no])
+  fi
 fi
 
 if test "x$enable_cms" = "xyes"; then
   AC_DEFINE(USE_CMS, 1, [Defines if use cms])
+  if test "x$lcms2" != "xyes"; then
+    lcms1=yes;
+    AC_DEFINE(USE_LCMS1, 1, [Defines if use lcms1])
+  fi
 fi
 AM_CONDITIONAL(USE_CMS, test x$enable_cms = xyes)
+AM_CONDITIONAL(USE_LCMS1, test x$lcms1 = xyes)
+
+AC_ARG_WITH([testdatadir],
+   [AS_HELP_STRING([--testdatadir=/path/to/testdatadir],
+                   [Specify test data dir])],
+   [case $withval in
+       [[\\/]]* | ?:[[\\/]]* )  # Absolute name.
+          TESTDATADIR=$withval ;;
+       *) # Relative name.
+          TESTDATADIR=$ac_pwd/$withval ;;
+    esac
+   ],
+   [case $srcdir in
+       [[\\/]]* | ?:[[\\/]]* )  # Absolute name.
+          TESTDATADIR=$srcdir/../test ;;
+       *) # Relative name.
+          TESTDATADIR=$ac_pwd/$srcdir/../test ;;
+    esac
+   ]
+)
+AC_MSG_CHECKING([for test data in $TESTDATADIR])
+if test -d $TESTDATADIR && test -f $TESTDATADIR/test-poppler.c; then
+  AC_MSG_RESULT([yes])
+else
+  AC_MSG_RESULT([no])
+  AC_MSG_WARN([
+ No test data found in $TESTDATADIR.
+ You will not be able to run 'make check' successfully.
+
+ The test data is not included in the source packages
+ and is also not part of the main git repository. Instead,
+ you can checkout the test data from its own git
+ repository with:
+
+   git clone git://git.freedesktop.org/git/poppler/test
+
+ You should checkout the test data as a sibling of your
+ poppler source folder or specify the location of your
+ checkout with --testdatadir=/path/to/checkoutdir/test.
+])
+fi
+AC_SUBST(TESTDATADIR)
 
 if test "x$GCC" != xyes; then
   enable_compile_warnings=no
@@ -691,7 +748,15 @@ echo "  use zlib:           $enable_zlib"
 echo "  use libcurl:        $enable_libcurl"
 echo "  use libopenjpeg:    $enable_libopenjpeg"
 echo "  use cms:            $enable_cms"
+if test x$enable_cms = xyes;then
+    if test x$lcms1 = xyes;then
+        echo "      with lcms1"
+    else
+        echo "      with lcms2"
+    fi
+fi
 echo "  command line utils: $enable_utils"
+echo "  test data dir:      $TESTDATADIR"
 echo ""
 
 if test x$enable_splash_output = xno -a x$enable_cairo_output = xno; then

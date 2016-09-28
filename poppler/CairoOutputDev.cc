@@ -16,16 +16,17 @@
 //
 // Copyright (C) 2005-2008 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
-// Copyright (C) 2005, 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005, 2009, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
 // Copyright (C) 2006-2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2008 Carl Worth <cworth@cworth.org>
-// Copyright (C) 2008-2011 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2008-2012 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
 // Copyright (C) 2008, 2009 Chris Wilson <chris@chris-wilson.co.uk>
 // Copyright (C) 2008 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2009, 2010 David Benjamin <davidben@mit.edu>
 // Copyright (C) 2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2012 Patrick Pfeifer <p2000@mailinator.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -53,7 +54,6 @@
 #include "GfxFont.h"
 #include "Page.h"
 #include "Link.h"
-#include "CharCodeToUnicode.h"
 #include "FontEncodingTables.h"
 #include "PDFDocEncoding.h"
 #include <fofi/FoFiTrueType.h>
@@ -889,7 +889,7 @@ GBool CairoOutputDev::radialShadedSupportExtend(GfxState *state, GfxRadialShadin
   return (shading->getExtend0() == shading->getExtend1());
 }
 
-#if CAIRO_VERSION == CAIRO_VERSION_ENCODE(1, 11, 2)
+#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
 GBool CairoOutputDev::gouraudTriangleShadedFill(GfxState *state, GfxGouraudTriangleShading *shading)
 {
   double x0, y0, x1, y1, x2, y2;
@@ -906,21 +906,21 @@ GBool CairoOutputDev::gouraudTriangleShadedFill(GfxState *state, GfxGouraudTrian
 			 &x1, &y1, &color[1],
 			 &x2, &y2, &color[2]);
 
-    cairo_pattern_mesh_begin_patch (fill_pattern);
+    cairo_mesh_pattern_begin_patch (fill_pattern);
 
-    cairo_pattern_mesh_move_to (fill_pattern, x0, y0);
-    cairo_pattern_mesh_line_to (fill_pattern, x1, y1);
-    cairo_pattern_mesh_line_to (fill_pattern, x2, y2);
+    cairo_mesh_pattern_move_to (fill_pattern, x0, y0);
+    cairo_mesh_pattern_line_to (fill_pattern, x1, y1);
+    cairo_mesh_pattern_line_to (fill_pattern, x2, y2);
 
     for (j = 0; j < 3; j++) {
 	shading->getColorSpace()->getRGB(&color[j], &rgb);
-	cairo_pattern_mesh_set_corner_color_rgb (fill_pattern, j,
+	cairo_mesh_pattern_set_corner_color_rgb (fill_pattern, j,
 						 colToDbl(rgb.r),
 						 colToDbl(rgb.g),
 						 colToDbl(rgb.b));
     }
 
-    cairo_pattern_mesh_end_patch (fill_pattern);
+    cairo_mesh_pattern_end_patch (fill_pattern);
   }
 
   double xMin, yMin, xMax, yMax;
@@ -949,33 +949,33 @@ GBool CairoOutputDev::patchMeshShadedFill(GfxState *state, GfxPatchMeshShading *
     GfxColor color;
     GfxRGB rgb;
 
-    cairo_pattern_mesh_begin_patch (fill_pattern);
+    cairo_mesh_pattern_begin_patch (fill_pattern);
 
-    cairo_pattern_mesh_move_to (fill_pattern, patch->x[0][0], patch->y[0][0]);
-    cairo_pattern_mesh_curve_to (fill_pattern,
+    cairo_mesh_pattern_move_to (fill_pattern, patch->x[0][0], patch->y[0][0]);
+    cairo_mesh_pattern_curve_to (fill_pattern,
 			    patch->x[0][1], patch->y[0][1],
 			    patch->x[0][2], patch->y[0][2],
 			    patch->x[0][3], patch->y[0][3]);
 
-    cairo_pattern_mesh_curve_to (fill_pattern,
+    cairo_mesh_pattern_curve_to (fill_pattern,
 			    patch->x[1][3], patch->y[1][3],
 			    patch->x[2][3], patch->y[2][3],
 			    patch->x[3][3], patch->y[3][3]);
 
-    cairo_pattern_mesh_curve_to (fill_pattern,
+    cairo_mesh_pattern_curve_to (fill_pattern,
 			    patch->x[3][2], patch->y[3][2],
 			    patch->x[3][1], patch->y[3][1],
 			    patch->x[3][0], patch->y[3][0]);
 
-    cairo_pattern_mesh_curve_to (fill_pattern,
+    cairo_mesh_pattern_curve_to (fill_pattern,
 			    patch->x[2][0], patch->y[2][0],
 			    patch->x[1][0], patch->y[1][0],
 			    patch->x[0][0], patch->y[0][0]);
 
-    cairo_pattern_mesh_set_control_point (fill_pattern, 0, patch->x[1][1], patch->y[1][1]);
-    cairo_pattern_mesh_set_control_point (fill_pattern, 1, patch->x[1][2], patch->y[1][2]);
-    cairo_pattern_mesh_set_control_point (fill_pattern, 2, patch->x[2][2], patch->y[2][2]);
-    cairo_pattern_mesh_set_control_point (fill_pattern, 3, patch->x[2][1], patch->y[2][1]);
+    cairo_mesh_pattern_set_control_point (fill_pattern, 0, patch->x[1][1], patch->y[1][1]);
+    cairo_mesh_pattern_set_control_point (fill_pattern, 1, patch->x[1][2], patch->y[1][2]);
+    cairo_mesh_pattern_set_control_point (fill_pattern, 2, patch->x[2][2], patch->y[2][2]);
+    cairo_mesh_pattern_set_control_point (fill_pattern, 3, patch->x[2][1], patch->y[2][1]);
 
     for (j = 0; j < 4; j++) {
       int u, v;
@@ -1005,12 +1005,12 @@ GBool CairoOutputDev::patchMeshShadedFill(GfxState *state, GfxPatchMeshShading *
       }
 
       shading->getColorSpace()->getRGB(&color, &rgb);
-      cairo_pattern_mesh_set_corner_color_rgb (fill_pattern, j,
+      cairo_mesh_pattern_set_corner_color_rgb (fill_pattern, j,
 					       colToDbl(rgb.r),
 					       colToDbl(rgb.g),
 					       colToDbl(rgb.b));
     }
-    cairo_pattern_mesh_end_patch (fill_pattern);
+    cairo_mesh_pattern_end_patch (fill_pattern);
   }
 
   double xMin, yMin, xMax, yMax;
@@ -1026,7 +1026,7 @@ GBool CairoOutputDev::patchMeshShadedFill(GfxState *state, GfxPatchMeshShading *
 
   return gTrue;
 }
-#endif /* CAIRO_VERSION == CAIRO_VERSION_ENCODE(1, 11, 2) */
+#endif /* CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0) */
 
 void CairoOutputDev::clip(GfxState *state) {
   doPath (cairo, state, state->getPath());
@@ -1306,7 +1306,7 @@ void CairoOutputDev::endTextObject(GfxState *state) {
 
 void CairoOutputDev::beginActualText(GfxState *state, GooString *text)
 {
-  if (text)
+  if (this->text)
     actualText->begin(state, text);
 }
 
@@ -1859,12 +1859,28 @@ void CairoOutputDev::setSoftMaskFromImageMask(GfxState *state, Object *ref, Stre
     drawImageMaskRegular(state, ref, str, width, height, invert, gFalse, inlineImg);
   }
 
+  if (state->getFillColorSpace()->getMode() == csPattern) {
+    cairo_set_source_rgb (cairo, 1, 1, 1);
+    cairo_set_matrix (cairo, &mask_matrix);
+    cairo_mask (cairo, mask);
+  }
+
   if (mask)
     cairo_pattern_destroy (mask);
   mask = cairo_pop_group (cairo);
+
+  saveState(state);
+  double bbox[4] = {0,0,1,1}; // dummy
+  beginTransparencyGroup(state, bbox, state->getFillColorSpace(),
+                         gTrue, gFalse, gFalse);
 }
 
 void CairoOutputDev::unsetSoftMaskFromImageMask(GfxState *state) {
+  double bbox[4] = {0,0,1,1}; // dummy
+
+  endTransparencyGroup(state);
+  restoreState(state);
+  paintTransparencyGroup(state, bbox);
   clearSoftMask(state);
 }
 
@@ -2775,7 +2791,8 @@ void CairoOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
 
   cairo_surface_mark_dirty (image);
 
-  setMimeData(str, ref, image);
+  if (!inlineImg) /* don't read stream twice if it is an inline image */
+    setMimeData(str, ref, image);
 
   pattern = cairo_pattern_create_for_surface (image);
   cairo_surface_destroy (image);
@@ -2810,6 +2827,7 @@ void CairoOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
   if (maskPattern) {
     if (!printing)
       cairo_clip (cairo);
+    cairo_set_matrix (cairo, &mask_matrix);
     cairo_mask (cairo, maskPattern);
   } else {
     if (printing)

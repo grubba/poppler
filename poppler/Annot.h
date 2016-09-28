@@ -22,6 +22,7 @@
 // Copyright (C) 2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2008 Tomas Are Haavet <tomasare@gmail.com>
 // Copyright (C) 2009-2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -176,6 +177,7 @@ private:
 //------------------------------------------------------------------------
 
 class AnnotQuadrilaterals {
+public:
   class AnnotQuadrilateral {
   public:
     AnnotQuadrilateral(double x1, double y1, double x2, double y2, double x3,
@@ -184,9 +186,8 @@ class AnnotQuadrilaterals {
     AnnotCoord coord1, coord2, coord3, coord4;
   };
 
-public:
-
   AnnotQuadrilaterals(Array *array, PDFRectangle *rect);
+  AnnotQuadrilaterals(AnnotQuadrilateral **quads, int quadsLength);
   ~AnnotQuadrilaterals();
 
   double getX1(int quadrilateral);
@@ -227,6 +228,8 @@ public:
   AnnotBorder();
   virtual ~AnnotBorder();
 
+  virtual void setWidth(double new_width) { width = new_width; }
+
   virtual AnnotBorderType getType() const { return type; }
   virtual double getWidth() const { return width; }
   virtual int getDashLength() const { return dashLength; }
@@ -252,6 +255,11 @@ class AnnotBorderArray: public AnnotBorder {
 public:
   AnnotBorderArray();
   AnnotBorderArray(Array *array);
+
+  void writeToObject(XRef *xref, Object *dest) const;
+
+  void setHorizontalCorner(double hc) { horizontalCorner = hc; }
+  void setVerticalCorner(double vc) { verticalCorner = vc; }
 
   double getHorizontalCorner() const { return horizontalCorner; }
   double getVerticalCorner() const { return verticalCorner; }
@@ -302,6 +310,8 @@ public:
 
   AnnotColorSpace getSpace() const { return (AnnotColorSpace) length; }
   const double *getValues() const { return values; }
+
+  void writeToObject(XRef *xref, Object *dest) const;
 
 private:
 
@@ -474,9 +484,17 @@ public:
 
   double getFontSize() { return fontSize; }
 
+  void setRect(PDFRectangle *rect);
+  void setRect(double x1, double y1, double x2, double y2);
+
   // Sets the annot contents to new_content
   // new_content should never be NULL
   void setContents(GooString *new_content);
+  void setName(GooString *new_name);
+  void setModified(GooString *new_date);
+  void setFlags(Guint new_flags);
+
+  void setBorder(AnnotBorderArray *new_border); // Takes ownership
 
   // The annotation takes the ownership of
   // new_color. 
@@ -620,6 +638,7 @@ public:
   void setPopup(AnnotPopup *new_popup);
   void setLabel(GooString *new_label);
   void setOpacity(double opacityA);
+  void setDate(GooString *new_date);
 
 protected:
   GooString *label;             // T            (Default autor)
@@ -797,6 +816,12 @@ public:
   AnnotFreeText(PDFDoc *docA, Dict *dict, Object *obj);
   ~AnnotFreeText();
 
+  void setAppearanceString(GooString *new_string);
+  void setQuadding(AnnotFreeTextQuadding new_quadding);
+  void setStyleString(GooString *new_string);
+  void setCalloutLine(AnnotCalloutLine *line);
+  void setIntent(AnnotFreeTextIntent new_intent);
+
   // getters
   GooString *getAppearanceString() const { return appearanceString; }
   AnnotFreeTextQuadding getQuadding() const { return quadding; }
@@ -850,6 +875,14 @@ public:
   ~AnnotLine();
 
   virtual void draw(Gfx *gfx, GBool printing);
+
+  void setVertices(double x1, double y1, double x2, double y2);
+  void setStartEndStyle(AnnotLineEndingStyle start, AnnotLineEndingStyle end);
+  void setInteriorColor(AnnotColor *new_color);
+  void setLeaderLineLength(double len);
+  void setLeaderLineExtension(double len);
+  void setCaption(bool new_cap);
+  void setIntent(AnnotLineIntent new_intent);
 
   // getters
   AnnotLineEndingStyle getStartStyle() const { return startStyle; }
@@ -907,6 +940,11 @@ public:
 
   virtual void draw(Gfx *gfx, GBool printing);
 
+  // typeHighlight, typeUnderline, typeSquiggly or typeStrikeOut
+  void setType(AnnotSubtype new_type);
+
+  void setQuadrilaterals(AnnotQuadrilaterals *quadPoints);
+
   AnnotQuadrilaterals *getQuadrilaterals() const { return quadrilaterals; }
 
 protected:
@@ -926,6 +964,8 @@ public:
   AnnotStamp(PDFDoc *docA, PDFRectangle *rect);
   AnnotStamp(PDFDoc *docA, Dict *dict, Object *obj);
   ~AnnotStamp();
+
+  void setIcon(GooString *new_icon);
 
   // getters
   GooString *getIcon() const { return icon; }
@@ -949,6 +989,9 @@ public:
   ~AnnotGeometry();
 
   virtual void draw(Gfx *gfx, GBool printing);
+
+  void setType(AnnotSubtype new_type); // typeSquare or typeCircle
+  void setInteriorColor(AnnotColor *new_color);
 
   // getters
   AnnotColor *getInteriorColor() const { return interiorColor; }
@@ -980,6 +1023,12 @@ public:
   AnnotPolygon(PDFDoc *docA, PDFRectangle *rect, AnnotSubtype subType, AnnotPath *path);
   AnnotPolygon(PDFDoc *docA, Dict *dict, Object *obj);
   ~AnnotPolygon();
+
+  void setType(AnnotSubtype new_type); // typePolygon or typePolyLine
+  void setVertices(AnnotPath *path);
+  void setStartEndStyle(AnnotLineEndingStyle start, AnnotLineEndingStyle end);
+  void setInteriorColor(AnnotColor *new_color);
+  void setIntent(AnnotPolygonIntent new_intent);
 
   // getters
   AnnotPath *getVertices() const { return vertices; }
@@ -1023,6 +1072,8 @@ public:
   AnnotCaret(PDFDoc *docA, Dict *dict, Object *obj);
   ~AnnotCaret();
 
+  void setSymbol(AnnotCaretSymbol new_symbol);
+
   // getters
   AnnotCaretSymbol getSymbol() const { return symbol; }
   PDFRectangle *getCaretRect() const { return caretRect; }
@@ -1046,6 +1097,8 @@ public:
   AnnotInk(PDFDoc *docA, Dict *dict, Object *obj);
   ~AnnotInk();
 
+  void setInkList(AnnotPath **paths, int n_paths);
+
   // getters
   AnnotPath **getInkList() const { return inkList; }
   int getInkListLength() const { return inkListLength; }
@@ -1053,6 +1106,9 @@ public:
 private:
 
   void initialize(PDFDoc *docA, Dict *dict);
+  void writeInkList(AnnotPath **paths, int n_paths, Array *dest_array);
+  void parseInkList(Array *src_array);
+  void freeInkList();
 
   // required
   AnnotPath **inkList;       // InkList

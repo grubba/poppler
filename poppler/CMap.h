@@ -15,6 +15,7 @@
 //
 // Copyright (C) 2008 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2012 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -75,6 +76,8 @@ public:
 
   // Return collection name (<registry>-<ordering>).
   GooString *getCollection() { return collection; }
+
+  GooString *getCMapName() { return cMapName; }
 
   // Return true if this CMap matches the specified <collectionA>, and
   // <cMapNameA>.

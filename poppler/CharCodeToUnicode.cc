@@ -13,13 +13,14 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2006, 2008-2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006, 2008-2010, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2007 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
 // Copyright (C) 2008 Vasile Gaburici <gaburici@cs.umd.edu>
 // Copyright (C) 2010 William Bader <williambader@hotmail.com>
 // Copyright (C) 2010 Jakub Wilk <ubanus@users.sf.net>
+// Copyright (C) 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -111,7 +112,11 @@ static GBool parseHex(char *s, int len, Guint *val) {
 //------------------------------------------------------------------------
 
 CharCodeToUnicode *CharCodeToUnicode::makeIdentityMapping() {
-  return new CharCodeToUnicode();
+  CharCodeToUnicode *ctu = new CharCodeToUnicode();
+  ctu->isIdentity = gTrue;
+  ctu->mapLen = 1;
+  ctu->map = (Unicode *)gmallocn(ctu->mapLen, sizeof(Unicode));
+  return ctu;
 }
 
 CharCodeToUnicode *CharCodeToUnicode::parseCIDToUnicode(GooString *fileName,
@@ -468,6 +473,7 @@ CharCodeToUnicode::CharCodeToUnicode() {
   sMap = NULL;
   sMapLen = sMapSize = 0;
   refCnt = 1;
+  isIdentity = gFalse;
 #if MULTITHREADED
   gInitMutex(&mutex);
 #endif
@@ -485,6 +491,7 @@ CharCodeToUnicode::CharCodeToUnicode(GooString *tagA) {
   sMap = NULL;
   sMapLen = sMapSize = 0;
   refCnt = 1;
+  isIdentity = gFalse;
 #if MULTITHREADED
   gInitMutex(&mutex);
 #endif
@@ -506,6 +513,7 @@ CharCodeToUnicode::CharCodeToUnicode(GooString *tagA, Unicode *mapA,
   sMapLen = sMapLenA;
   sMapSize = sMapSizeA;
   refCnt = 1;
+  isIdentity = gFalse;
 #if MULTITHREADED
   gInitMutex(&mutex);
 #endif
@@ -557,7 +565,7 @@ GBool CharCodeToUnicode::match(GooString *tagA) {
 void CharCodeToUnicode::setMapping(CharCode c, Unicode *u, int len) {
   int i, j;
 
-  if (!map) {
+  if (!map || isIdentity) {
     return;
   }
   if (len == 1) {
@@ -590,8 +598,9 @@ void CharCodeToUnicode::setMapping(CharCode c, Unicode *u, int len) {
 int CharCodeToUnicode::mapToUnicode(CharCode c, Unicode **u) {
   int i;
 
-  if (!map) {
-    *u[0] = (Unicode)c;
+  if (isIdentity) {
+    map[0] = (Unicode)c;
+    *u = map;
     return 1;
   }
   if (c >= mapLen) {
@@ -613,6 +622,10 @@ int CharCodeToUnicode::mapToUnicode(CharCode c, Unicode **u) {
 int CharCodeToUnicode::mapToCharCode(Unicode* u, CharCode *c, int usize) {
   //look for charcode in map
   if (usize == 1) {
+    if (isIdentity) {
+      *c = (CharCode) *u;
+      return 1;
+    }
     for (CharCode i=0; i<mapLen; i++) {
       if (map[i] == *u) {
         *c = i;

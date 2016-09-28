@@ -13,13 +13,14 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2007-2008, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2007-2008, 2010, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2010 Mike Slegeir <tehpola@yahoo.com>
 // Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
 // Copyright (C) 2010 OSSD CDAC Mumbai by Leena Chourey (leenac@cdacmumbai.in) and Onkar Potdar (onkar@cdacmumbai.in)
 // Copyright (C) 2011 Steven Murdoch <Steven.Murdoch@cl.cam.ac.uk>
 // Copyright (C) 2012 Igor Slepchin <igor.redhat@gmail.com>
+// Copyright (C) 2012 Ihar Filipau <thephilips@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -46,6 +47,7 @@
 #include "XRef.h"
 #include "Catalog.h"
 #include "Page.h"
+#include "Outline.h"
 #include "PDFDoc.h"
 #include "PDFDocFactory.h"
 #include "HtmlOutputDev.h"
@@ -81,6 +83,7 @@ GBool stout=gFalse;
 GBool xml=gFalse;
 static GBool errQuiet=gFalse;
 static GBool noDrm=gFalse;
+double wordBreakThreshold=10;  // 10%, below converted into a coefficient - 0.1
 
 GBool showHidden = gFalse;
 GBool noMerge = gFalse;
@@ -141,6 +144,8 @@ static const ArgDesc argDesc[] = {
    "user password (for encrypted files)"},
   {"-nodrm", argFlag, &noDrm, 0,
    "override document DRM settings"},
+  {"-wbt",    argFP,    &wordBreakThreshold, 0,
+   "word break threshold (default 10 percent)"},
   {NULL}
 };
 
@@ -182,6 +187,7 @@ int main(int argc, char *argv[]) {
   SplashOutputDev *splashOut = NULL;
 #endif
   PSOutputDev *psOut = NULL;
+  GBool doOutline;
   GBool ok;
   char *p;
   GooString *ownerPW, *userPW;
@@ -218,6 +224,9 @@ int main(int argc, char *argv[]) {
 	goto error;    
     }
   }
+
+  // convert from user-friendly percents into a coefficient
+  wordBreakThreshold /= 100.0;
 
   // open PDF file
   if (ownerPassword[0]) {
@@ -370,6 +379,11 @@ int main(int argc, char *argv[]) {
   else
       rawOrder = singleHtml;
 
+#ifdef DISABLE_OUTLINE
+  doOutline = gFalse;
+#else
+  doOutline = doc->getOutline()->getItems() != NULL;
+#endif
   // write text file
   htmlOut = new HtmlOutputDev(doc->getCatalog(), htmlFileName->getCString(), 
 	  docTitle->getCString(), 
@@ -380,7 +394,7 @@ int main(int argc, char *argv[]) {
 	  extension,
 	  rawOrder, 
 	  firstPage,
-	  doc->getCatalog()->getOutline()->isDict());
+	  doOutline);
   delete docTitle;
   if( author )
   {   
@@ -403,10 +417,7 @@ int main(int argc, char *argv[]) {
   {
     doc->displayPages(htmlOut, firstPage, lastPage, 72 * scale, 72 * scale, 0,
 		      gTrue, gFalse, gFalse);
-  	if (!xml)
-	{
-		htmlOut->dumpDocOutline(doc);
-	}
+    htmlOut->dumpDocOutline(doc);
   }
   
   if ((complexMode || singleHtml) && !xml && !ignore) {
@@ -528,7 +539,6 @@ static GooString* getInfoString(Dict *infoDict, const char *key) {
     rawString = obj.getString();
 
     // Convert rawString to unicode
-    encodedString = new GooString();
     if (rawString->hasUnicodeMarker()) {
       isUnicode = gTrue;
       unicodeLength = (obj.getString()->getLength() - 2) / 2;
