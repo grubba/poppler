@@ -39,6 +39,11 @@
 #cmakedefine TEXTOUT_WORD_LIST 1
 #endif
 
+/* Use MacOS X font configuration backend */
+#ifndef WITH_FONTCONFIGURATION_MAC
+#cmakedefine WITH_FONTCONFIGURATION_MAC 1
+#endif
+
 // Also, there's a couple of preprocessor symbols in the header files
 // that are used but never defined: DISABLE_OUTLINE, DEBUG_MEM and
 

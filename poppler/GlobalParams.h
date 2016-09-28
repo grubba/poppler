@@ -35,8 +35,6 @@
 #pragma interface
 #endif
 
-#include "config.h"
-
 #include <assert.h>
 #include "poppler-config.h"
 #include <stdio.h>
