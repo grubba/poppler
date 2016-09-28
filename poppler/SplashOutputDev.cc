@@ -23,6 +23,7 @@
 // Copyright (C) 2009 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 William Bader <williambader@hotmail.com>
+// Copyright (C) 2010 Patrick Spendrin <ps_ml@gmx.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -64,6 +65,11 @@
 #if (__VMS_VER < 70000000)
 extern "C" int unlink(char *filename);
 #endif
+#endif
+
+#ifdef _MSC_VER
+#include <float.h>
+#define isfinite(x) _finite(x)
 #endif
 
 //------------------------------------------------------------------------

@@ -23,6 +23,7 @@
 // Copyright (C) 2009 William Bader <williambader@hotmail.com>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+// Copyright (C) 2010 Patrick Spendrin <ps_ml@gmx.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -179,9 +180,9 @@ get_poppler_datadir (void)
   if (!GetModuleFileName (hmodule, (CHAR *) retval, sizeof(retval) - 20))
     return POPPLER_DATADIR;
 
-  p = _mbsrchr ((const unsigned char *) retval, '\\');
+  p = _mbsrchr ((unsigned char *) retval, '\\');
   *p = '\0';
-  p = _mbsrchr ((const unsigned char *) retval, '\\');
+  p = _mbsrchr ((unsigned char *) retval, '\\');
   if (p) {
     if (stricmp ((const char *) (p+1), "bin") == 0)
       *p = '\0';
