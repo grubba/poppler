@@ -14,7 +14,7 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Jeff Muizelaar <jeff@infidigm.net>
-// Copyright (C) 2006-2010, 2012 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006-2010, 2012-2014 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2007 Krzysztof Kowalczyk <kkowalczyk@gmail.com>
 // Copyright (C) 2008 Julien Rebetez <julien@fhtagn.net>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
@@ -23,8 +23,15 @@
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2010 Tomas Hoger <thoger@redhat.com>
 // Copyright (C) 2011, 2012 William Bader <williambader@hotmail.com>
-// Copyright (C) 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2012, 2013 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2012 Oliver Sander <sander@mi.fu-berlin.de>
+// Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
+// Copyright (C) 2012 Even Rouault <even.rouault@mines-paris.org>
+// Copyright (C) 2013 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2013 Adam Reichold <adamreichold@myopera.com>
+// Copyright (C) 2013 Pino Toscano <pino@kde.org>
+// Copyright (C) 2015 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+// Copyright (C) 2015 Jason Crain <jason@aquaticape.us>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -54,6 +61,7 @@
 #include "Lexer.h"
 #include "GfxState.h"
 #include "Stream.h"
+#include "XRef.h"
 #include "JBIG2Stream.h"
 #include "Stream-CCITT.h"
 #include "CachedFile.h"
@@ -84,15 +92,38 @@ static GBool setDJSYSFLAGS = gFalse;
 #endif
 #endif
 
+#if MULTITHREADED
+#  define streamLocker()   MutexLocker locker(&mutex)
+#else
+#  define streamLocker()
+#endif
 //------------------------------------------------------------------------
 // Stream (base class)
 //------------------------------------------------------------------------
 
 Stream::Stream() {
   ref = 1;
+#if MULTITHREADED
+  gInitMutex(&mutex);
+#endif
 }
 
 Stream::~Stream() {
+#if MULTITHREADED
+  gDestroyMutex(&mutex);
+#endif
+}
+
+int Stream::incRef() {
+  streamLocker();
+  ++ref;
+  return ref;
+}
+
+int Stream::decRef() {
+  streamLocker();
+  --ref;
+  return ref;
 }
 
 void Stream::close() {
@@ -137,34 +168,34 @@ GooString *Stream::getPSFilter(int psLevel, const char *indent) {
   return new GooString();
 }
 
-Stream *Stream::addFilters(Object *dict) {
+Stream *Stream::addFilters(Object *dict, int recursion) {
   Object obj, obj2;
   Object params, params2;
   Stream *str;
   int i;
 
   str = this;
-  dict->dictLookup("Filter", &obj);
+  dict->dictLookup("Filter", &obj, recursion);
   if (obj.isNull()) {
     obj.free();
     dict->dictLookup("F", &obj);
   }
-  dict->dictLookup("DecodeParms", &params);
+  dict->dictLookup("DecodeParms", &params, recursion);
   if (params.isNull()) {
     params.free();
     dict->dictLookup("DP", &params);
   }
   if (obj.isName()) {
-    str = makeFilter(obj.getName(), str, &params);
+    str = makeFilter(obj.getName(), str, &params, recursion, dict);
   } else if (obj.isArray()) {
     for (i = 0; i < obj.arrayGetLength(); ++i) {
-      obj.arrayGet(i, &obj2);
+      obj.arrayGet(i, &obj2, recursion);
       if (params.isArray())
-	params.arrayGet(i, &params2);
+	params.arrayGet(i, &params2, recursion);
       else
 	params2.initNull();
       if (obj2.isName()) {
-	str = makeFilter(obj2.getName(), str, &params2);
+	str = makeFilter(obj2.getName(), str, &params2, recursion);
       } else {
 	error(errSyntaxError, getPos(), "Bad filter name");
 	str = new EOFStream(str);
@@ -181,7 +212,7 @@ Stream *Stream::addFilters(Object *dict) {
   return str;
 }
 
-Stream *Stream::makeFilter(char *name, Stream *str, Object *params) {
+Stream *Stream::makeFilter(char *name, Stream *str, Object *params, int recursion, Object *dict) {
   int pred;			// parameters
   int colors;
   int bits;
@@ -203,23 +234,23 @@ Stream *Stream::makeFilter(char *name, Stream *str, Object *params) {
     bits = 8;
     early = 1;
     if (params->isDict()) {
-      params->dictLookup("Predictor", &obj);
+      params->dictLookup("Predictor", &obj, recursion);
       if (obj.isInt())
 	pred = obj.getInt();
       obj.free();
-      params->dictLookup("Columns", &obj);
+      params->dictLookup("Columns", &obj, recursion);
       if (obj.isInt())
 	columns = obj.getInt();
       obj.free();
-      params->dictLookup("Colors", &obj);
+      params->dictLookup("Colors", &obj, recursion);
       if (obj.isInt())
 	colors = obj.getInt();
       obj.free();
-      params->dictLookup("BitsPerComponent", &obj);
+      params->dictLookup("BitsPerComponent", &obj, recursion);
       if (obj.isInt())
 	bits = obj.getInt();
       obj.free();
-      params->dictLookup("EarlyChange", &obj);
+      params->dictLookup("EarlyChange", &obj, recursion);
       if (obj.isInt())
 	early = obj.getInt();
       obj.free();
@@ -236,37 +267,37 @@ Stream *Stream::makeFilter(char *name, Stream *str, Object *params) {
     endOfBlock = gTrue;
     black = gFalse;
     if (params->isDict()) {
-      params->dictLookup("K", &obj);
+      params->dictLookup("K", &obj, recursion);
       if (obj.isInt()) {
 	encoding = obj.getInt();
       }
       obj.free();
-      params->dictLookup("EndOfLine", &obj);
+      params->dictLookup("EndOfLine", &obj, recursion);
       if (obj.isBool()) {
 	endOfLine = obj.getBool();
       }
       obj.free();
-      params->dictLookup("EncodedByteAlign", &obj);
+      params->dictLookup("EncodedByteAlign", &obj, recursion);
       if (obj.isBool()) {
 	byteAlign = obj.getBool();
       }
       obj.free();
-      params->dictLookup("Columns", &obj);
+      params->dictLookup("Columns", &obj, recursion);
       if (obj.isInt()) {
 	columns = obj.getInt();
       }
       obj.free();
-      params->dictLookup("Rows", &obj);
+      params->dictLookup("Rows", &obj, recursion);
       if (obj.isInt()) {
 	rows = obj.getInt();
       }
       obj.free();
-      params->dictLookup("EndOfBlock", &obj);
+      params->dictLookup("EndOfBlock", &obj, recursion);
       if (obj.isBool()) {
 	endOfBlock = obj.getBool();
       }
       obj.free();
-      params->dictLookup("BlackIs1", &obj);
+      params->dictLookup("BlackIs1", &obj, recursion);
       if (obj.isBool()) {
 	black = obj.getBool();
       }
@@ -277,31 +308,31 @@ Stream *Stream::makeFilter(char *name, Stream *str, Object *params) {
   } else if (!strcmp(name, "DCTDecode") || !strcmp(name, "DCT")) {
     colorXform = -1;
     if (params->isDict()) {
-      if (params->dictLookup("ColorTransform", &obj)->isInt()) {
+      if (params->dictLookup("ColorTransform", &obj, recursion)->isInt()) {
 	colorXform = obj.getInt();
       }
       obj.free();
     }
-    str = new DCTStream(str, colorXform);
+    str = new DCTStream(str, colorXform, dict, recursion);
   } else if (!strcmp(name, "FlateDecode") || !strcmp(name, "Fl")) {
     pred = 1;
     columns = 1;
     colors = 1;
     bits = 8;
     if (params->isDict()) {
-      params->dictLookup("Predictor", &obj);
+      params->dictLookup("Predictor", &obj, recursion);
       if (obj.isInt())
 	pred = obj.getInt();
       obj.free();
-      params->dictLookup("Columns", &obj);
+      params->dictLookup("Columns", &obj, recursion);
       if (obj.isInt())
 	columns = obj.getInt();
       obj.free();
-      params->dictLookup("Colors", &obj);
+      params->dictLookup("Colors", &obj, recursion);
       if (obj.isInt())
 	colors = obj.getInt();
       obj.free();
-      params->dictLookup("BitsPerComponent", &obj);
+      params->dictLookup("BitsPerComponent", &obj, recursion);
       if (obj.isInt())
 	bits = obj.getInt();
       obj.free();
@@ -309,12 +340,21 @@ Stream *Stream::makeFilter(char *name, Stream *str, Object *params) {
     str = new FlateStream(str, pred, columns, colors, bits);
   } else if (!strcmp(name, "JBIG2Decode")) {
     if (params->isDict()) {
-      params->dictLookup("JBIG2Globals", &globals);
+      XRef *xref = params->getDict()->getXRef();
+      params->dictLookupNF("JBIG2Globals", &obj);
+      obj.fetch(xref, &globals, recursion);
     }
-    str = new JBIG2Stream(str, &globals);
+    str = new JBIG2Stream(str, &globals, &obj);
     globals.free();
+    obj.free();
   } else if (!strcmp(name, "JPXDecode")) {
     str = new JPXStream(str);
+  } else if (!strcmp(name, "Crypt")) {
+    if (str->getKind() == strCrypt) {
+      str = str->getBaseStream();
+    } else {
+      error(errSyntaxError, getPos(), "Can't revert non decrypt streams");
+    }
   } else {
     error(errSyntaxError, getPos(), "Unknown filter '{0:s}'", name);
     str = new EOFStream(str);
@@ -337,7 +377,7 @@ OutStream::~OutStream ()
 //------------------------------------------------------------------------
 // FileOutStream
 //------------------------------------------------------------------------
-FileOutStream::FileOutStream (FILE* fa, Guint startA)
+FileOutStream::FileOutStream (FILE* fa, Goffset startA)
 {
   f = fa;
   start = startA;
@@ -353,9 +393,9 @@ void FileOutStream::close ()
 
 }
 
-int FileOutStream::getPos ()
+Goffset FileOutStream::getPos ()
 {
-  return ftell(f);
+  return Gftell(f);
 }
 
 void FileOutStream::put (char c)
@@ -376,7 +416,7 @@ void FileOutStream::printf(const char *format, ...)
 // BaseStream
 //------------------------------------------------------------------------
 
-BaseStream::BaseStream(Object *dictA, Guint lengthA) {
+BaseStream::BaseStream(Object *dictA, Goffset lengthA) {
   dict = *dictA;
   length = lengthA;
 }
@@ -400,7 +440,7 @@ void FilterStream::close() {
   str->close();
 }
 
-void FilterStream::setPos(Guint pos, int dir) {
+void FilterStream::setPos(Goffset pos, int dir) {
   error(errInternal, -1, "Internal: called setPos() on FilterStream");
 }
 
@@ -418,11 +458,10 @@ ImageStream::ImageStream(Stream *strA, int widthA, int nCompsA, int nBitsA) {
 
   nVals = width * nComps;
   inputLineSize = (nVals * nBits + 7) >> 3;
-  if (nVals > INT_MAX / nBits - 7) {
-    // force a call to gmallocn(-1,...), which will throw an exception
+  if (nBits <= 0 || nVals > INT_MAX / nBits - 7 || width > INT_MAX / nComps) {
     inputLineSize = -1;
   }
-  inputLine = (Guchar *)gmallocn(inputLineSize, sizeof(char));
+  inputLine = (Guchar *)gmallocn_checkoverflow(inputLineSize, sizeof(char));
   if (nBits == 8) {
     imgLine = (Guchar *)inputLine;
   } else {
@@ -476,6 +515,10 @@ Guchar *ImageStream::getLine() {
   int c;
   int i;
   Guchar *p;
+  
+  if (unlikely(inputLine == NULL)) {
+      return NULL;
+  }
  
   int readChars = str->doGetChars(inputLineSize, inputLine);
   for ( ; readChars < inputLineSize; readChars++) inputLine[readChars] = EOF;
@@ -727,11 +770,11 @@ GBool StreamPredictor::getNextLine() {
 // FileStream
 //------------------------------------------------------------------------
 
-FileStream::FileStream(FILE *fA, Guint startA, GBool limitedA,
-		       Guint lengthA, Object *dictA):
+FileStream::FileStream(GooFile* fileA, Goffset startA, GBool limitedA,
+		       Goffset lengthA, Object *dictA):
     BaseStream(dictA, lengthA) {
-  f = fA;
-  start = startA;
+  file = fileA;
+  offset = start = startA;
   limited = limitedA;
   length = lengthA;
   bufPtr = bufEnd = buf;
@@ -744,22 +787,18 @@ FileStream::~FileStream() {
   close();
 }
 
-Stream *FileStream::makeSubStream(Guint startA, GBool limitedA,
-				  Guint lengthA, Object *dictA) {
-  return new FileStream(f, startA, limitedA, lengthA, dictA);
+BaseStream *FileStream::copy() {
+  return new FileStream(file, start, limited, length, &dict);
+}
+
+Stream *FileStream::makeSubStream(Goffset startA, GBool limitedA,
+				  Goffset lengthA, Object *dictA) {
+  return new FileStream(file, startA, limitedA, lengthA, dictA);
 }
 
 void FileStream::reset() {
-#if HAVE_FSEEKO
-  savePos = (Guint)ftello(f);
-  fseeko(f, start, SEEK_SET);
-#elif HAVE_FSEEK64
-  savePos = (Guint)ftell64(f);
-  fseek64(f, start, SEEK_SET);
-#else
-  savePos = (Guint)ftell(f);
-  fseek(f, start, SEEK_SET);
-#endif
+  savePos = offset;
+  offset = start;
   saved = gTrue;
   bufPtr = bufEnd = buf;
   bufPos = start;
@@ -767,13 +806,7 @@ void FileStream::reset() {
 
 void FileStream::close() {
   if (saved) {
-#if HAVE_FSEEKO
-    fseeko(f, savePos, SEEK_SET);
-#elif HAVE_FSEEK64
-    fseek64(f, savePos, SEEK_SET);
-#else
-    fseek(f, savePos, SEEK_SET);
-#endif
+    offset = savePos;
     saved = gFalse;
   }
 }
@@ -791,7 +824,11 @@ GBool FileStream::fillBuf() {
   } else {
     n = fileStreamBufSize;
   }
-  n = fread(buf, 1, n, f);
+  n = file->read(buf, n, offset);
+  if (n == -1) {
+    return gFalse;
+  }
+  offset += n;
   bufEnd = buf + n;
   if (bufPtr >= bufEnd) {
     return gFalse;
@@ -799,46 +836,22 @@ GBool FileStream::fillBuf() {
   return gTrue;
 }
 
-void FileStream::setPos(Guint pos, int dir) {
-  Guint size;
+void FileStream::setPos(Goffset pos, int dir) {
+  Goffset size;
 
   if (dir >= 0) {
-#if HAVE_FSEEKO
-    fseeko(f, pos, SEEK_SET);
-#elif HAVE_FSEEK64
-    fseek64(f, pos, SEEK_SET);
-#else
-    fseek(f, pos, SEEK_SET);
-#endif
-    bufPos = pos;
+    offset = bufPos = pos;
   } else {
-#if HAVE_FSEEKO
-    fseeko(f, 0, SEEK_END);
-    size = (Guint)ftello(f);
-#elif HAVE_FSEEK64
-    fseek64(f, 0, SEEK_END);
-    size = (Guint)ftell64(f);
-#else
-    fseek(f, 0, SEEK_END);
-    size = (Guint)ftell(f);
-#endif
+    size = file->size();
     if (pos > size)
-      pos = (Guint)size;
-#if HAVE_FSEEKO
-    fseeko(f, -(int)pos, SEEK_END);
-    bufPos = (Guint)ftello(f);
-#elif HAVE_FSEEK64
-    fseek64(f, -(int)pos, SEEK_END);
-    bufPos = (Guint)ftell64(f);
-#else
-    fseek(f, -(int)pos, SEEK_END);
-    bufPos = (Guint)ftell(f);
-#endif
+      pos = size;
+    offset = size - pos;
+    bufPos = offset;
   }
   bufPtr = bufEnd = buf;
 }
 
-void FileStream::moveStart(int delta) {
+void FileStream::moveStart(Goffset delta) {
   start += delta;
   bufPtr = bufEnd = buf;
   bufPos = start;
@@ -848,8 +861,8 @@ void FileStream::moveStart(int delta) {
 // CachedFileStream
 //------------------------------------------------------------------------
 
-CachedFileStream::CachedFileStream(CachedFile *ccA, Guint startA,
-        GBool limitedA, Guint lengthA, Object *dictA)
+CachedFileStream::CachedFileStream(CachedFile *ccA, Goffset startA,
+        GBool limitedA, Goffset lengthA, Object *dictA)
   : BaseStream(dictA, lengthA)
 {
   cc = ccA;
@@ -868,8 +881,13 @@ CachedFileStream::~CachedFileStream()
   cc->decRefCnt();
 }
 
-Stream *CachedFileStream::makeSubStream(Guint startA, GBool limitedA,
-        Guint lengthA, Object *dictA)
+BaseStream *CachedFileStream::copy() {
+  cc->incRefCnt();
+  return new CachedFileStream(cc, start, limited, length, &dict);
+}
+
+Stream *CachedFileStream::makeSubStream(Goffset startA, GBool limitedA,
+        Goffset lengthA, Object *dictA)
 {
   cc->incRefCnt();
   return new CachedFileStream(cc, startA, limitedA, lengthA, dictA);
@@ -907,7 +925,7 @@ GBool CachedFileStream::fillBuf()
   } else {
     n = cachedStreamBufSize - (bufPos % cachedStreamBufSize);
   }
-  cc->read(buf, 1, n);
+  n = cc->read(buf, 1, n);
   bufEnd = buf + n;
   if (bufPtr >= bufEnd) {
     return gFalse;
@@ -915,7 +933,7 @@ GBool CachedFileStream::fillBuf()
   return gTrue;
 }
 
-void CachedFileStream::setPos(Guint pos, int dir)
+void CachedFileStream::setPos(Goffset pos, int dir)
 {
   Guint size;
 
@@ -936,7 +954,7 @@ void CachedFileStream::setPos(Guint pos, int dir)
   bufPtr = bufEnd = buf;
 }
 
-void CachedFileStream::moveStart(int delta)
+void CachedFileStream::moveStart(Goffset delta)
 {
   start += delta;
   bufPtr = bufEnd = buf;
@@ -947,7 +965,7 @@ void CachedFileStream::moveStart(int delta)
 // MemStream
 //------------------------------------------------------------------------
 
-MemStream::MemStream(char *bufA, Guint startA, Guint lengthA, Object *dictA):
+MemStream::MemStream(char *bufA, Goffset startA, Goffset lengthA, Object *dictA):
     BaseStream(dictA, lengthA) {
   buf = bufA;
   start = startA;
@@ -963,10 +981,14 @@ MemStream::~MemStream() {
   }
 }
 
-Stream *MemStream::makeSubStream(Guint startA, GBool limited,
-				 Guint lengthA, Object *dictA) {
+BaseStream *MemStream::copy() {
+  return new MemStream(buf, start, length, &dict);
+}
+
+Stream *MemStream::makeSubStream(Goffset startA, GBool limited,
+				 Goffset lengthA, Object *dictA) {
   MemStream *subStr;
-  Guint newLength;
+  Goffset newLength;
 
   if (!limited || startA + lengthA > start + length) {
     newLength = start + length - startA;
@@ -1000,7 +1022,7 @@ int MemStream::getChars(int nChars, Guchar *buffer) {
   return n;
 }
 
-void MemStream::setPos(Guint pos, int dir) {
+void MemStream::setPos(Goffset pos, int dir) {
   Guint i;
 
   if (dir >= 0) {
@@ -1016,7 +1038,7 @@ void MemStream::setPos(Guint pos, int dir) {
   bufPtr = buf + i;
 }
 
-void MemStream::moveStart(int delta) {
+void MemStream::moveStart(Goffset delta) {
   start += delta;
   length -= delta;
   bufPtr = buf + start;
@@ -1027,7 +1049,7 @@ void MemStream::moveStart(int delta) {
 //------------------------------------------------------------------------
 
 EmbedStream::EmbedStream(Stream *strA, Object *dictA,
-			 GBool limitedA, Guint lengthA):
+			 GBool limitedA, Goffset lengthA):
     BaseStream(dictA, lengthA) {
   str = strA;
   limited = limitedA;
@@ -1037,8 +1059,13 @@ EmbedStream::EmbedStream(Stream *strA, Object *dictA,
 EmbedStream::~EmbedStream() {
 }
 
-Stream *EmbedStream::makeSubStream(Guint start, GBool limitedA,
-				   Guint lengthA, Object *dictA) {
+BaseStream *EmbedStream::copy() {
+  error(errInternal, -1, "Called copy() on EmbedStream");
+  return NULL;
+}
+
+Stream *EmbedStream::makeSubStream(Goffset start, GBool limitedA,
+				   Goffset lengthA, Object *dictA) {
   error(errInternal, -1, "Called makeSubStream() on EmbedStream");
   return NULL;
 }
@@ -1062,22 +1089,22 @@ int EmbedStream::getChars(int nChars, Guchar *buffer) {
   if (nChars <= 0) {
     return 0;
   }
-  if (limited && length < (Guint)nChars) {
-    nChars = (int)length;
+  if (limited && length < nChars) {
+    nChars = length;
   }
   return str->doGetChars(nChars, buffer);
 }
 
-void EmbedStream::setPos(Guint pos, int dir) {
+void EmbedStream::setPos(Goffset pos, int dir) {
   error(errInternal, -1, "Internal: called setPos() on EmbedStream");
 }
 
-Guint EmbedStream::getStart() {
+Goffset EmbedStream::getStart() {
   error(errInternal, -1, "Internal: called getStart() on EmbedStream");
   return 0;
 }
 
-void EmbedStream::moveStart(int delta) {
+void EmbedStream::moveStart(Goffset delta) {
   error(errInternal, -1, "Internal: called moveStart() on EmbedStream");
 }
 
@@ -1707,11 +1734,12 @@ int CCITTFaxStream::lookChar() {
 
     // 2-D encoding
     if (nextLine2D) {
-      for (i = 0; codingLine[i] < columns; ++i) {
+      for (i = 0; i < columns && codingLine[i] < columns; ++i) {
 	refLine[i] = codingLine[i];
       }
-      refLine[i++] = columns;
-      refLine[i] = columns;
+      for (; i < columns + 2; ++i) {
+	refLine[i] = columns;
+      }
       codingLine[0] = 0;
       a0i = 0;
       b1i = 0;
@@ -1723,7 +1751,7 @@ int CCITTFaxStream::lookChar() {
       //   codingLine[a0i = 0] = refLine[b1i = 0] = 0 is possible
       // exception at right edge:
       //   refLine[b1i] = refLine[b1i+1] = columns is possible
-      while (codingLine[a0i] < columns) {
+      while (codingLine[a0i] < columns && !err) {
 	code1 = getTwoDimCode();
 	switch (code1) {
 	case twoDimPass:
@@ -1757,49 +1785,109 @@ int CCITTFaxStream::lookChar() {
 	  }
 	  while (refLine[b1i] <= codingLine[a0i] && refLine[b1i] < columns) {
 	    b1i += 2;
+	    if (unlikely(b1i > columns + 1)) {
+	      error(errSyntaxError, getPos(),
+		"Bad 2D code {0:04x} in CCITTFax stream", code1);
+	      err = gTrue;
+	      break;
+	    }
 	  }
 	  break;
 	case twoDimVertR3:
+	  if (unlikely(b1i > columns + 1)) {
+	    error(errSyntaxError, getPos(),
+	      "Bad 2D code {0:04x} in CCITTFax stream", code1);
+	    err = gTrue;
+	    break;
+	  }
 	  addPixels(refLine[b1i] + 3, blackPixels);
 	  blackPixels ^= 1;
 	  if (codingLine[a0i] < columns) {
 	    ++b1i;
 	    while (refLine[b1i] <= codingLine[a0i] && refLine[b1i] < columns) {
 	      b1i += 2;
+	      if (unlikely(b1i > columns + 1)) {
+		error(errSyntaxError, getPos(),
+		  "Bad 2D code {0:04x} in CCITTFax stream", code1);
+		err = gTrue;
+		break;
+	      }
 	    }
 	  }
 	  break;
 	case twoDimVertR2:
+	  if (unlikely(b1i > columns + 1)) {
+	    error(errSyntaxError, getPos(),
+	      "Bad 2D code {0:04x} in CCITTFax stream", code1);
+	    err = gTrue;
+	    break;
+	  }
 	  addPixels(refLine[b1i] + 2, blackPixels);
 	  blackPixels ^= 1;
 	  if (codingLine[a0i] < columns) {
 	    ++b1i;
 	    while (refLine[b1i] <= codingLine[a0i] && refLine[b1i] < columns) {
 	      b1i += 2;
+	      if (unlikely(b1i > columns + 1)) {
+		error(errSyntaxError, getPos(),
+		  "Bad 2D code {0:04x} in CCITTFax stream", code1);
+		err = gTrue;
+		break;
+	      }
 	    }
 	  }
 	  break;
 	case twoDimVertR1:
+	  if (unlikely(b1i > columns + 1)) {
+	    error(errSyntaxError, getPos(),
+	      "Bad 2D code {0:04x} in CCITTFax stream", code1);
+	    err = gTrue;
+	    break;
+	  }
 	  addPixels(refLine[b1i] + 1, blackPixels);
 	  blackPixels ^= 1;
 	  if (codingLine[a0i] < columns) {
 	    ++b1i;
 	    while (refLine[b1i] <= codingLine[a0i] && refLine[b1i] < columns) {
 	      b1i += 2;
+	      if (unlikely(b1i > columns + 1)) {
+		error(errSyntaxError, getPos(),
+		  "Bad 2D code {0:04x} in CCITTFax stream", code1);
+		err = gTrue;
+		break;
+	      }
 	    }
 	  }
 	  break;
 	case twoDimVert0:
+	  if (unlikely(b1i > columns + 1)) {
+	    error(errSyntaxError, getPos(),
+	      "Bad 2D code {0:04x} in CCITTFax stream", code1);
+	    err = gTrue;
+	    break;
+	  }
 	  addPixels(refLine[b1i], blackPixels);
 	  blackPixels ^= 1;
 	  if (codingLine[a0i] < columns) {
 	    ++b1i;
 	    while (refLine[b1i] <= codingLine[a0i] && refLine[b1i] < columns) {
 	      b1i += 2;
+	      if (unlikely(b1i > columns + 1)) {
+		error(errSyntaxError, getPos(),
+		  "Bad 2D code {0:04x} in CCITTFax stream", code1);
+		err = gTrue;
+		break;
+	      }
 	    }
 	  }
 	  break;
 	case twoDimVertL3:
+	  if (unlikely(b1i > columns + 1)) {
+	    error(errSyntaxError, getPos(),
+	      "Bad 2D code {0:04x} in CCITTFax stream", code1);
+	    err = gTrue;
+	    break;
+	  }
 	  addPixelsNeg(refLine[b1i] - 3, blackPixels);
 	  blackPixels ^= 1;
 	  if (codingLine[a0i] < columns) {
@@ -1810,10 +1898,22 @@ int CCITTFaxStream::lookChar() {
 	    }
 	    while (refLine[b1i] <= codingLine[a0i] && refLine[b1i] < columns) {
 	      b1i += 2;
+	      if (unlikely(b1i > columns + 1)) {
+		error(errSyntaxError, getPos(),
+		  "Bad 2D code {0:04x} in CCITTFax stream", code1);
+		err = gTrue;
+		break;
+	      }
 	    }
 	  }
 	  break;
 	case twoDimVertL2:
+	  if (unlikely(b1i > columns + 1)) {
+	    error(errSyntaxError, getPos(),
+	      "Bad 2D code {0:04x} in CCITTFax stream", code1);
+	    err = gTrue;
+	    break;
+	  }
 	  addPixelsNeg(refLine[b1i] - 2, blackPixels);
 	  blackPixels ^= 1;
 	  if (codingLine[a0i] < columns) {
@@ -1824,10 +1924,22 @@ int CCITTFaxStream::lookChar() {
 	    }
 	    while (refLine[b1i] <= codingLine[a0i] && refLine[b1i] < columns) {
 	      b1i += 2;
+	      if (unlikely(b1i > columns + 1)) {
+	        error(errSyntaxError, getPos(),
+		  "Bad 2D code {0:04x} in CCITTFax stream", code1);
+	        err = gTrue;
+	        break;
+	      }
 	    }
 	  }
 	  break;
 	case twoDimVertL1:
+	  if (unlikely(b1i > columns + 1)) {
+	    error(errSyntaxError, getPos(),
+	      "Bad 2D code {0:04x} in CCITTFax stream", code1);
+	    err = gTrue;
+	    break;
+	  }
 	  addPixelsNeg(refLine[b1i] - 1, blackPixels);
 	  blackPixels ^= 1;
 	  if (codingLine[a0i] < columns) {
@@ -1838,6 +1950,12 @@ int CCITTFaxStream::lookChar() {
 	    }
 	    while (refLine[b1i] <= codingLine[a0i] && refLine[b1i] < columns) {
 	      b1i += 2;
+	      if (unlikely(b1i > columns + 1)) {
+		error(errSyntaxError, getPos(),
+		  "Bad 2D code {0:04x} in CCITTFax stream", code1);
+		err = gTrue;
+		break;
+	      }
 	    }
 	  }
 	  break;
@@ -2021,6 +2139,12 @@ int CCITTFaxStream::lookChar() {
 	outputBits = 0;
 	if (codingLine[a0i] < columns) {
 	  ++a0i;
+	  if (unlikely(a0i > columns)) {
+	    error(errSyntaxError, getPos(),
+	      "Bad bits {0:04x} in CCITTFax stream", bits);
+	      err = gTrue;
+	      break;
+	  }
 	  outputBits = codingLine[a0i] - codingLine[a0i - 1];
 	} else if (bits > 0) {
 	  buf <<= bits;
@@ -2288,7 +2412,8 @@ GBool CCITTFaxStream::isBinary(GBool last) {
 
 // clip [-256,511] --> [0,255]
 #define dctClipOffset 256
-static Guchar dctClip[768];
+#define dctClipLength 768
+static Guchar dctClip[dctClipLength];
 static int dctClipInit = 0;
 
 // zig zag decode map
@@ -2310,7 +2435,7 @@ static const int dctZigZag[64] = {
   63
 };
 
-DCTStream::DCTStream(Stream *strA, int colorXformA):
+DCTStream::DCTStream(Stream *strA, int colorXformA, Object *dict, int recursion):
     FilterStream(strA) {
   int i, j;
 
@@ -3244,7 +3369,12 @@ void DCTStream::transformDataUnit(Gushort *quantTable,
 
   // convert to 8-bit integers
   for (i = 0; i < 64; ++i) {
-    dataOut[i] = dctClip[dctClipOffset + 128 + ((dataIn[i] + 8) >> 4)];
+    const int ix = dctClipOffset + 128 + ((dataIn[i] + 8) >> 4);
+    if (unlikely(ix < 0 || ix >= dctClipLength)) {
+      dataOut[i] = 0;
+    } else {
+      dataOut[i] = dctClip[ix];
+    }
   }
 }
 
@@ -4399,7 +4529,12 @@ FlateStream::~FlateStream() {
   delete str;
 }
 
-void FlateStream::unfilteredReset() {
+void FlateStream::flateReset(GBool unfiltered) {
+  if (unfiltered)
+    str->unfilteredReset();
+  else
+    str->reset();
+
   index = 0;
   remain = 0;
   codeBuf = 0;
@@ -4407,14 +4542,16 @@ void FlateStream::unfilteredReset() {
   compressedBlock = gFalse;
   endOfBlock = gTrue;
   eof = gTrue;
+}
 
-  str->reset();
+void FlateStream::unfilteredReset() {
+  flateReset(gTrue);
 }
 
 void FlateStream::reset() {
   int cmf, flg;
 
-  unfilteredReset();
+  flateReset(gFalse);
 
   // read header
   //~ need to look at window size?

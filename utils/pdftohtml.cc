@@ -13,15 +13,17 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2007-2008, 2010, 2012 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2007-2008, 2010, 2012, 2015 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2010 Mike Slegeir <tehpola@yahoo.com>
-// Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+// Copyright (C) 2010, 2013 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
 // Copyright (C) 2010 OSSD CDAC Mumbai by Leena Chourey (leenac@cdacmumbai.in) and Onkar Potdar (onkar@cdacmumbai.in)
 // Copyright (C) 2011 Steven Murdoch <Steven.Murdoch@cl.cam.ac.uk>
 // Copyright (C) 2012 Igor Slepchin <igor.redhat@gmail.com>
 // Copyright (C) 2012 Ihar Filipau <thephilips@gmail.com>
 // Copyright (C) 2012 Luis Parravicini <lparravi@gmail.com>
+// Copyright (C) 2014 Pino Toscano <pino@kde.org>
+// Copyright (C) 2015 William Bader <williambader@hotmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -104,7 +106,11 @@ static const ArgDesc argDesc[] = {
    "don't print any messages or errors"},
   {"-h",      argFlag,     &printHelp,     0,
    "print usage information"},
+  {"-?",      argFlag,     &printHelp,     0,
+   "print usage information"},
   {"-help",   argFlag,     &printHelp,     0,
+   "print usage information"},
+  {"--help",  argFlag,     &printHelp,     0,
    "print usage information"},
   {"-p",      argFlag,     &printHtml,     0,
    "exchange .pdf links by .html"}, 
@@ -150,10 +156,8 @@ class SplashOutputDevNoText : public SplashOutputDev {
 public:
   SplashOutputDevNoText(SplashColorMode colorModeA, int bitmapRowPadA,
         GBool reverseVideoA, SplashColorPtr paperColorA,
-        GBool bitmapTopDownA = gTrue,
-        GBool allowAntialiasA = gTrue) : SplashOutputDev(colorModeA,
-            bitmapRowPadA, reverseVideoA, paperColorA, bitmapTopDownA,
-            allowAntialiasA) { }
+        GBool bitmapTopDownA = gTrue) : SplashOutputDev(colorModeA,
+            bitmapRowPadA, reverseVideoA, paperColorA, bitmapTopDownA) { }
   virtual ~SplashOutputDevNoText() { }
   
   void drawChar(GfxState *state, double x, double y,
@@ -165,7 +169,6 @@ public:
       CharCode code, Unicode *u, int uLen) { return false; }
   void endType3Char(GfxState *state) { }
   void beginTextObject(GfxState *state) { }
-  GBool deviceHasTextClip(GfxState *state) { return false; }
   void endTextObject(GfxState *state) { }
   GBool interpretType3Chars() { return gFalse; }
 };
@@ -186,6 +189,7 @@ int main(int argc, char *argv[]) {
   char *p;
   GooString *ownerPW, *userPW;
   Object info;
+  int exit_status = EXIT_FAILURE;
 
   // parse args
   ok = parseArgs(argDesc, &argc, argv);
@@ -197,7 +201,7 @@ int main(int argc, char *argv[]) {
     if (!printVersion) {
       printUsage("pdftohtml", "<PDF-file> [<html-file> <xml-file>]", argDesc);
     }
-    exit(1);
+    exit(printHelp || printVersion ? 0 : 1);
   }
  
   // init error file
@@ -323,6 +327,12 @@ int main(int argc, char *argv[]) {
     firstPage = 1;
   if (lastPage < 1 || lastPage > doc->getNumPages())
     lastPage = doc->getNumPages();
+  if (lastPage < firstPage) {
+    error(errCommandLine, -1,
+          "Wrong page range given: the first page ({0:d}) can not be after the last page ({1:d}).",
+          firstPage, lastPage);
+    goto error;
+  }
 
   doc->getDocInfo(&info);
   if (info.isDict()) {
@@ -425,6 +435,8 @@ int main(int argc, char *argv[]) {
   
   delete htmlOut;
 
+  exit_status = EXIT_SUCCESS;
+
   // clean up
  error:
   if(doc) delete doc;
@@ -438,7 +450,7 @@ int main(int argc, char *argv[]) {
   Object::memCheck(stderr);
   gMemReport(stderr);
 
-  return 0;
+  return exit_status;
 }
 
 static GooString* getInfoString(Dict *infoDict, const char *key) {

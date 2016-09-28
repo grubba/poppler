@@ -14,13 +14,14 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Takashi Iwai <tiwai@suse.de>
-// Copyright (C) 2009-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009-2015 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
 // Copyright (C) 2011 Andreas Hartmetz <ahartmetz@gmail.com>
 // Copyright (C) 2011 Andrea Canciani <ranma42@gmail.com>
 // Copyright (C) 2011 Adrian Johnson <ajohnson@redneon.com>
-// Copyright (C) 2012 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2012, 2015 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2015 William Bader <williambader@hotmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -40,6 +41,7 @@
 #include "poppler-config.h"
 #include "OutputDev.h"
 #include "GfxState.h"
+#include "GlobalParams.h"
 
 class PDFDoc;
 class Gfx8BitFont;
@@ -74,12 +76,15 @@ public:
 
   virtual GfxUnivariateShading *getShading() { return shading; }
 
+  virtual GBool isCMYK() { return gfxMode == csDeviceCMYK; }
+
 protected:
   Matrix ictm;
   double t0, t1, dt;
   GfxUnivariateShading *shading;
   GfxState *state;
   SplashColorMode colorMode;
+  GfxColorSpaceMode gfxMode;
 };
 
 class SplashAxialPattern: public SplashUnivariatePattern {
@@ -114,6 +119,8 @@ public:
 
   virtual GBool isStatic() { return gFalse; }
 
+  virtual GBool isCMYK() { return gfxMode == csDeviceCMYK; }
+
   virtual GBool isParameterized() { return shading->isParameterized(); }
   virtual int getNTriangles() { return shading->getNTriangles(); }
   virtual  void getTriangle(int i, double *x0, double *y0, double *color0,
@@ -128,6 +135,7 @@ private:
   GfxState *state;
   GBool bDirectColorTranslation;
   SplashColorMode mode;
+  GfxColorSpaceMode gfxMode;
 };
 
 // see GfxState.h, GfxRadialShading
@@ -163,7 +171,8 @@ public:
   SplashOutputDev(SplashColorMode colorModeA, int bitmapRowPadA,
 		  GBool reverseVideoA, SplashColorPtr paperColorA,
 		  GBool bitmapTopDownA = gTrue,
-		  GBool allowAntialiasA = gTrue);
+		  SplashThinLineMode thinLineMode = splashThinLineDefault,
+		  GBool overprintPreviewA = globalParams->getOverprintPreview());
 
   // Destructor.
   virtual ~SplashOutputDev();
@@ -195,7 +204,7 @@ public:
   //----- initialization and control
 
   // Start a page.
-  virtual void startPage(int pageNum, GfxState *state);
+  virtual void startPage(int pageNum, GfxState *state, XRef *xref);
 
   // End a page.
   virtual void endPage();
@@ -215,11 +224,15 @@ public:
   virtual void updateMiterLimit(GfxState *state);
   virtual void updateLineWidth(GfxState *state);
   virtual void updateStrokeAdjust(GfxState *state);
+  virtual void updateFillColorSpace(GfxState *state);
+  virtual void updateStrokeColorSpace(GfxState *state);
   virtual void updateFillColor(GfxState *state);
   virtual void updateStrokeColor(GfxState *state);
   virtual void updateBlendMode(GfxState *state);
   virtual void updateFillOpacity(GfxState *state);
   virtual void updateStrokeOpacity(GfxState *state);
+  virtual void updatePatternOpacity(GfxState *state);
+  virtual void clearPatternOpacity(GfxState *state);
   virtual void updateFillOverprint(GfxState *state);
   virtual void updateStrokeOverprint(GfxState *state);
   virtual void updateOverprintMode(GfxState *state);
@@ -256,7 +269,6 @@ public:
 			       CharCode code, Unicode *u, int uLen);
   virtual void endType3Char(GfxState *state);
   virtual void beginTextObject(GfxState *state);
-  virtual GBool deviceHasTextClip(GfxState *state) { return textClipPath; }
   virtual void endTextObject(GfxState *state);
 
   //----- image drawing
@@ -349,6 +361,9 @@ public:
   virtual void setVectorAntialias(GBool vaa);
 #endif
 
+  GBool getFontAntialias() { return fontAntialias; }
+  void setFontAntialias(GBool anti) { fontAntialias = anti; }
+
   void setFreeTypeHinting(GBool enable, GBool enableSlightHinting);
 
 protected:
@@ -362,6 +377,7 @@ private:
   SplashPattern *getColor(GfxRGB *rgb);
 #if SPLASH_CMYK
   SplashPattern *getColor(GfxCMYK *cmyk);
+  SplashPattern *getColor(GfxColor *deviceN);
 #endif
   void setOverprintMask(GfxColorSpace *colorSpace, GBool overprintFlag,
 			int overprintMode, GfxColor *singleColor, GBool grayIndexed = gFalse);
@@ -369,6 +385,12 @@ private:
 			  GBool dropEmptySubpaths);
   void drawType3Glyph(GfxState *state, T3FontCache *t3Font,
 		      T3FontCacheTag *tag, Guchar *data);
+#ifdef USE_CMS
+  GBool useIccImageSrc(void *data);
+  static void iccTransform(void *data, SplashBitmap *bitmap);
+  static GBool iccImageSrc(void *data, SplashColorPtr colorLine,
+			Guchar *alphaLine);
+#endif
   static GBool imageMaskSrc(void *data, SplashColorPtr line);
   static GBool imageSrc(void *data, SplashColorPtr colorLine,
 			Guchar *alphaLine);
@@ -385,8 +407,9 @@ private:
   int bitmapRowPad;
   GBool bitmapTopDown;
   GBool bitmapUpsideDown;
-  GBool allowAntialias;
+  GBool fontAntialias;
   GBool vectorAntialias;
+  GBool overprintPreview;
   GBool enableFreeTypeHinting;
   GBool enableSlightHinting;
   GBool reverseVideo;		// reverse video mode
@@ -396,6 +419,7 @@ private:
   GBool skipRotatedText;
 
   PDFDoc *doc;			// the current document
+  XRef *xref;       // the xref of the current document
 
   SplashBitmap *bitmap;
   Splash *splash;

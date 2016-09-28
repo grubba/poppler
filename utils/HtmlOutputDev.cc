@@ -17,7 +17,7 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2005-2012 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005-2013 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2008 Kjartan Maraas <kmaraas@gnome.org>
 // Copyright (C) 2008 Boris Toloknov <tlknv@yandex.ru>
 // Copyright (C) 2008 Haruyuki Kawabe <Haruyuki.Kawabe@unisys.co.jp>
@@ -25,7 +25,7 @@
 // Copyright (C) 2009 Warren Toomey <wkt@tuhs.org>
 // Copyright (C) 2009, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 Reece Dunn <msclrhd@gmail.com>
-// Copyright (C) 2010 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2010, 2012, 2013 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2010 OSSD CDAC Mumbai by Leena Chourey (leenac@cdacmumbai.in) and Onkar Potdar (onkar@cdacmumbai.in)
 // Copyright (C) 2011 Joshua Richardson <jric@chegg.com>
@@ -33,6 +33,11 @@
 // Copyright (C) 2011, 2012 Igor Slepchin <igor.slepchin@gmail.com>
 // Copyright (C) 2012 Ihar Filipau <thephilips@gmail.com>
 // Copyright (C) 2012 Gerald Schmidt <solahcin@gmail.com>
+// Copyright (C) 2012 Pino Toscano <pino@kde.org>
+// Copyright (C) 2013 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2013 Julien Nabet <serval2412@yahoo.fr>
+// Copyright (C) 2013 Johannes Brandstätter <jbrandstaetter@gmail.com>
+// Copyright (C) 2014 Fabio D'Urso <fabiodurso@hotmail.it>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -66,6 +71,10 @@
 #include "HtmlUtils.h"
 #include "Outline.h"
 #include "PDFDoc.h"
+
+#ifdef ENABLE_LIBPNG
+#include <png.h>
+#endif
 
 #define DEBUG __FILE__ << ": " << __LINE__ << ": DEBUG: "
 
@@ -400,19 +409,7 @@ void HtmlPage::addChar(GfxState *state, double x, double y,
     h1 /= uLen;
   }
   for (i = 0; i < uLen; ++i) {
-    Unicode u1 = u[i];
-    if (u1 >= 0xd800 && u1 <= 0xdbff && i < uLen) {
-      // surrogate pair
-      const Unicode u2 = u[i + 1];
-      if (u2 >= 0xdc00 && u2 <= 0xdfff) {
-	u1 = 0x10000 + ((u1 - 0xd800) << 10) + (u2 - 0xdc00);
-	
-	curStr->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, u1);
-      }
-      ++i;
-    } else {
-      curStr->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, u1);
-    }
+    curStr->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, u[i]);
   }
 }
 
@@ -1236,7 +1233,7 @@ HtmlOutputDev::~HtmlOutputDev() {
       delete pages;
 }
 
-void HtmlOutputDev::startPage(int pageNum, GfxState *state) {
+void HtmlOutputDev::startPage(int pageNum, GfxState *state, XRef *xref) {
 #if 0
   if (mode&&!xml){
     if (write){
@@ -1331,7 +1328,7 @@ void HtmlOutputDev::drawJpegImage(GfxState *state, Stream *str)
   // open the image file
   GooString *fName=createImageFileName("jpg");
   if (!(f1 = fopen(fName->getCString(), "wb"))) {
-    error(errIO, -1, "Couldn't open image file '%s'", fName->getCString());
+    error(errIO, -1, "Couldn't open image file '{0:t}'", fName);
     delete fName;
     return;
   }
@@ -1365,7 +1362,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
   // open the image file
   GooString *fName=createImageFileName("png");
   if (!(f1 = fopen(fName->getCString(), "wb"))) {
-    error(errIO, -1, "Couldn't open image file '%s'", fName->getCString());
+    error(errIO, -1, "Couldn't open image file '{0:t}'", fName);
     delete fName;
     return;
   }
@@ -1373,7 +1370,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
   PNGWriter *writer = new PNGWriter( isMask ? PNGWriter::MONOCHROME : PNGWriter::RGB );
   // TODO can we calculate the resolution of the image?
   if (!writer->init(f1, width, height, 72, 72)) {
-    error(errInternal, -1, "Can't init PNG for image '%s'", fName->getCString());
+    error(errInternal, -1, "Can't init PNG for image '{0:t}'", fName);
     delete writer;
     fclose(f1);
     return;
@@ -1405,7 +1402,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
       }
 
       if (!writer->writeRow(row_pointer)) {
-        error(errIO, -1, "Failed to write into PNG '%s'", fName->getCString());
+        error(errIO, -1, "Failed to write into PNG '{0:t}'", fName);
         delete writer;
         delete imgStr;
         fclose(f1);
@@ -1417,32 +1414,39 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
     delete imgStr;
   }
   else { // isMask == true
-    ImageStream *imgStr = new ImageStream(str, width, 1, 1);
-    imgStr->reset();
+    int size = (width + 7)/8;
 
-    Guchar *png_row = (Guchar *)gmalloc( width );
+    // PDF masks use 0 = draw current color, 1 = leave unchanged.
+    // We invert this to provide the standard interpretation of alpha
+    // (0 = transparent, 1 = opaque). If the colorMap already inverts
+    // the mask we leave the data unchanged.
+    int invert_bits = 0xff;
+    if (colorMap) {
+      GfxGray gray;
+      Guchar zero = 0;
+      colorMap->getGray(&zero, &gray);
+      if (colToByte(gray) == 0)
+        invert_bits = 0x00;
+    }
+
+    str->reset();
+    Guchar *png_row = (Guchar *)gmalloc(size);
 
     for (int ri = 0; ri < height; ++ri)
     {
-      // read the row of the mask
-      Guchar *bit_row = imgStr->getLine();
-
-      // invert for PNG
-      for(int i = 0; i < width; i++)
-        png_row[i] = bit_row[i] ? 0xff : 0x00;
+      for(int i = 0; i < size; i++)
+        png_row[i] = str->getChar() ^ invert_bits;
 
       if (!writer->writeRow( &png_row ))
       {
-        error(errIO, -1, "Failed to write into PNG '%s'", fName->getCString());
+        error(errIO, -1, "Failed to write into PNG '{0:t}'", fName);
         delete writer;
         fclose(f1);
-        delete imgStr;
         gfree(png_row);
         return;
       }
     }
-    imgStr->close();
-    delete imgStr;
+    str->close();
     gfree(png_row);
   }
 
@@ -1507,7 +1511,8 @@ void HtmlOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
   /*if( !globalParams->getErrQuiet() )
     printf("image stream of kind %d\n", str->getKind());*/
   // dump JPEG file
-  if (dumpJPEG && str->getKind() == strDCT) {
+  if (dumpJPEG && str->getKind() == strDCT && (colorMap->getNumPixelComps() == 1 ||
+	  colorMap->getNumPixelComps() == 3) && !inlineImg) {
     drawJpegImage(state, str);
   }
   else {
@@ -1706,9 +1711,9 @@ GBool HtmlOutputDev::dumpDocOutline(PDFDoc* doc)
 			GooString *str = Docname->copy();
 			str->append("-outline.html");
 			output = fopen(str->getCString(), "w");
+			delete str;
 			if (output == NULL)
 				return gFalse;
-			delete str;
 			bClose = gTrue;
 
 			GooString *htmlEncoding =
@@ -1802,7 +1807,7 @@ GBool HtmlOutputDev::newHtmlOutlineLevel(FILE *output, GooList *outlines, Catalo
 		atLeastOne = gTrue;
 
 		item->open();
-		if (item->hasKids())
+		if (item->hasKids() && item->getKids())
 		{
 			fputs("\n",output);
 			newHtmlOutlineLevel(output, item->getKids(), catalog, level+1);
@@ -1839,7 +1844,7 @@ void HtmlOutputDev::newXmlOutlineLevel(FILE *output, GooList *outlines, Catalog*
         delete titleStr;
 
         item->open();
-        if (item->hasKids())
+        if (item->hasKids() && item->getKids())
         {
             newXmlOutlineLevel(output, item->getKids(), catalog);
         }

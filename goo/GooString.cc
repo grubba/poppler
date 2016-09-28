@@ -20,7 +20,11 @@
 // Copyright (C) 2007 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2008-2011 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2011 Kenji Uno <ku@digitaldolphins.jp>
-// Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
+// Copyright (C) 2012, 2013 Fabio D'Urso <fabiodurso@hotmail.it>
+// Copyright (C) 2012 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2012 Pino Toscano <pino@kde.org>
+// Copyright (C) 2013 Jason Crain <jason@aquaticape.us>
+// Copyright (C) 2015 William Bader <williambader@hotmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -317,10 +321,11 @@ GooString *GooString::appendfv(const char *fmt, va_list argList) {
   int len, i;
   const char *p0, *p1;
   char *str;
+  GooStringFormatArg argsBuf[ 8 ];
 
   argsLen = 0;
-  argsSize = 8;
-  args = (GooStringFormatArg *)gmallocn(argsSize, sizeof(GooStringFormatArg));
+  argsSize = sizeof(argsBuf) / sizeof(argsBuf[0]);
+  args = argsBuf;
 
   p0 = fmt;
   while (*p0) {
@@ -389,8 +394,13 @@ GooString *GooString::appendfv(const char *fmt, va_list argList) {
 	if (idx == argsLen) {
 	  if (argsLen == argsSize) {
 	    argsSize *= 2;
-	    args = (GooStringFormatArg *)greallocn(args, argsSize,
+	    if (args == argsBuf) {
+	      args = (GooStringFormatArg *)gmallocn(argsSize, sizeof(GooStringFormatArg));
+	      memcpy(args, argsBuf, argsLen * sizeof(GooStringFormatArg));
+	    } else {
+	      args = (GooStringFormatArg *)greallocn(args, argsSize,
 						 sizeof(GooStringFormatArg));
+	    }
 	  }
 	  switch (ft) {
 	  case fmtIntDecimal:
@@ -629,7 +639,10 @@ GooString *GooString::appendfv(const char *fmt, va_list argList) {
     }
   }
 
-  gfree(args);
+  if (args != argsBuf) {
+    gfree(args);
+  }
+
   return this;
 }
 
@@ -648,18 +661,25 @@ void GooString::formatInt(long x, char *buf, int bufSize,
   const char *vals = upperCase ? upperCaseDigits : lowerCaseDigits;
   GBool neg;
   int start, i, j;
+#ifdef LLONG_MAX
+  unsigned long long abs_x;
+#else
+  unsigned long abs_x;
+#endif
 
   i = bufSize;
   if ((neg = x < 0)) {
-    x = -x;
+    abs_x = -x;
+  } else {
+    abs_x = x;
   }
   start = neg ? 1 : 0;
-  if (x == 0) {
+  if (abs_x == 0) {
     buf[--i] = '0';
   } else {
-    while (i > start && x) {
-      buf[--i] = vals[x % base];
-      x /= base;
+    while (i > start && abs_x) {
+      buf[--i] = vals[abs_x % base];
+      abs_x /= base;
     }
   }
   if (zeroFill) {
@@ -768,14 +788,12 @@ GooString *GooString::insert(int i, GooString *str) {
 }
 
 GooString *GooString::insert(int i, const char *str, int lengthA) {
-  int j;
   int prevLen = length;
   if (CALC_STRING_LEN == lengthA)
     lengthA = strlen(str);
 
   resize(length + lengthA);
-  for (j = prevLen; j >= i; --j)
-    s[j+lengthA] = s[j];
+  memmove(s+i+lengthA, s+i, prevLen-i);
   memcpy(s+i, str, lengthA);
   return this;
 }
@@ -893,9 +911,18 @@ int GooString::cmpN(const char *sA, int n) const {
   return 0;
 }
 
+GBool GooString::endsWith(const char *suffix) const {
+  int suffixLen = strlen(suffix);
+
+  if (length < suffixLen)
+    return gFalse;
+
+  return strcmp(s + length - suffixLen, suffix) == 0;
+}
+
 GBool GooString::hasUnicodeMarker(void)
 {
-    return (s[0] & 0xff) == 0xfe && (s[1] & 0xff) == 0xff;
+  return length > 1 && (s[0] & 0xff) == 0xfe && (s[1] & 0xff) == 0xff;
 }
 
 GooString *GooString::sanitizedName(GBool psmode)

@@ -13,8 +13,9 @@
 //
 // Copyright (C) 2005 Marco Pesenti Gritti <mpg@redhat.com>
 // Copyright (C) 2007, 2011 Albert Astals Cid <aacid@kde.org>
-// Copyright (C) 2010-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2010-2013, 2015 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
+// Copyright (C) 2012 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -55,11 +56,15 @@ typedef GBool (*SplashImageMaskSource)(void *data, SplashColorPtr pixel);
 typedef GBool (*SplashImageSource)(void *data, SplashColorPtr colorLine,
 				   Guchar *alphaLine);
 
+// Use ICCColorSpace to transform a bitmap
+typedef void (*SplashICCTransform)(void *data, SplashBitmap *bitmap);
+
 //------------------------------------------------------------------------
 
 enum SplashPipeResultColorCtrl {
 #if SPLASH_CMYK
   splashPipeResultColorNoAlphaBlendCMYK,
+  splashPipeResultColorNoAlphaBlendDeviceN,
 #endif
   splashPipeResultColorNoAlphaBlendRGB,
   splashPipeResultColorNoAlphaBlendMono,
@@ -67,12 +72,14 @@ enum SplashPipeResultColorCtrl {
   splashPipeResultColorAlphaNoBlendRGB,
 #if SPLASH_CMYK
   splashPipeResultColorAlphaNoBlendCMYK,
+  splashPipeResultColorAlphaNoBlendDeviceN,
 #endif
   splashPipeResultColorAlphaBlendMono,
   splashPipeResultColorAlphaBlendRGB
 #if SPLASH_CMYK
   ,
-  splashPipeResultColorAlphaBlendCMYK
+  splashPipeResultColorAlphaBlendCMYK,
+  splashPipeResultColorAlphaBlendDeviceN
 #endif
 };
 
@@ -122,6 +129,8 @@ public:
   void setBlendFunc(SplashBlendFunc func);
   void setStrokeAlpha(SplashCoord alpha);
   void setFillAlpha(SplashCoord alpha);
+  void setPatternAlpha(SplashCoord strokeAlpha, SplashCoord fillAlpha);
+  void clearPatternAlpha();
   void setFillOverprint(GBool fop);
   void setStrokeOverprint(GBool sop);
   void setOverprintMode(int opm);
@@ -207,9 +216,10 @@ public:
   //    BGR8         BGR8
   //    CMYK8        CMYK8
   // The matrix behaves as for fillImageMask.
-  SplashError drawImage(SplashImageSource src, void *srcData,
+  SplashError drawImage(SplashImageSource src, SplashICCTransform tf, void *srcData,
 			SplashColorMode srcMode, GBool srcAlpha,
-			int w, int h, SplashCoord *mat, GBool tilingPattern = gFalse);
+			int w, int h, SplashCoord *mat, GBool interpolate,
+			GBool tilingPattern = gFalse);
 
   // Composite a rectangular region from <src> onto this Splash
   // object.
@@ -227,6 +237,7 @@ public:
   // zero.
   SplashError blitTransparent(SplashBitmap *src, int xSrc, int ySrc,
 			      int xDest, int yDest, int w, int h);
+  void blitImage(SplashBitmap *src, GBool srcAlpha, int xDest, int yDest);
 
   //----- misc
 
@@ -242,6 +253,10 @@ public:
 
   // Set the minimum line width.
   void setMinLineWidth(SplashCoord w) { minLineWidth = w; }
+
+  // Setter/Getter for thin line mode
+  void setThinLineMode(SplashThinLineMode thinLineModeA) { thinLineMode = thinLineModeA; }
+  SplashThinLineMode getThinLineMode() { return thinLineMode; }
 
   // Get a bounding box which includes all modifications since the
   // last call to clearModRegion.
@@ -285,6 +300,7 @@ private:
   void pipeRunSimpleBGR8(SplashPipe *pipe);
 #if SPLASH_CMYK
   void pipeRunSimpleCMYK8(SplashPipe *pipe);
+  void pipeRunSimpleDeviceN8(SplashPipe *pipe);
 #endif
   void pipeRunAAMono1(SplashPipe *pipe);
   void pipeRunAAMono8(SplashPipe *pipe);
@@ -293,6 +309,7 @@ private:
   void pipeRunAABGR8(SplashPipe *pipe);
 #if SPLASH_CMYK
   void pipeRunAACMYK8(SplashPipe *pipe);
+  void pipeRunAADeviceN8(SplashPipe *pipe);
 #endif
   void pipeSetXY(SplashPipe *pipe, int x, int y);
   void pipeIncX(SplashPipe *pipe);
@@ -300,7 +317,7 @@ private:
   void drawAAPixelInit();
   void drawAAPixel(SplashPipe *pipe, int x, int y);
   void drawSpan(SplashPipe *pipe, int x0, int x1, int y, GBool noClip);
-  void drawAALine(SplashPipe *pipe, int x0, int x1, int y);
+  void drawAALine(SplashPipe *pipe, int x0, int x1, int y, GBool adjustLine = gFalse, Guchar lineOpacity = 0);
   void transform(SplashCoord *matrix, SplashCoord xi, SplashCoord yi,
 		 SplashCoord *xo, SplashCoord *yo);
   void updateModX(int x);
@@ -316,6 +333,7 @@ private:
 		    SplashCoord *matrix, SplashCoord flatness2,
 		    SplashPath *fPath);
   SplashPath *makeDashedPath(SplashPath *xPath);
+  void getBBoxFP(SplashPath *path, SplashCoord *xMinA, SplashCoord *yMinA, SplashCoord *xMaxA, SplashCoord *yMaxA);
   SplashError fillWithPattern(SplashPath *path, GBool eo,
 			      SplashPattern *pattern, SplashCoord alpha);
   GBool pathAllOutside(SplashPath *path);
@@ -344,15 +362,15 @@ private:
 		     SplashBitmap *dest);
   void blitMask(SplashBitmap *src, int xDest, int yDest,
 		SplashClipResult clipRes);
-  SplashError arbitraryTransformImage(SplashImageSource src, void *srcData,
+  SplashError arbitraryTransformImage(SplashImageSource src, SplashICCTransform tf, void *srcData,
 			       SplashColorMode srcMode, int nComps,
 			       GBool srcAlpha,
 			       int srcWidth, int srcHeight,
-			       SplashCoord *mat, GBool tilingPattern = gFalse);
+                               SplashCoord *mat, GBool interpolate, GBool tilingPattern = gFalse);
   SplashBitmap *scaleImage(SplashImageSource src, void *srcData,
 			   SplashColorMode srcMode, int nComps,
 			   GBool srcAlpha, int srcWidth, int srcHeight,
-			   int scaledWidth, int scaledHeight);
+			   int scaledWidth, int scaledHeight, GBool interpolate, GBool tilingPattern = gFalse);
   void scaleImageYdXd(SplashImageSource src, void *srcData,
 		      SplashColorMode srcMode, int nComps,
 		      GBool srcAlpha, int srcWidth, int srcHeight,
@@ -369,6 +387,11 @@ private:
 		      int scaledWidth, int scaledHeight,
 		      SplashBitmap *dest);
   void scaleImageYuXu(SplashImageSource src, void *srcData,
+		      SplashColorMode srcMode, int nComps,
+		      GBool srcAlpha, int srcWidth, int srcHeight,
+		      int scaledWidth, int scaledHeight,
+		      SplashBitmap *dest);
+  void scaleImageYuXuBilinear(SplashImageSource src, void *srcData,
 		      SplashColorMode srcMode, int nComps,
 		      GBool srcAlpha, int srcWidth, int srcHeight,
 		      int scaledWidth, int scaledHeight,
@@ -397,6 +420,7 @@ private:
   int alpha0X, alpha0Y;		// offset within alpha0Bitmap
   SplashCoord aaGamma[splashAASize * splashAASize + 1];
   SplashCoord minLineWidth;
+  SplashThinLineMode thinLineMode;
   int modXMin, modYMin, modXMax, modYMax;
   SplashClipResult opClipRes;
   GBool vectorAntialias;

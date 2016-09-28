@@ -1,7 +1,8 @@
 /* poppler-form.h: qt4 interface to poppler
  * Copyright (C) 2007-2008, 2011, Pino Toscano <pino@kde.org>
- * Copyright (C) 2008, 2011, 2012 Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2008, 2011, 2012, 2015, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2011 Carlos Garcia Campos <carlosgc@gnome.org>
+ * Copyright (C) 2012, Adam Reichold <adamreichold@myopera.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -226,13 +227,20 @@ void FormFieldButton::setState( bool state )
 QList<int> FormFieldButton::siblings() const
 {
   FormWidgetButton* fwb = static_cast<FormWidgetButton*>(m_formData->fm);
+  ::FormFieldButton* ffb = static_cast< ::FormFieldButton* >(fwb->getField());
   if (fwb->getButtonType() == formButtonPush)
     return QList<int>();
 
   QList<int> ret;
-  unsigned *sibls = fwb->getSiblingsID();
-  for (int i = 0; i < fwb->getNumSiblingsID(); ++i)
-    ret.append(sibls[i]);
+  for (int i = 0; i < ffb->getNumSiblings(); ++i)
+  {
+    ::FormFieldButton* sibling = static_cast< ::FormFieldButton* >(ffb->getSibling(i));
+    for (int j = 0; j < sibling->getNumWidgets(); ++j)
+    {
+        FormWidget *w = sibling->getWidget(j);
+        if (w) ret.append(w->getID());
+    }
+  }
 
   return ret;
 }
@@ -334,6 +342,7 @@ QStringList FormFieldChoice::choices() const
   FormWidgetChoice* fwc = static_cast<FormWidgetChoice*>(m_formData->fm);
   QStringList ret;
   int num = fwc->getNumChoices();
+  ret.reserve(num);
   for (int i = 0; i < num; ++i)
   {
     ret.append(UnicodeParsedString(fwc->getChoice(i)));
@@ -370,6 +379,28 @@ void FormFieldChoice::setCurrentChoices( const QList<int> &choice )
   fwc->deselectAll();
   for ( int i = 0; i < choice.count(); ++i )
     fwc->select( choice.at( i ) );
+}
+
+QString FormFieldChoice::editChoice() const
+{
+  FormWidgetChoice* fwc = static_cast<FormWidgetChoice*>(m_formData->fm);
+  
+  if ( fwc->isCombo() && fwc->hasEdit() )
+    return UnicodeParsedString(fwc->getEditChoice());
+  else
+    return QString();
+}
+
+void FormFieldChoice::setEditChoice(const QString& text)
+{
+  FormWidgetChoice* fwc = static_cast<FormWidgetChoice*>(m_formData->fm);
+  
+  if ( fwc->isCombo() && fwc->hasEdit() )
+  {
+    GooString* goo = QStringToUnicodeGooString( text );
+    fwc->setEditChoice( goo );
+    delete goo;
+  }
 }
 
 Qt::Alignment FormFieldChoice::textAlignment() const

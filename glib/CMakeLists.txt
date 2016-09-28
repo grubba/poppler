@@ -30,6 +30,7 @@ set(poppler_glib_public_headers
   poppler-movie.h
   poppler-media.h
   poppler.h
+  poppler-structure-element.h
 )
 
 find_program(GLIB2_MKENUMS glib-mkenums)
@@ -71,6 +72,7 @@ set(poppler_glib_SRCS
   poppler.cc
   poppler-cached-file-loader.cc
   poppler-input-stream.cc
+  poppler-structure-element.cc
 )
 set(poppler_glib_generated_SRCS
   ${CMAKE_CURRENT_BINARY_DIR}/poppler-enums.c
@@ -79,8 +81,11 @@ set(poppler_glib_generated_SRCS
   ${CMAKE_SOURCE_DIR}/poppler/CairoRescaleBox.cc
 )
 add_library(poppler-glib SHARED ${poppler_glib_SRCS} ${poppler_glib_generated_SRCS})
-set_target_properties(poppler-glib PROPERTIES VERSION 8.4.0 SOVERSION 8)
+set_target_properties(poppler-glib PROPERTIES VERSION 8.7.0 SOVERSION 8)
 target_link_libraries(poppler-glib poppler ${GLIB2_LIBRARIES} ${CAIRO_LIBRARIES} ${FREETYPE_LIBRARIES})
+if(HAVE_PTHREAD)
+   target_link_libraries(poppler-glib -lpthread)
+endif()
 install(TARGETS poppler-glib RUNTIME DESTINATION bin LIBRARY DESTINATION lib${LIB_SUFFIX} ARCHIVE DESTINATION lib${LIB_SUFFIX})
 
 install(FILES
@@ -105,12 +110,12 @@ endmacro(_list_prefix)
 if (HAVE_INTROSPECTION)
   include(GObjectIntrospectionMacros)
   set(INTROSPECTION_GIRS)
-  set(INTROSPECTION_SCANNER_ARGS "--add-include-path=${CMAKE_CURRENT_SOURCE_DIR}")
+  set(INTROSPECTION_SCANNER_ARGS "--add-include-path=${CMAKE_CURRENT_SOURCE_DIR} --warn-all")
   set(INTROSPECTION_COMPILER_ARGS "--includedir=${CMAKE_CURRENT_SOURCE_DIR}")
 
   set(introspection_files ${poppler_glib_SRCS} ${poppler_glib_public_headers})
   set(Poppler_0_18_gir "poppler-glib")
-  set(Poppler_0_18_gir_INCLUDES GObject-2.0 cairo-1.0)
+  set(Poppler_0_18_gir_INCLUDES GObject-2.0 Gio-2.0 cairo-1.0)
   get_directory_property(_tmp_includes INCLUDE_DIRECTORIES)
   _list_prefix(_includes _tmp_includes "-I")
   set(Poppler_0_18_gir_CFLAGS ${_includes})

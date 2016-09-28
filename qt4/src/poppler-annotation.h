@@ -3,9 +3,9 @@
  * Copyright (C) 2006, 2008 Pino Toscano <pino@kde.org>
  * Copyright (C) 2007, Brad Hards <bradh@frogmouth.net>
  * Copyright (C) 2010, Philip Lorenz <lorenzph+freedesktop@gmail.com>
- * Copyright (C) 2012, Tobias Koenig <tokoe@kdab.com>
+ * Copyright (C) 2012, 2015, Tobias Koenig <tobias.koenig@kdab.com>
  * Copyright (C) 2012, Guillermo A. Amaral B. <gamaral@kde.org>
- * Copyright (C) 2012, Fabio D'Urso <fabiodurso@hotmail.it>
+ * Copyright (C) 2012, 2013 Fabio D'Urso <fabiodurso@hotmail.it>
  * Adapting code from
  *   Copyright (C) 2004 by Enrico Ros <eros.kde@email.it>
  *
@@ -55,6 +55,8 @@ class FileAttachmentAnnotationPrivate;
 class SoundAnnotationPrivate;
 class MovieAnnotationPrivate;
 class ScreenAnnotationPrivate;
+class WidgetAnnotationPrivate;
+class RichMediaAnnotationPrivate;
 class EmbeddedFile;
 class Link;
 class SoundObject;
@@ -100,21 +102,125 @@ class POPPLER_QT4_EXPORT AnnotationUtils
  * contained by a Page in the document.
  *
  * \warning Different Annotation objects might point to the same annotation.
- *          Use uniqueName to test for Annotation equality
+ *
+ * \section annotCreation How to add annotations
+ *
+ * Create an Annotation object of the desired subclass (for example
+ * TextAnnotation) and set its properties:
+ * @code
+ * Poppler::TextAnnotation* myann = new Poppler::TextAnnotation(Poppler::TextAnnotation::InPlace);
+ * myann->setBoundary(QRectF(0.1, 0.1, 0.2, 0.2)); // normalized coordinates: (0,0) is top-left, (1,1) is bottom-right
+ * myann->setContents("Hello, world!");
+ * @endcode
+ * \note Always set a boundary rectangle, or nothing will be shown!
+ *
+ * Obtain a pointer to the Page where you want to add the annotation (refer to
+ * \ref req for instructions) and add the annotation:
+ * @code
+ * Poppler::Page* mypage = ...;
+ * mypage->addAnnotation(myann);
+ * @endcode
+ *
+ * You can keep on editing the annotation after it has been added to the page:
+ * @code
+ * myann->setContents("World, hello!"); // Let's change text...
+ * myann->setAuthor("Your name here");  // ...and set an author too
+ * @endcode
+ *
+ * When you're done with editing the annotation, you must destroy the Annotation
+ * object:
+ * @code
+ * delete myann;
+ * @endcode
+ *
+ * Use the PDFConverter class to save the modified document.
+ *
+ * \section annotFixedRotation FixedRotation flag specifics
+ *
+ * According to the PDF specification, annotations whose
+ * Annotation::FixedRotation flag is set must always be shown in their original
+ * orientation, no matter what the current rendering rotation or the page's
+ * Page::orientation() values are. In comparison with regular annotations, such
+ * annotations should therefore be transformed by an extra rotation at rendering
+ * time to "undo" such context-related rotations, which is equal to
+ * <code>-(rendering_rotation + page_orientation)</code>. The rotation pivot
+ * is the top-left corner of the boundary rectangle.
+ *
+ * In practice, %Poppler's \ref Page::renderToImage only "unrotates" the
+ * page orientation, and does <b>not</b> unrotate the rendering rotation.
+ * This ensures consistent renderings at different Page::Rotation values:
+ * annotations are always positioned as if they were being positioned at the
+ * default page orientation.
+ *
+ * Just like regular annotations, %Poppler Qt4 exposes normalized coordinates
+ * relative to the page's default orientation. However, behind the scenes, the
+ * coordinate system is different and %Poppler transparently transforms each
+ * shape. If you never call either Annotation::setFlags or
+ * Annotation::setBoundary, you don't need to worry about this; but if you do
+ * call them, then you need to adhere to the following rules:
+ *  - Whenever you toggle the Annotation::FixedRotation flag, you <b>must</b>
+ *    set again the boundary rectangle first, and then you <b>must</b> set
+ *    again any other geometry-related property.
+ *  - Whenever you modify the boundary rectangle of an annotation whose
+ *    Annotation::FixedRotation flag is set, you <b>must</b> set again any other
+ *    geometry-related property.
+ *
+ * These two rules are necessary to make %Poppler's transparent coordinate
+ * conversion work properly.
  */
 class POPPLER_QT4_EXPORT Annotation
 {
   friend class AnnotationUtils;
   friend class LinkMovie;
+  friend class LinkRendition;
 
   public:
     // enum definitions
+    /**
+     * Annotation subclasses
+     *
+     * \sa subType()
+     */
     // WARNING!!! oKular uses that very same values so if you change them notify the author!
-    enum SubType { AText = 1, ALine = 2, AGeom = 3, AHighlight = 4, AStamp = 5,
-                   AInk = 6, ALink = 7, ACaret = 8, AFileAttachment = 9, ASound = 10,
-                   AMovie = 11, AScreen = 12 /** \since 0.20 */, A_BASE = 0 };
-    enum Flag { Hidden = 1, FixedSize = 2, FixedRotation = 4, DenyPrint = 8,
-                DenyWrite = 16, DenyDelete = 32, ToggleHidingOnMouse = 64, External = 128 };
+    enum SubType
+    {
+        AText = 1,            ///< TextAnnotation
+        ALine = 2,            ///< LineAnnotation
+        AGeom = 3,            ///< GeomAnnotation
+        AHighlight = 4,       ///< HighlightAnnotation
+        AStamp = 5,           ///< StampAnnotation
+        AInk = 6,             ///< InkAnnotation
+        ALink = 7,            ///< LinkAnnotation
+        ACaret = 8,           ///< CaretAnnotation
+        AFileAttachment = 9,  ///< FileAttachmentAnnotation
+        ASound = 10,          ///< SoundAnnotation
+        AMovie = 11,          ///< MovieAnnotation
+        AScreen = 12,         ///< ScreenAnnotation \since 0.20
+        AWidget = 13,         ///< WidgetAnnotation \since 0.22
+        ARichMedia = 14,      ///< RichMediaAnnotation \since 0.36
+        A_BASE = 0
+    };
+
+    /**
+     * Annotation flags
+     *
+     * They can be OR'd together (e.g. Annotation::FixedRotation | Annotation::DenyPrint).
+     *
+     * \sa flags(), setFlags(int)
+     */
+    // NOTE: Only flags that are known to work are documented
+    enum Flag
+    {
+        Hidden = 1,                ///< Do not display or print the annotation
+        FixedSize = 2,
+        FixedRotation = 4,         ///< Do not rotate the annotation according to page orientation and rendering rotation \warning Extra care is needed with this flag: see \ref annotFixedRotation
+        DenyPrint = 8,             ///< Do not print the annotation
+        DenyWrite = 16,
+        DenyDelete = 32,
+        ToggleHidingOnMouse = 64,
+        External = 128
+    };
+
     enum LineStyle { Solid = 1, Dashed = 2, Beveled = 4, Inset = 8, Underline = 16 };
     enum LineEffect { NoEffect = 1, Cloudy = 2};
     enum RevScope { Root = 0 /** \since 0.20 */, Reply = 1, Group = 2, Delete = 4 };
@@ -149,10 +255,35 @@ class POPPLER_QT4_EXPORT Annotation
     QDateTime creationDate() const;
     void setCreationDate( const QDateTime &date );
 
+    /**
+     * Returns this annotation's flags
+     *
+     * \sa Flag, setFlags(int)
+     */
     int flags() const;
+    /**
+     * Sets this annotation's flags
+     *
+     * \sa Flag, flags(), \ref annotFixedRotation
+     */
     void setFlags( int flags );
 
+    /**
+     * Returns this annotation's boundary rectangle in normalized coordinates
+     *
+     * \sa setBoundary(const QRectF&)
+     */
     QRectF boundary() const;
+    /**
+     * Sets this annotation's boundary rectangle
+     *
+     * The boundary rectangle is the smallest rectangle that contains the
+     * annotation.
+     *
+     * \warning This property is mandatory: you must always set this.
+     *
+     * \sa boundary(), \ref annotFixedRotation
+     */
     void setBoundary( const QRectF &boundary );
 
     /**
@@ -238,7 +369,7 @@ class POPPLER_QT4_EXPORT Annotation
 
     /// \since 0.20
     Popup popup() const;
-    /// \since 0.20
+    /// \warning Currently does nothing \since 0.20
     void setPopup( const Popup& popup );
 
     /// \cond PRIVATE
@@ -271,6 +402,28 @@ class POPPLER_QT4_EXPORT Annotation
      * Destructor.
      */
     virtual ~Annotation();
+
+    /**
+     * Describes the flags from an annotations 'AA' dictionary.
+     *
+     * This flag is used by the additionalAction() method for ScreenAnnotation
+     * and WidgetAnnotation.
+     *
+     * \since 0.22
+     */
+    enum AdditionalActionType
+    {
+        CursorEnteringAction, ///< Performed when the cursor enters the annotation's active area
+        CursorLeavingAction,  ///< Performed when the cursor exists the annotation's active area
+        MousePressedAction,   ///< Performed when the mouse button is pressed inside the annotation's active area
+        MouseReleasedAction,  ///< Performed when the mouse button is released inside the annotation's active area
+        FocusInAction,        ///< Performed when the annotation receives the input focus
+        FocusOutAction,       ///< Performed when the annotation loses the input focus
+        PageOpeningAction,    ///< Performed when the page containing the annotation is opened
+        PageClosingAction,    ///< Performed when the page containing the annotation is closed
+        PageVisibleAction,    ///< Performed when the page containing the annotation becomes visible
+        PageInvisibleAction   ///< Performed when the page containing the annotation becomes invisible
+    };
 
   protected:
     /// \cond PRIVATE
@@ -840,12 +993,381 @@ class POPPLER_QT4_EXPORT ScreenAnnotation : public Annotation
      */
     void setScreenTitle( const QString &title );
 
+    /**
+     * Returns the additional action of the given @p type fo the annotation or
+     * @c 0 if no action has been defined.
+     *
+     * \since 0.22
+     */
+    Link* additionalAction( AdditionalActionType type ) const;
+
   private:
     ScreenAnnotation();
     ScreenAnnotation( ScreenAnnotationPrivate &dd );
     virtual void store( QDomNode &parentNode, QDomDocument &document ) const; // stub
     Q_DECLARE_PRIVATE( ScreenAnnotation )
     Q_DISABLE_COPY( ScreenAnnotation )
+};
+
+/**
+ * \short Widget annotation.
+ *
+ * The widget annotation represents a widget (form field) on a page.
+ *
+ * \note This class is just provided for consistency of the annotation API,
+ *       use the FormField classes to get all the form-related information.
+ *
+ * \since 0.22
+ */
+class POPPLER_QT4_EXPORT WidgetAnnotation : public Annotation
+{
+  friend class AnnotationPrivate;
+
+  public:
+    virtual ~WidgetAnnotation();
+
+    virtual SubType subType() const;
+
+    /**
+     * Returns the additional action of the given @p type fo the annotation or
+     * @c 0 if no action has been defined.
+     *
+     * \since 0.22
+     */
+    Link* additionalAction( AdditionalActionType type ) const;
+
+  private:
+    WidgetAnnotation();
+    WidgetAnnotation( WidgetAnnotationPrivate &dd );
+    virtual void store( QDomNode &parentNode, QDomDocument &document ) const; // stub
+    Q_DECLARE_PRIVATE( WidgetAnnotation )
+    Q_DISABLE_COPY( WidgetAnnotation )
+};
+
+/**
+ * \short RichMedia annotation.
+ *
+ * The RichMedia annotation represents a video or sound on a page.
+ *
+ * \since 0.36
+ */
+class POPPLER_QT4_EXPORT RichMediaAnnotation : public Annotation
+{
+  friend class AnnotationPrivate;
+
+  public:
+    virtual ~RichMediaAnnotation();
+
+    virtual SubType subType() const;
+
+    /**
+     * The params object of a RichMediaAnnotation::Instance object.
+     *
+     * The params object provides media specific parameters, to play
+     * back the media inside the PDF viewer.
+     *
+     * At the moment only parameters for flash player are supported.
+     */
+    class POPPLER_QT4_EXPORT Params
+    {
+      friend class AnnotationPrivate;
+
+      public:
+        Params();
+        ~Params();
+
+        /**
+         * Returns the parameters for the flash player.
+         */
+        QString flashVars() const;
+
+      private:
+        void setFlashVars( const QString &flashVars );
+
+        class Private;
+        QScopedPointer<Private> d;
+    };
+
+    /**
+     * The instance object of a RichMediaAnnotation::Configuration object.
+     *
+     * The instance object represents one media object, that should be shown
+     * on the page. It has a media type and a Params object, to define the
+     * media specific parameters.
+     */
+    class POPPLER_QT4_EXPORT Instance
+    {
+      friend class AnnotationPrivate;
+
+      public:
+        /**
+         * Describes the media type of the instance.
+         */
+        enum Type
+        {
+          Type3D,     ///< A 3D media file.
+          TypeFlash,  ///< A Flash media file.
+          TypeSound,  ///< A sound media file.
+          TypeVideo   ///< A video media file.
+        };
+
+        Instance();
+        ~Instance();
+
+        /**
+         * Returns the media type of the instance.
+         */
+        Type type() const;
+
+        /**
+         * Returns the params object of the instance or @c 0 if it doesn't exist.
+         */
+        RichMediaAnnotation::Params* params() const;
+
+      private:
+        void setType( Type type );
+        void setParams( RichMediaAnnotation::Params *params );
+
+        class Private;
+        QScopedPointer<Private> d;
+    };
+
+    /**
+     * The configuration object of a RichMediaAnnotation::Content object.
+     *
+     * The configuration object provides access to the various Instance objects
+     * of the rich media annotation.
+     */
+    class POPPLER_QT4_EXPORT Configuration
+    {
+      friend class AnnotationPrivate;
+
+      public:
+        /**
+         * Describes the media type of the configuration.
+         */
+        enum Type
+        {
+          Type3D,     ///< A 3D media file.
+          TypeFlash,  ///< A Flash media file.
+          TypeSound,  ///< A sound media file.
+          TypeVideo   ///< A video media file.
+        };
+
+        Configuration();
+        ~Configuration();
+
+        /**
+         * Returns the media type of the configuration.
+         */
+        Type type() const;
+
+        /**
+         * Returns the name of the configuration.
+         */
+        QString name() const;
+
+        /**
+         * Returns the list of Instance objects of the configuration.
+         */
+        QList< RichMediaAnnotation::Instance* > instances() const;
+
+      private:
+        void setType( Type type );
+        void setName( const QString &name );
+        void setInstances( const QList< RichMediaAnnotation::Instance* > &instances );
+
+        class Private;
+        QScopedPointer<Private> d;
+    };
+
+    /**
+     * The asset object of a RichMediaAnnotation::Content object.
+     *
+     * The asset object provides a mapping between identifier name, as
+     * used in the flash vars string of RichMediaAnnotation::Params,  and the
+     * associated file spec object.
+     */
+    class POPPLER_QT4_EXPORT Asset
+    {
+      friend class AnnotationPrivate;
+
+      public:
+        Asset();
+        ~Asset();
+
+        /**
+         * Returns the identifier name of the asset.
+         */
+        QString name() const;
+
+        /**
+         * Returns the embedded file the asset points to.
+         */
+        EmbeddedFile* embeddedFile() const;
+
+      private:
+        void setName( const QString &name );
+        void setEmbeddedFile( EmbeddedFile *embeddedFile );
+
+        class Private;
+        QScopedPointer<Private> d;
+    };
+
+    /**
+     * The content object of a RichMediaAnnotation.
+     *
+     * The content object provides access to the list of configurations
+     * and assets of the rich media annotation.
+     */
+    class POPPLER_QT4_EXPORT Content
+    {
+      friend class AnnotationPrivate;
+
+      public:
+        Content();
+        ~Content();
+
+        /**
+         * Returns the list of configuration objects of the content object.
+         */
+        QList< RichMediaAnnotation::Configuration* > configurations() const;
+
+        /**
+         * Returns the list of asset objects of the content object.
+         */
+        QList< RichMediaAnnotation::Asset* > assets() const;
+
+      private:
+        void setConfigurations( const QList< RichMediaAnnotation::Configuration* > &configurations );
+        void setAssets( const QList< RichMediaAnnotation::Asset* > &assets );
+
+        class Private;
+        QScopedPointer<Private> d;
+    };
+
+    /**
+     * The activation object of the RichMediaAnnotation::Settings object.
+     *
+     * The activation object is a wrapper around the settings for the activation
+     * state. At the moment it provides only the activation condition.
+     */
+    class POPPLER_QT4_EXPORT Activation
+    {
+      friend class AnnotationPrivate;
+
+      public:
+        /**
+         * Describes the condition for activating the rich media.
+         */
+        enum Condition {
+          PageOpened,   ///< Activate when page is opened.
+          PageVisible,  ///< Activate when page becomes visible.
+          UserAction    ///< Activate when user interacts with the annotation.
+        };
+
+        Activation();
+        ~Activation();
+
+        /**
+         * Returns the activation condition.
+         */
+        Condition condition() const;
+
+      private:
+        void setCondition( Condition condition );
+
+        class Private;
+        QScopedPointer<Private> d;
+    };
+
+    /**
+     * The deactivation object of the RichMediaAnnotation::Settings object.
+     *
+     * The deactivation object is a wrapper around the settings for the deactivation
+     * state. At the moment it provides only the deactivation condition.
+     */
+    class POPPLER_QT4_EXPORT Deactivation
+    {
+      friend class AnnotationPrivate;
+
+      public:
+        /**
+         * Describes the condition for deactivating the rich media.
+         */
+        enum Condition {
+          PageClosed,     ///< Deactivate when page is closed.
+          PageInvisible,  ///< Deactivate when page becomes invisible.
+          UserAction      ///< Deactivate when user interacts with the annotation.
+        };
+
+        Deactivation();
+        ~Deactivation();
+
+        /**
+         * Returns the deactivation condition.
+         */
+        Condition condition() const;
+
+      private:
+        void setCondition( Condition condition );
+
+        class Private;
+        QScopedPointer<Private> d;
+    };
+
+    /**
+     * The settings object of a RichMediaAnnotation.
+     *
+     * The settings object provides access to the configuration objects
+     * for annotation activation and deactivation.
+     */
+    class POPPLER_QT4_EXPORT Settings
+    {
+      friend class AnnotationPrivate;
+
+      public:
+        Settings();
+        ~Settings();
+
+        /**
+         * Returns the Activation object of the settings object or @c 0 if it doesn't exist.
+         */
+        RichMediaAnnotation::Activation* activation() const;
+
+        /**
+         * Returns the Deactivation object of the settings object or @c 0 if it doesn't exist.
+         */
+        RichMediaAnnotation::Deactivation* deactivation() const;
+
+      private:
+        void setActivation( RichMediaAnnotation::Activation *activation );
+        void setDeactivation( RichMediaAnnotation::Deactivation *deactivation );
+
+        class Private;
+        QScopedPointer<Private> d;
+    };
+
+    /**
+     * Returns the Settings object of the rich media annotation or @c 0 if it doesn't exist.
+     */
+    RichMediaAnnotation::Settings* settings() const;
+
+    /**
+     * Returns the Content object of the rich media annotation or @c 0 if it doesn't exist.
+     */
+    RichMediaAnnotation::Content* content() const;
+
+  private:
+    void setSettings( RichMediaAnnotation::Settings *settings );
+    void setContent( RichMediaAnnotation::Content *content );
+
+    RichMediaAnnotation();
+    RichMediaAnnotation( const QDomNode &node );
+    RichMediaAnnotation( RichMediaAnnotationPrivate &dd );
+    virtual void store( QDomNode &parentNode, QDomDocument &document ) const;
+    Q_DECLARE_PRIVATE( RichMediaAnnotation )
+    Q_DISABLE_COPY( RichMediaAnnotation )
 };
 
 }

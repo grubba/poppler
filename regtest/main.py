@@ -23,6 +23,8 @@ import backends
 import os
 from Config import Config
 
+from multiprocessing import cpu_count
+
 class ListAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string = None):
         setattr(namespace, self.dest, values.split(','))
@@ -39,6 +41,8 @@ class HelpAction(argparse.Action):
         sys.exit(0)
 
 def main(args):
+    n_cpus = cpu_count()
+
     parser = argparse.ArgumentParser(
         description = 'Poppler regression tests',
         prog = 'poppler-regtest',
@@ -49,6 +53,9 @@ def main(args):
     parser.add_argument('--help-command', metavar = 'COMMAND',
                         action = HelpAction,
                         help = 'Show help for a given command')
+    parser.add_argument('-v', '--verbose',
+                        action = 'store_true', dest = 'verbose', default = False,
+                        help = 'Run in verbose mode')
     parser.add_argument('--utils-dir',
                         action = 'store', dest = 'utils_dir', default = os.path.abspath("../utils"),
                         help = 'Directory of poppler utils used for the tests')
@@ -58,24 +65,34 @@ def main(args):
     parser.add_argument('--skip', metavar = 'FILE',
                         action = 'store', dest = 'skipped_file',
                         help = 'File containing tests to skip')
+    parser.add_argument('-p', '--passwords', metavar = 'FILE',
+                        action = 'store', dest = 'passwords_file',
+                        help = 'File containing the documents passwords')
+    parser.add_argument('-t', '--threads',
+                        action = 'store', dest = 'threads', type = int, default = n_cpus,
+                        help = 'Number of worker threads (Default: %d)' % n_cpus)
 
     ns, args = parser.parse_known_args(args)
     if not args:
         parser.print_help()
         sys.exit(0)
 
-    Config(vars(ns))
+    c = Config(vars(ns))
+
+    if c.threads <= 0:
+        c.threads = n_cpus - c.threads
+
     try:
-        commands.run(args)
+        return commands.run(args)
     except commands.UnknownCommandError:
         sys.stderr.write("Unknown command: %s\n" % (args[0]))
         commands.print_help()
-        sys.exit(1)
+        return 1
     except backends.UnknownBackendError as e:
         sys.stderr.write(str(e) + "\n")
         sys.stdout.write("Backends are: %s\n" % (", ".join([backend.get_name() for backend in backends.get_all_backends()])))
-        sys.exit(1)
+        return 1
 
 if __name__ == '__main__':
     import sys
-    main(sys.argv[1:])
+    sys.exit(main(sys.argv[1:]))

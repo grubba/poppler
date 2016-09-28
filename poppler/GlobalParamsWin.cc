@@ -1,11 +1,13 @@
 /* Written by Krzysztof Kowalczyk (http://blog.kowalczyk.info)
    but mostly based on xpdf code.
    
-   // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
-   // Copyright (C) 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
+   // Copyright (C) 2010, 2012 Hib Eris <hib@hiberis.nl>
+   // Copyright (C) 2012, 2013 Thomas Freitag <Thomas.Freitag@alfa.de>
    // Copyright (C) 2012 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
    // Copyright (C) 2012 Adrian Johnson <ajohnson@redneon.com>
    // Copyright (C) 2012 Mark Brand <mabrand@mabrand.nl>
+   // Copyright (C) 2013 Adam Reichold <adamreichold@myopera.com>
+   // Copyright (C) 2013 Dmytro Morgun <lztoad@gmail.com>
 
 TODO: instead of a fixed mapping defined in displayFontTab, it could
 scan the whole fonts directory, parse TTF files and build font
@@ -242,7 +244,7 @@ static bool FileExists(const char *path)
 
 void SysFontList::scanWindowsFonts(GooString *winFontDir) {
   OSVERSIONINFO version;
-  char *path;
+  const char *path;
   DWORD idx, valNameLen, dataLen, type;
   HKEY regKey;
   char valName[1024], data[1024];
@@ -408,9 +410,7 @@ void GlobalParams::setupBaseFonts(char * dir)
 {
     const char *dataRoot = popplerDataDir ? popplerDataDir : POPPLER_DATADIR;
     GooString *fileName = NULL;
-    struct stat buf;
-    FILE *file;
-    int size = 0;
+    GooFile *file;
 
     if (baseFontsInitialized)
         return;
@@ -444,24 +444,21 @@ void GlobalParams::setupBaseFonts(char * dir)
             delete fontPath;
         }
 
-        if (displayFontTab[i].warnIfMissing)
-          error(errSyntaxError, -1, "No display font for '{0:s}'", fontName);
+        if (displayFontTab[i].warnIfMissing) {
+            error(errSyntaxError, -1, "No display font for '{0:s}'", displayFontTab[i].name);
+            delete fontName;
+        }
     }
     if (winFontDir[0]) {
-      sysFonts->scanWindowsFonts(new GooString(winFontDir));
+        GooString gooWinFontsDir(winFontDir);
+        sysFonts->scanWindowsFonts(&gooWinFontsDir);
     }
 
     fileName = new GooString(dataRoot);
     fileName->append("/cidfmap");
-    if (stat(fileName->getCString(), &buf) == 0) {
-      size = buf.st_size;
-    }
+
     // try to open file
-#ifdef VMS
-    file = fopen(fileName->getCString(), "rb", "ctx=stm");
-#else
-    file = fopen(fileName->getCString(), "rb");
-#endif
+    file = GooFile::open(fileName);
 
     if (file != NULL) {
       Parser *parser;
@@ -470,36 +467,39 @@ void GlobalParams::setupBaseFonts(char * dir)
       obj1.initNull();
       parser = new Parser(NULL,
 	      new Lexer(NULL,
-	      new FileStream(file, 0, gFalse, size, &obj1)),
+	      new FileStream(file, 0, gFalse, file->size(), &obj1)),
 	      gTrue);
       obj1.free();
       parser->getObj(&obj1);
       while (!obj1.isEOF()) {
-	parser->getObj(&obj2);
-	if (obj1.isName()) {
-	  // Substitutions
-	  if (obj2.isDict()) {
-	    Object obj3;
-	    obj2.getDict()->lookup("Path", &obj3);
-	    if (obj3.isString())
-	      addFontFile(new GooString(obj1.getName()), obj3.getString()->copy());
-	    obj3.free();
-	  // Aliases
-	  } else if (obj2.isName()) {
-	    substFiles->add(new GooString(obj1.getName()), new GooString(obj2.getName()));
-	  }
-	}
-	obj2.free();
-	obj1.free();
-	parser->getObj(&obj1);
-	// skip trailing ';'
-	while (obj1.isCmd(";")) {
-	  obj1.free();
-	  parser->getObj(&obj1);
-	}
+	    parser->getObj(&obj2);
+	    if (obj1.isName()) {
+	      // Substitutions
+	      if (obj2.isDict()) {
+	        Object obj3;
+	        obj2.getDict()->lookup("Path", &obj3);
+	        if (obj3.isString())
+	          addFontFile(new GooString(obj1.getName()), obj3.getString()->copy());
+	        obj3.free();
+	      // Aliases
+	      } else if (obj2.isName()) {
+	        substFiles->add(new GooString(obj1.getName()), new GooString(obj2.getName()));
+	      }
+	    }
+	    obj2.free();
+	    obj1.free();
+	    parser->getObj(&obj1);
+	    // skip trailing ';'
+	    while (obj1.isCmd(";")) {
+	      obj1.free();
+	      parser->getObj(&obj1);
+	    }
       }
-      fclose(file);
+      delete file;
       delete parser;
+    }
+    else {
+        delete fileName;
     }
 }
 

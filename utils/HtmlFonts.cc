@@ -17,7 +17,7 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2007, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2007, 2010, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2008 Boris Toloknov <tlknv@yandex.ru>
 // Copyright (C) 2008 Tomas Are Haavet <tomasare@gmail.com>
 // Copyright (C) 2010 OSSD CDAC Mumbai by Leena Chourey (leenac@cdacmumbai.in) and Onkar Potdar (onkar@cdacmumbai.in)
@@ -25,6 +25,7 @@
 // Copyright (C) 2011 Stephen Reichling <sreichling@chegg.com>
 // Copyright (C) 2012 Igor Slepchin <igor.slepchin@gmail.com>
 // Copyright (C) 2012 Luis Parravicini <lparravi@gmail.com>
+// Copyright (C) 2013 Julien Nabet <serval2412@yahoo.fr>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -83,10 +84,10 @@ GooString *HtmlFontColor::convtoX(unsigned int xcol) const{
   char tmp;
   unsigned  int k;
   k = (xcol/16);
-  if ((k>=0)&&(k<10)) tmp=(char) ('0'+k); else tmp=(char)('a'+k-10);
+  if (k<10) tmp=(char) ('0'+k); else tmp=(char)('a'+k-10);
   xret->append(tmp);
   k = (xcol%16);
-  if ((k>=0)&&(k<10)) tmp=(char) ('0'+k); else tmp=(char)('a'+k-10);
+  if (k<10) tmp=(char) ('0'+k); else tmp=(char)('a'+k-10);
   xret->append(tmp);
  return xret;
 }
@@ -297,7 +298,7 @@ HtmlFontAccu::~HtmlFontAccu(){
 
 int HtmlFontAccu::AddFont(const HtmlFont& font){
  std::vector<HtmlFont>::iterator i; 
- for (i=accu->begin();i!=accu->end();i++)
+ for (i=accu->begin();i!=accu->end();++i)
  {
 	if (font.isEqual(*i)) 
 	{

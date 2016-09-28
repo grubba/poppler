@@ -15,20 +15,26 @@
 //
 // Copyright (C) 2005-2007 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
-// Copyright (C) 2006-2008, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2006, 2007 Ed Catmur <ed@catmur.co.uk>
+// Copyright (C) 2006-2008, 2011-2013 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2006, 2007, 2013 Ed Catmur <ed@catmur.co.uk>
 // Copyright (C) 2006 Jeff Muizelaar <jeff@infidigm.net>
-// Copyright (C) 2007, 2008 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2007, 2008, 2012 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008 Koji Otani <sho@bbr.jp>
-// Copyright (C) 2008, 2010, 2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2008, 2010-2012, 2014, 2015 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2008, 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2009 Ross Moore <ross@maths.mq.edu.au>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
 // Copyright (C) 2010 Brian Ewins <brian.ewins@gmail.com>
+// Copyright (C) 2010 Marek Kasik <mkasik@redhat.com>
 // Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
 // Copyright (C) 2011 Sam Liao <phyomh@gmail.com>
 // Copyright (C) 2012 Horst Prote <prote@fmi.uni-stuttgart.de>
+// Copyright (C) 2012, 2013-2015 Jason Crain <jason@aquaticape.us>
+// Copyright (C) 2012 Peter Breitenlohner <peb@mppmu.mpg.de>
+// Copyright (C) 2013 José Aliste <jaliste@src.gnome.org>
+// Copyright (C) 2013 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2013 Ed Catmur <ed@catmur.co.uk>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -63,7 +69,7 @@
 #include "TextOutputDev.h"
 #include "Page.h"
 #include "Annot.h"
-#include "PDFDocEncoding.h"
+#include "UTF.h"
 
 #ifdef MACOS
 // needed for setting type/creator of MacOS files
@@ -127,7 +133,7 @@
 
 // Minimum spacing between characters within a word, as a fraction of
 // the font size.
-#define minCharSpacing -0.2
+#define minCharSpacing -0.5
 
 // Maximum spacing between characters within a word, as a fraction of
 // the font size, when there is no obvious extra-wide character
@@ -166,6 +172,11 @@
 
 // Max distance between edge of text and edge of link border
 #define hyperlinkSlack 2
+
+// Max distance between characters when combining a base character and
+// combining character
+#define combMaxMidDelta 0.3
+#define combMaxBaseDelta 0.4
 
 //------------------------------------------------------------------------
 // TextUnderline
@@ -230,108 +241,31 @@ GBool TextFontInfo::matches(TextFontInfo *fontInfo) {
   return gfxFont == fontInfo->gfxFont;
 }
 
+double TextFontInfo::getAscent() {
+  return gfxFont ? gfxFont->getAscent() : 0.95;
+}
+
+double TextFontInfo::getDescent() {
+  return gfxFont ? gfxFont->getDescent() : -0.35;
+}
+
+int TextFontInfo::getWMode() {
+  return gfxFont ? gfxFont->getWMode() : 0;
+}
+
 //------------------------------------------------------------------------
 // TextWord
 //------------------------------------------------------------------------
 
-TextWord::TextWord(GfxState *state, int rotA, double x0, double y0,
-		   TextFontInfo *fontA, double fontSizeA) {
-  GfxFont *gfxFont;
-  double x, y, ascent, descent;
-  int wMode;
-  
+TextWord::TextWord(GfxState *state, int rotA, double fontSizeA) {
   rot = rotA;
-  font = fontA;
   fontSize = fontSizeA;
-  state->transform(x0, y0, &x, &y);
-  if ((gfxFont = font->gfxFont)) {
-    ascent = gfxFont->getAscent() * fontSize;
-    descent = gfxFont->getDescent() * fontSize;
-    wMode = gfxFont->getWMode();
-  } else {
-    // this means that the PDF file draws text without a current font,
-    // which should never happen
-    ascent = 0.95 * fontSize;
-    descent = -0.35 * fontSize;
-    wMode = 0;
-  }
-  if (wMode) { // vertical writing mode
-    // NB: the rotation value has been incremented by 1 (in
-    // TextPage::beginWord()) for vertical writing mode
-    switch (rot) {
-    case 0:
-      yMin = y - fontSize;
-      yMax = y;
-      base = y;
-      break;
-    case 1:
-      xMin = x;
-      xMax = x + fontSize;
-      base = x;
-      break;
-    case 2:
-      yMin = y;
-      yMax = y + fontSize;
-      base = y;
-      break;
-    case 3:
-      xMin = x - fontSize;
-      xMax = x;
-      base = x;
-      break;
-    }
-  } else { // horizontal writing mode
-    switch (rot) {
-    case 0:
-      yMin = y - ascent;
-      yMax = y - descent;
-      if (yMin == yMax) {
-	// this is a sanity check for a case that shouldn't happen -- but
-	// if it does happen, we want to avoid dividing by zero later
-	yMin = y;
-	yMax = y + 1;
-      }
-      base = y;
-      break;
-    case 1:
-      xMin = x + descent;
-      xMax = x + ascent;
-      if (xMin == xMax) {
-	// this is a sanity check for a case that shouldn't happen -- but
-	// if it does happen, we want to avoid dividing by zero later
-	xMin = x;
-	xMax = x + 1;
-      }
-      base = x;
-      break;
-    case 2:
-      yMin = y + descent;
-      yMax = y + ascent;
-      if (yMin == yMax) {
-	// this is a sanity check for a case that shouldn't happen -- but
-	// if it does happen, we want to avoid dividing by zero later
-	yMin = y;
-	yMax = y + 1;
-      }
-      base = y;
-      break;
-    case 3:
-      xMin = x - ascent;
-      xMax = x - descent;
-      if (xMin == xMax) {
-	// this is a sanity check for a case that shouldn't happen -- but
-	// if it does happen, we want to avoid dividing by zero later
-	xMin = x;
-	xMax = x + 1;
-      }
-      base = x;
-      break;
-    }
-  }
   text = NULL;
   charcode = NULL;
   edge = NULL;
   charPos = NULL;
+  font = NULL;
+  textMat = NULL;
   len = size = 0;
   spaceAfter = gFalse;
   next = NULL;
@@ -358,54 +292,41 @@ TextWord::~TextWord() {
   gfree(charcode);
   gfree(edge);
   gfree(charPos);
+  gfree(font);
+  gfree(textMat);
 }
 
-void TextWord::addChar(GfxState *state, double x, double y,
+void TextWord::addChar(GfxState *state, TextFontInfo *fontA, double x, double y,
 		       double dx, double dy, int charPosA, int charLen,
-		       CharCode c, Unicode u) {
-  int wMode;
-
-  if (len == size) {
-    size += 16;
-    text = (Unicode *)greallocn(text, size, sizeof(Unicode));
-    charcode = (Unicode *)greallocn(charcode, size, sizeof(CharCode));
-    edge = (double *)greallocn(edge, (size + 1), sizeof(double));
-    charPos = (int *)greallocn(charPos, size + 1, sizeof(int));
-  }
+		       CharCode c, Unicode u, const Matrix &textMatA) {
+  ensureCapacity(len+1);
   text[len] = u;
   charcode[len] = c;
   charPos[len] = charPosA;
   charPos[len + 1] = charPosA + charLen;
-  wMode = font->gfxFont ? font->gfxFont->getWMode() : 0;
+  font[len] = fontA;
+  textMat[len] = textMatA;
+
+  if (len == 0)
+    setInitialBounds(fontA, x, y);
+
   if (wMode) { // vertical writing mode
     // NB: the rotation value has been incremented by 1 (in
     // TextPage::beginWord()) for vertical writing mode
     switch (rot) {
     case 0:
-      if (len == 0) {
-	xMin = x - fontSize;
-      }
       edge[len] = x - fontSize;
       xMax = edge[len+1] = x;
       break;
     case 1:
-      if (len == 0) {
-	yMin = y - fontSize;
-      }
       edge[len] = y - fontSize;
       yMax = edge[len+1] = y;
       break;
     case 2:
-      if (len == 0) {
-	xMax = x + fontSize;
-      }
       edge[len] = x + fontSize;
       xMin = edge[len+1] = x;
       break;
     case 3:
-      if (len == 0) {
-	yMax = y + fontSize;
-      }
       edge[len] = y + fontSize;
       yMin = edge[len+1] = y;
       break;
@@ -413,36 +334,287 @@ void TextWord::addChar(GfxState *state, double x, double y,
   } else { // horizontal writing mode
     switch (rot) {
     case 0:
-      if (len == 0) {
-	xMin = x;
-      }
       edge[len] = x;
       xMax = edge[len+1] = x + dx;
       break;
     case 1:
-      if (len == 0) {
-	yMin = y;
-      }
       edge[len] = y;
       yMax = edge[len+1] = y + dy;
       break;
     case 2:
-      if (len == 0) {
-	xMax = x;
-      }
       edge[len] = x;
       xMin = edge[len+1] = x + dx;
       break;
     case 3:
-      if (len == 0) {
-	yMax = y;
-      }
       edge[len] = y;
       yMin = edge[len+1] = y + dy;
       break;
    }
   }
   ++len;
+}
+
+void TextWord::setInitialBounds(TextFontInfo *fontA, double x, double y) {
+  double ascent = fontA->getAscent() * fontSize;
+  double descent = fontA->getDescent() * fontSize;
+  wMode = fontA->getWMode();
+
+  if (wMode) { // vertical writing mode
+    // NB: the rotation value has been incremented by 1 (in
+    // TextPage::beginWord()) for vertical writing mode
+    switch (rot) {
+    case 0:
+      xMin = x - fontSize;
+      yMin = y - fontSize;
+      yMax = y;
+      base = y;
+      break;
+    case 1:
+      xMin = x;
+      yMin = y - fontSize;
+      xMax = x + fontSize;
+      base = x;
+      break;
+    case 2:
+      yMin = y;
+      xMax = x + fontSize;
+      yMax = y + fontSize;
+      base = y;
+      break;
+    case 3:
+      xMin = x - fontSize;
+      xMax = x;
+      yMax = y + fontSize;
+      base = x;
+      break;
+    }
+  } else { // horizontal writing mode
+    switch (rot) {
+    case 0:
+      xMin = x;
+      yMin = y - ascent;
+      yMax = y - descent;
+      if (yMin == yMax) {
+	// this is a sanity check for a case that shouldn't happen -- but
+	// if it does happen, we want to avoid dividing by zero later
+	yMin = y;
+	yMax = y + 1;
+      }
+      base = y;
+      break;
+    case 1:
+      xMin = x + descent;
+      yMin = y;
+      xMax = x + ascent;
+      if (xMin == xMax) {
+	// this is a sanity check for a case that shouldn't happen -- but
+	// if it does happen, we want to avoid dividing by zero later
+	xMin = x;
+	xMax = x + 1;
+      }
+      base = x;
+      break;
+    case 2:
+      yMin = y + descent;
+      xMax = x;
+      yMax = y + ascent;
+      if (yMin == yMax) {
+	// this is a sanity check for a case that shouldn't happen -- but
+	// if it does happen, we want to avoid dividing by zero later
+	yMin = y;
+	yMax = y + 1;
+      }
+      base = y;
+      break;
+    case 3:
+      xMin = x - ascent;
+      xMax = x - descent;
+      yMax = y;
+      if (xMin == xMax) {
+	// this is a sanity check for a case that shouldn't happen -- but
+	// if it does happen, we want to avoid dividing by zero later
+	xMin = x;
+	xMax = x + 1;
+      }
+      base = x;
+      break;
+    }
+  }
+}
+
+void TextWord::ensureCapacity(int capacity) {
+  if (capacity > size) {
+    size = std::max(size + 16, capacity);
+    text = (Unicode *)greallocn(text, size, sizeof(Unicode));
+    charcode = (CharCode *)greallocn(charcode, (size + 1), sizeof(CharCode));
+    edge = (double *)greallocn(edge, (size + 1), sizeof(double));
+    charPos = (int *)greallocn(charPos, size + 1, sizeof(int));
+    font = (TextFontInfo **)greallocn(font, size, sizeof(TextFontInfo *));
+    textMat = (Matrix *)greallocn(textMat, size, sizeof(Matrix));
+  }
+}
+
+struct CombiningTable {
+  Unicode base;
+  Unicode comb;
+};
+
+static struct CombiningTable combiningTable[] = {
+  {0x0060, 0x0300}, // grave
+  {0x00a8, 0x0308}, // dieresis
+  {0x00af, 0x0304}, // macron
+  {0x00b4, 0x0301}, // acute
+  {0x00b8, 0x0327}, // cedilla
+  {0x02c6, 0x0302}, // circumflex
+  {0x02c7, 0x030c}, // caron
+  {0x02d8, 0x0306}, // breve
+  {0x02d9, 0x0307}, // dotaccent
+  {0x02da, 0x030a}, // ring
+  {0x02dc, 0x0303}, // tilde
+  {0x02dd, 0x030b}  // hungarumlaut (double acute accent)
+};
+
+// returning combining versions of characters
+Unicode getCombiningChar(Unicode u) {
+  int len = sizeof(combiningTable) / sizeof(combiningTable[0]);
+  for (int i = 0; i < len; ++i) {
+    if (u == combiningTable[i].base)
+      return combiningTable[i].comb;
+  }
+  return 0;
+}
+
+GBool TextWord::addCombining(GfxState *state, TextFontInfo *fontA, double fontSizeA, double x, double y,
+			     double dx, double dy, int charPosA, int charLen,
+			     CharCode c, Unicode u, const Matrix &textMatA) {
+  if (len == 0 || wMode != 0 || fontA->getWMode() != 0)
+    return gFalse;
+
+  Unicode cCurrent = getCombiningChar(u);
+  Unicode cPrev = getCombiningChar(text[len-1]);
+  double edgeMid = (edge[len-1] + edge[len]) / 2;
+  double charMid, maxScaledMidDelta, charBase, maxScaledBaseDelta;
+
+  if (cCurrent != 0 && unicodeTypeAlphaNum(text[len-1])) {
+    // Current is a combining character, previous is base character
+    maxScaledMidDelta = fabs(edge[len] - edge[len-1]) * combMaxMidDelta;
+    charMid = charBase = maxScaledBaseDelta = 0;
+
+    // Test if characters overlap
+    if (rot == 0 || rot == 2) {
+      charMid = x + (dx / 2);
+      charBase = y;
+      maxScaledBaseDelta = (yMax - yMin) * combMaxBaseDelta;
+    } else {
+      charMid = y + (dy / 2);
+      charBase = x;
+      maxScaledBaseDelta = (xMax - xMin) * combMaxBaseDelta;
+    }
+
+    if (fabs(charMid - edgeMid) >= maxScaledMidDelta ||
+	fabs(charBase - base) >= maxScaledBaseDelta)
+      return gFalse;
+
+    // Add character, but don't adjust edge / bounding box because
+    // combining character's positioning could be odd.
+    ensureCapacity(len+1);
+    text[len] = cCurrent;
+    charcode[len] = c;
+    charPos[len] = charPosA;
+    charPos[len+1] = charPosA + charLen;
+    font[len] = fontA;
+    textMat[len] = textMatA;
+    edge[len+1] = edge[len];
+    edge[len] = (edge[len+1] + edge[len-1]) / 2;
+    ++len;
+    return gTrue;
+  }
+
+  if (cPrev != 0 && unicodeTypeAlphaNum(u)) {
+    // Previous is a combining character, current is base character
+    maxScaledBaseDelta = (fontA->getAscent() - fontA->getDescent()) * fontSizeA * combMaxBaseDelta;
+    charMid = charBase = maxScaledMidDelta = 0;
+
+    // Test if characters overlap
+    if (rot == 0 || rot == 2) {
+      charMid = x + (dx / 2);
+      charBase = y;
+      maxScaledMidDelta = fabs(dx * combMaxMidDelta);
+    } else {
+      charMid = y + (dy / 2);
+      charBase = x;
+      maxScaledMidDelta = fabs(dy * combMaxMidDelta);
+    }
+
+    if (fabs(charMid - edgeMid) >= maxScaledMidDelta ||
+	fabs(charBase - base) >= maxScaledBaseDelta)
+      return gFalse;
+
+    // move combining character to after base character
+    ensureCapacity(len+1);
+    fontSize = fontSizeA;
+    text[len] = cPrev;
+    charcode[len] = charcode[len-1];
+    charPos[len] = charPosA;
+    charPos[len+1] = charPosA + charLen;
+    font[len] = font[len-1];
+    textMat[len] = textMat[len-1];
+
+    text[len-1] = u;
+    charcode[len-1] = c;
+    font[len-1] = fontA;
+    textMat[len-1] = textMatA;
+
+    if (len == 1)
+      setInitialBounds(fontA, x, y);
+
+    // Updated edges / bounding box because we changed the base
+    // character.
+    if (wMode) {
+      switch (rot) {
+      case 0:
+	edge[len-1] = x - fontSize;
+	xMax = edge[len+1] = x;
+	break;
+      case 1:
+	edge[len-1] = y - fontSize;
+	yMax = edge[len+1] = y;
+	break;
+      case 2:
+	edge[len-1] = x + fontSize;
+	xMin = edge[len+1] = x;
+	break;
+      case 3:
+	edge[len-1] = y + fontSize;
+	yMin = edge[len+1] = y;
+	break;
+      }
+    } else {
+      switch (rot) {
+      case 0:
+	edge[len-1] = x;
+	xMax = edge[len+1] = x + dx;
+	break;
+      case 1:
+	edge[len-1] = y;
+	yMax = edge[len+1] = y + dy;
+	break;
+      case 2:
+	edge[len-1] = x;
+	xMin = edge[len+1] = x + dx;
+	break;
+      case 3:
+	edge[len-1] = y;
+	yMin = edge[len+1] = y + dy;
+	break;
+      }
+    }
+
+    edge[len] = (edge[len+1] + edge[len-1]) / 2;
+    ++len;
+    return gTrue;
+  }
+  return gFalse;
 }
 
 void TextWord::merge(TextWord *word) {
@@ -460,18 +632,14 @@ void TextWord::merge(TextWord *word) {
   if (word->yMax > yMax) {
     yMax = word->yMax;
   }
-  if (len + word->len > size) {
-    size = len + word->len;
-    text = (Unicode *)greallocn(text, size, sizeof(Unicode));
-    charcode = (CharCode *)greallocn(charcode, (size + 1), sizeof(CharCode));
-    edge = (double *)greallocn(edge, (size + 1), sizeof(double));
-    charPos = (int *)greallocn(charPos, size + 1, sizeof(int));
-  }
+  ensureCapacity(len + word->len);
   for (i = 0; i < word->len; ++i) {
     text[len + i] = word->text[i];
     charcode[len + i] = word->charcode[i];
     edge[len + i] = word->edge[i];
     charPos[len + i] = word->charPos[i];
+    font[len + i] = word->font[i];
+    textMat[len + i] = word->textMat[i];
   }
   edge[len + word->len] = word->edge[word->len];
   charPos[len + word->len] = word->charPos[word->len];
@@ -631,6 +799,10 @@ void TextPool::addWord(TextWord *word) {
   TextWord *w0, *w1;
 
   // expand the array if needed
+  if (unlikely((word->base / textPoolStep) > INT_MAX)) {
+      error(errSyntaxWarning, -1, "word->base / textPoolStep > INT_MAX");
+      return;
+  }
   wordBaseIdx = (int)(word->base / textPoolStep);
   if (minBaseIdx > maxBaseIdx) {
     minBaseIdx = wordBaseIdx - 128;
@@ -863,7 +1035,7 @@ void TextLine::coalesce(UnicodeMap *uMap) {
 	word0->spaceAfter = gTrue;
 	word0 = word1;
 	word1 = word1->next;
-      } else if (word0->font == word1->font &&
+      } else if (word0->font[word0->len - 1] == word1->font[0] &&
 		 word0->underlined == word1->underlined &&
 		 fabs(word0->fontSize - word1->fontSize) <
 		   maxWordFontSizeDelta * words->fontSize &&
@@ -2075,6 +2247,7 @@ TextPage::TextPage(GBool rawOrderA) {
   haveLastFind = gFalse;
   underlines = new GooList();
   links = new GooList();
+  mergeCombining = gTrue;
 }
 
 TextPage::~TextPage() {
@@ -2201,10 +2374,12 @@ void TextPage::updateFont(GfxState *state) {
     mCode = letterCode = anyCode = -1;
     for (code = 0; code < 256; ++code) {
       name = ((Gfx8BitFont *)gfxFont)->getCharName(code);
-      if (name && name[0] == 'm' && name[1] == '\0') {
+      int nameLen = name ? strlen(name) : 0;
+      GBool nameOneChar = nameLen == 1 || (nameLen > 1 && name[1] == '\0');
+      if (nameOneChar && name[0] == 'm') {
 	mCode = code;
       }
-      if (letterCode < 0 && name && name[1] == '\0' &&
+      if (letterCode < 0 && nameOneChar &&
 	  ((name[0] >= 'A' && name[0] <= 'Z') ||
 	   (name[0] >= 'a' && name[0] <= 'z'))) {
 	letterCode = code;
@@ -2234,7 +2409,7 @@ void TextPage::updateFont(GfxState *state) {
   }
 }
 
-void TextPage::beginWord(GfxState *state, double x0, double y0) {
+void TextPage::beginWord(GfxState *state) {
   GfxFont *gfxFont;
   double *fontm;
   double m[4], m2[4];
@@ -2270,11 +2445,11 @@ void TextPage::beginWord(GfxState *state, double x0, double y0) {
 
   // for vertical writing mode, the lines are effectively rotated 90
   // degrees
-  if (state->getFont()->getWMode()) {
+  if (gfxFont && gfxFont->getWMode()) {
     rot = (rot + 1) & 3;
   }
 
-  curWord = new TextWord(state, rot, x0, y0, curFont, curFontSize);
+  curWord = new TextWord(state, rot, curFontSize);
 }
 
 void TextPage::addChar(GfxState *state, double x, double y,
@@ -2283,6 +2458,8 @@ void TextPage::addChar(GfxState *state, double x, double y,
   double x1, y1, w1, h1, dx2, dy2, base, sp, delta;
   GBool overlap;
   int i;
+  int wMode;
+  Matrix mat;
 
   // subtract char and word spacing from the dx,dy values
   sp = state->getCharSpace();
@@ -2299,7 +2476,8 @@ void TextPage::addChar(GfxState *state, double x, double y,
   state->transform(x, y, &x1, &y1);
   if (x1 + w1 < 0 || x1 > pageWidth ||
       y1 + h1 < 0 || y1 > pageHeight ||
-      w1 > pageWidth || h1 > pageHeight) {
+      x1 != x1 || y1 != y1 || // IEEE way of checking for isnan
+      w1 != w1 || h1 != h1) {
     charPos += nBytes;
     return;
   }
@@ -2320,6 +2498,17 @@ void TextPage::addChar(GfxState *state, double x, double y,
     return;
   }
 
+  state->getFontTransMat(&mat.m[0], &mat.m[1], &mat.m[2], &mat.m[3]);
+  mat.m[4] = x1;
+  mat.m[5] = y1;
+
+  if (mergeCombining && curWord && uLen == 1 &&
+      curWord->addCombining(state, curFont, curFontSize, x1, y1, w1, h1, charPos, nBytes, c,
+			    u[0], mat)) {
+    charPos += nBytes;
+    return;
+  }
+
   // start a new word if:
   // (1) this character doesn't fall in the right place relative to
   //     the end of the previous word (this places upper and lower
@@ -2329,6 +2518,7 @@ void TextPage::addChar(GfxState *state, double x, double y,
   // (3) the previous character was an overlap (we want each duplicated
   //     character to be in a word by itself at this stage),
   // (4) the font size has changed
+  // (5) the WMode changed
   if (curWord && curWord->len > 0) {
     base = sp = delta = 0; // make gcc happy
     switch (curWord->rot) {
@@ -2355,11 +2545,13 @@ void TextPage::addChar(GfxState *state, double x, double y,
     }
     overlap = fabs(delta) < dupMaxPriDelta * curWord->fontSize &&
               fabs(base - curWord->base) < dupMaxSecDelta * curWord->fontSize;
+    wMode = curFont->getWMode();
     if (overlap || lastCharOverlap ||
 	sp < -minDupBreakOverlap * curWord->fontSize ||
 	sp > minWordBreakSpace * curWord->fontSize ||
 	fabs(base - curWord->base) > 0.5 ||
-	curFontSize != curWord->fontSize) {
+	curFontSize != curWord->fontSize ||
+	wMode != curWord->wMode) {
       endWord();
     }
     lastCharOverlap = overlap;
@@ -2370,7 +2562,7 @@ void TextPage::addChar(GfxState *state, double x, double y,
   if (uLen != 0) {
     // start a new word if needed
     if (!curWord) {
-      beginWord(state, x, y);
+      beginWord(state);
     }
 
     // page rotation and/or transform matrices can cause text to be
@@ -2381,7 +2573,7 @@ void TextPage::addChar(GfxState *state, double x, double y,
         (curWord->rot == 2 && w1 > 0) ||
         (curWord->rot == 3 && h1 > 0)) {
       endWord();
-      beginWord(state, x + dx, y + dy);
+      beginWord(state);
       x1 += w1;
       y1 += h1;
       w1 = -w1;
@@ -2392,24 +2584,7 @@ void TextPage::addChar(GfxState *state, double x, double y,
     w1 /= uLen;
     h1 /= uLen;
     for (i = 0; i < uLen; ++i) {
-      if (u[i] >= 0xd800 && u[i] < 0xdc00) { /* surrogate pair */
-	if (i + 1 < uLen && u[i+1] >= 0xdc00 && u[i+1] < 0xe000) {
-	  /* next code is a low surrogate */
-	  Unicode uu = (((u[i] & 0x3ff) << 10) | (u[i+1] & 0x3ff)) + 0x10000;
-	  i++;
-	  curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, uu);
-	} else {
-	    /* missing low surrogate
-	     replace it with REPLACEMENT CHARACTER (U+FFFD) */
-	  curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, 0xfffd);
-	}
-      } else if (u[i] >= 0xdc00 && u[i] < 0xe000) {
-	  /* invalid low surrogate
-	   replace it with REPLACEMENT CHARACTER (U+FFFD) */
-	curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, 0xfffd);
-      } else {
-	curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, u[i]);
-      }
+      curWord->addChar(state, curFont, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, u[i], mat);
     }
   }
   charPos += nBytes;
@@ -3402,7 +3577,7 @@ void TextPage::coalesce(GBool physLayout, double fixedPitch, GBool doHTML) {
    *  so that they extend in x without hitting neighbours
    */
   for (blk1 = blkList; blk1; blk1 = blk1->next) {
-    if (!blk1->tableId >= 0) {
+    if (!(blk1->tableId >= 0)) {
       double xMax = DBL_MAX;
       double xMin = DBL_MIN;
 
@@ -4041,26 +4216,61 @@ public:
 			  int edge_end,
 			  PDFRectangle *selection);
   virtual void visitWord (TextWord *word, int begin, int end,
-			  PDFRectangle *selection) { };
+			  PDFRectangle *selection);
+  void endPage();
 
   GooString *getText(void);
+  GooList **takeWordList(int *nLines);
 
 private:
-  TextLineFrag *frags;
-  int nFrags, fragsSize;
+
+  void startLine();
+  void finishLine();
+
+  GooList **lines;
+  int nLines, linesSize;
+  GooList *words;
+  int tableId;
+  TextBlock *currentBlock;
 };
 
 TextSelectionDumper::TextSelectionDumper(TextPage *page)
     : TextSelectionVisitor(page)
 {
-  fragsSize = 256;
-  frags = (TextLineFrag *)gmallocn(fragsSize, sizeof(TextLineFrag));
-  nFrags = 0;
+  linesSize = 256;
+  lines = (GooList **)gmallocn(linesSize, sizeof(GooList *));
+  nLines = 0;
+
+  tableId = -1;
+  currentBlock = NULL;
+  words = NULL;
 }
 
 TextSelectionDumper::~TextSelectionDumper()
 {
-  gfree(frags);
+  for (int i = 0; i < nLines; i++)
+    deleteGooList(lines[i], TextWordSelection);
+  gfree(lines);
+}
+
+void TextSelectionDumper::startLine()
+{
+  finishLine();
+  words = new GooList();
+}
+
+void TextSelectionDumper::finishLine()
+{
+  if (nLines == linesSize) {
+    linesSize *= 2;
+    lines = (GooList **)grealloc(lines, linesSize * sizeof(GooList *));
+  }
+
+  if (words && words->getLength() > 0)
+    lines[nLines++] = words;
+  else if (words)
+    delete words;
+  words = NULL;
 }
 
 void TextSelectionDumper::visitLine (TextLine *line,
@@ -4070,130 +4280,93 @@ void TextSelectionDumper::visitLine (TextLine *line,
 				     int edge_end,
 				     PDFRectangle *selection)
 {
-  if (nFrags == fragsSize) {
-    fragsSize *= 2;
-    frags = (TextLineFrag *) grealloc(frags, fragsSize * sizeof(TextLineFrag));
+  TextLineFrag frag;
+
+  frag.init(line, edge_begin, edge_end - edge_begin);
+
+  if (tableId >= 0 && frag.line->blk->tableId < 0) {
+    finishLine();
+
+    tableId = -1;
+    currentBlock = NULL;
   }
 
-  frags[nFrags].init(line, edge_begin, edge_end - edge_begin);
-  ++nFrags;
+  if (frag.line->blk->tableId >= 0) { // a table
+    if (tableId == -1) {
+      tableId = frag.line->blk->tableId;
+      currentBlock = frag.line->blk;
+    }
 
+    if (currentBlock == frag.line->blk) { // the same block
+      startLine();
+    } else { // another block
+      if (currentBlock->tableEnd) { // previous block ended its row
+        startLine();
+      }
+      currentBlock = frag.line->blk;
+    }
+  } else { // not a table
+    startLine();
+  }
+}
+
+void TextSelectionDumper::visitWord (TextWord *word, int begin, int end,
+                                     PDFRectangle *selection)
+{
+  words->append(new TextWordSelection(word, begin, end));
+}
+
+void TextSelectionDumper::endPage()
+{
+  finishLine();
 }
 
 GooString *TextSelectionDumper::getText (void)
 {
-  GooString *s;
-  TextLineFrag *frag;
+  GooString *text;
   int i, j;
   UnicodeMap *uMap;
   char space[8], eol[16];
   int spaceLen, eolLen;
-  GooList *strings = NULL;
-  int actual_table = -1;
-  int actual_line = -1;
-  int last_length = 0;
-  TextBlock *actual_block = NULL;
 
-  s = new GooString();
+  text = new GooString();
 
-  uMap = globalParams->getTextEncoding();
-
-  if (uMap == NULL)
-      return s;
+  if (!(uMap = globalParams->getTextEncoding()))
+    return text;
 
   spaceLen = uMap->mapUnicode(0x20, space, sizeof(space));
   eolLen = uMap->mapUnicode(0x0a, eol, sizeof(eol));
 
-  if (nFrags > 0) {
-    for (i = 0; i < nFrags; ++i) {
-      frag = &frags[i];
+  for (i = 0; i < nLines; i++) {
+    GooList *lineWords = lines[i];
+    for (j = 0; j < lineWords->getLength(); j++) {
+      TextWordSelection *sel = (TextWordSelection *)lineWords->get(j);
 
-      if (actual_table >= 0 && frag->line->blk->tableId < 0) {
-        for (j = 0; j < strings->getLength (); j++) {
-          s->append ((GooString*) strings->get (j));
-          s->append (eol, eolLen);
-          delete ((GooString*) strings->get (j));
-        }
-        delete strings;
-        strings = NULL;
-        actual_table = -1;
-        actual_line = -1;
-        actual_block = NULL;
-      }
-
-      // a table
-      if (frag->line->blk->tableId >= 0) {
-        if (actual_table == -1) {
-          strings = new GooList();
-          actual_table = frag->line->blk->tableId;
-          actual_block = frag->line->blk;
-          actual_line = -1;
-        }
-
-        // the same block
-        if (actual_block == frag->line->blk) {
-          actual_line++;
-          if (actual_line >= strings->getLength ()) {
-            GooString *t = new GooString ();
-            // add some spaces to have this block correctly aligned
-            if (actual_line > 0)
-              for (j = 0; j < ((GooString*) (strings->get (actual_line - 1)))->getLength() - last_length - 1; j++)
-                t->append (space, spaceLen);
-            strings->append (t);
-          }
-        }
-        // another block
-        else {
-          // previous block ended its row
-          if (actual_block->tableEnd) {
-            for (j = 0; j < strings->getLength (); j++) {
-              s->append ((GooString*) strings->get (j));
-              s->append (eol, eolLen);
-              delete ((GooString*) strings->get (j));
-            }
-            delete strings;
-
-            strings = new GooList();
-            GooString *t = new GooString ();
-            strings->append (t);
-          }
-          actual_block = frag->line->blk;
-          actual_line = 0;
-        }
-
-        page->dumpFragment(frag->line->text + frag->start, frag->len, uMap, ((GooString*) strings->get (actual_line)));
-        last_length = frag->len;
-
-        if (!frag->line->blk->tableEnd) {
-          ((GooString*) strings->get (actual_line))->append (space, spaceLen);
-        }
-      }
-      // not a table
-      else {
-        page->dumpFragment (frag->line->text + frag->start, frag->len, uMap, s);
-        if (i < nFrags - 1) {
-          s->append (eol, eolLen);
-        }
-      }
+      page->dumpFragment (sel->word->text + sel->begin, sel->end - sel->begin, uMap, text);
+      if (j < lineWords->getLength() - 1)
+        text->append(space, spaceLen);
     }
-
-    if (strings != NULL) {
-      for (j = 0; j < strings->getLength (); j++) {
-        s->append((GooString*) strings->get (j));
-        s->append(eol, eolLen);
-        delete ((GooString*) strings->get (j));
-      }
-      delete strings;
-      strings = NULL;
-      actual_table = -1;
-      actual_line = -1;
-      actual_block = NULL;
-    }
+    if (i < nLines - 1)
+      text->append(eol, eolLen);
   }
 
   uMap->decRefCnt();
 
-  return s;
+  return text;
+}
+
+GooList **TextSelectionDumper::takeWordList(int *nLinesOut)
+{
+  GooList **returnValue = lines;
+
+  *nLinesOut = nLines;
+  if (nLines == 0)
+    return NULL;
+
+  nLines = 0;
+  lines = NULL;
+
+  return returnValue;
 }
 
 class TextSelectionSizer : public TextSelectionVisitor {
@@ -4274,11 +4447,14 @@ public:
 			  PDFRectangle *selection);
   virtual void visitWord (TextWord *word, int begin, int end,
 			  PDFRectangle *selection);
+  void endPage();
 
 private:
   OutputDev *out;
   GfxColor *box_color, *glyph_color;
   GfxState *state;
+  GooList *selectionList;
+  Matrix ctm, ictm;
 };
 
 TextSelectionPainter::TextSelectionPainter(TextPage *page,
@@ -4294,20 +4470,23 @@ TextSelectionPainter::TextSelectionPainter(TextPage *page,
 {
   PDFRectangle box(0, 0, page->pageWidth, page->pageHeight);
 
+  selectionList = new GooList();
   state = new GfxState(72 * scale, 72 * scale, &box, rotation, gFalse);
 
-  out->startPage (0, state);
+  state->getCTM(&ctm);
+  ctm.invertTo(&ictm);
+
+  out->startPage(0, state, NULL);
   out->setDefaultCTM (state->getCTM());
 
-  state->setTextMat(1, 0, 0, -1, 0, 0);
   state->setFillColorSpace(new GfxDeviceRGBColorSpace());
-
+  state->setFillColor(box_color);
+  out->updateFillColor(state);
 }
 
 TextSelectionPainter::~TextSelectionPainter()
 {
-  out->endPage ();
-
+  deleteGooList(selectionList, TextWordSelection);
   delete state;
 }
 
@@ -4319,10 +4498,6 @@ void TextSelectionPainter::visitLine (TextLine *line,
 				      PDFRectangle *selection)
 {
   double x1, y1, x2, y2, margin;
-  Matrix ctm, ictm;
-
-  state->setFillColor(box_color);
-  out->updateFillColor(state);
 
   margin = (line->yMax - line->yMin) / 8;
   x1 = floor (line->edge[edge_begin]);
@@ -4330,7 +4505,6 @@ void TextSelectionPainter::visitLine (TextLine *line,
   x2 = ceil (line->edge[edge_end]);
   y2 = ceil (line->yMax + margin);
 
-  state->getCTM (&ctm);
   ctm.transform(line->edge[edge_begin], line->yMin - margin, &x1, &y1);
   ctm.transform(line->edge[edge_end], line->yMax + margin, &x2, &y2);
 
@@ -4339,7 +4513,6 @@ void TextSelectionPainter::visitLine (TextLine *line,
   x2 = ceil (x2);
   y2 = ceil (y2);
 
-  ctm.invertTo (&ictm);
   ictm.transform(x1, y1, &x1, &y1);
   ictm.transform(x2, y2, &x2, &y2);
 
@@ -4348,37 +4521,67 @@ void TextSelectionPainter::visitLine (TextLine *line,
   state->lineTo(x2, y2);
   state->lineTo(x1, y2);
   state->closePath();
-
-  out->fill(state);
-  state->clearPath();
 }
 
 void TextSelectionPainter::visitWord (TextWord *word, int begin, int end,
 				      PDFRectangle *selection)
 {
-  GooString *string;
-  int i;
+  selectionList->append(new TextWordSelection(word, begin, end));
+}
+
+void TextSelectionPainter::endPage()
+{
+  out->fill(state);
+
+  out->saveState(state);
+  out->clip(state);
+
+  state->clearPath();
 
   state->setFillColor(glyph_color);
   out->updateFillColor(state);
-  word->font->gfxFont->incRefCnt();
-  state->setFont(word->font->gfxFont, word->fontSize);
-  out->updateFont(state);
 
-  /* The only purpose of this string is to let the output device query
-   * it's length.  Might want to change this interface later. */
+  for (int i = 0; i < selectionList->getLength(); i++) {
+    TextWordSelection *sel = (TextWordSelection *) selectionList->get(i);
+    int begin = sel->begin;
 
-  string = new GooString ((char *) word->charcode, end - begin);
+    while (begin < sel->end) {
+      TextFontInfo *font = sel->word->font[begin];
+      font->gfxFont->incRefCnt();
+      Matrix *mat = &sel->word->textMat[begin];
 
-  out->beginString(state, string);
+      state->setTextMat(mat->m[0], mat->m[1], mat->m[2], mat->m[3], 0, 0);
+      state->setFont(font->gfxFont, 1);
+      out->updateFont(state);
 
-  for (i = begin; i < end; i++)
-    out->drawChar(state, word->edge[i], word->base, 0, 0, 0, 0,
-		  word->charcode[i], 1, NULL, 0);
-  
-  out->endString(state);
+      int fEnd = begin + 1;
+      while (fEnd < sel->end && font->matches(sel->word->font[fEnd]) &&
+	     mat->m[0] == sel->word->textMat[fEnd].m[0] &&
+	     mat->m[1] == sel->word->textMat[fEnd].m[1] &&
+	     mat->m[2] == sel->word->textMat[fEnd].m[2] &&
+	     mat->m[3] == sel->word->textMat[fEnd].m[3])
+	fEnd++;
 
-  delete string;
+      /* The only purpose of this string is to let the output device query
+       * it's length.  Might want to change this interface later. */
+      GooString *string = new GooString ((char *) sel->word->charcode, fEnd - begin);
+      out->beginString(state, string);
+
+      for (int i = begin; i < fEnd; i++) {
+        if (i != begin && sel->word->charPos[i] == sel->word->charPos[i - 1])
+          continue;
+
+	out->drawChar(state, sel->word->textMat[i].m[4], sel->word->textMat[i].m[5], 0, 0, 0, 0,
+		      sel->word->charcode[i], 1, NULL, 0);
+      }
+      out->endString(state);
+      delete string;
+      begin = fEnd;
+    }
+  }
+
+  out->restoreState(state);
+  out->endPage ();
 }
 
 void TextWord::visitSelection(TextSelectionVisitor *visitor,
@@ -4642,7 +4845,8 @@ void TextPage::visitSelection(TextSelectionVisitor *visitor,
 	if (!best_block[i] ||
 	    d < best_d[i] ||
 	    (!blk->next && !flow->next &&
-	     x[i] > xMax && y[i] > yMax)) {
+	     x[i] >= fmin(xMax, pageWidth) &&
+	     y[i] >= fmin(yMax, pageHeight))) {
 	  best_block[i] = blk;
 	  best_flow[i] = flow;
 	  best_count[i] = count;
@@ -4723,6 +4927,7 @@ void TextPage::drawSelection(OutputDev *out,
 			       out, box_color, glyph_color);
 
   visitSelection(&painter, selection, style);
+  painter.endPage();
 }
 
 GooList *TextPage::getSelectionRegion(PDFRectangle *selection,
@@ -4741,8 +4946,21 @@ GooString *TextPage::getSelectionText(PDFRectangle *selection,
   TextSelectionDumper dumper(this);
 
   visitSelection(&dumper, selection, style);
+  dumper.endPage();
 
   return dumper.getText();
+}
+
+GooList **TextPage::getSelectionWords(PDFRectangle *selection,
+                                      SelectionStyle style,
+                                      int *nLines)
+{
+  TextSelectionDumper dumper(this);
+
+  visitSelection(&dumper, selection, style);
+  dumper.endPage();
+
+  return dumper.takeWordList(nLines);
 }
 
 GBool TextPage::findCharRange(int pos, int length,
@@ -5010,6 +5228,10 @@ void TextPage::dump(void *outputStream, TextOutputFunc outputFunc,
   uMap->decRefCnt();
 }
 
+void TextPage::setMergeCombining(GBool merge) {
+  mergeCombining = merge;
+}
+
 void TextPage::assignColumns(TextLineFrag *frags, int nFrags, GBool oneRot) {
   TextLineFrag *frag0, *frag1;
   int rot, col1, col2, i, j, k;
@@ -5247,41 +5469,17 @@ void ActualText::end(GfxState *state) {
   // extents of all the glyphs inside the span
 
   if (actualTextNBytes) {
-    char *uniString = NULL;
-    Unicode *uni;
-    int length, i;
-
-    if (!actualText->hasUnicodeMarker()) {
-      if (actualText->getLength() > 0) {
-        //non-unicode string -- assume pdfDocEncoding and
-        //try to convert to UTF16BE
-        uniString = pdfDocEncodingToUTF16(actualText, &length);
-      } else {
-        length = 0;
-      }
-    } else {
-      uniString = actualText->getCString();
-      length = actualText->getLength();
-    }
-
-    if (length < 3)
-      length = 0;
-    else
-      length = length/2 - 1;
-    uni = new Unicode[length];
-    for (i = 0 ; i < length; i++)
-      uni[i] = ((uniString[2 + i*2] & 0xff)<<8)|(uniString[3 + i*2] & 0xff);
+    Unicode *uni = NULL;
+    int length;
 
     // now that we have the position info for all of the text inside
     // the marked content span, we feed the "ActualText" back through
     // text->addChar()
+    length = TextStringToUCS4(actualText, &uni);
     text->addChar(state, actualTextX0, actualTextY0,
                   actualTextX1 - actualTextX0, actualTextY1 - actualTextY0,
                   0, actualTextNBytes, uni, length);
-
-    delete [] uni;
-    if (!actualText->hasUnicodeMarker())
-      delete [] uniString;
+    gfree(uni);
   }
 
   delete actualText;
@@ -5362,7 +5560,7 @@ TextOutputDev::~TextOutputDev() {
   delete actualText;
 }
 
-void TextOutputDev::startPage(int pageNum, GfxState *state) {
+void TextOutputDev::startPage(int pageNum, GfxState *state, XRef *xref) {
   text->startPage(state);
 }
 
@@ -5599,6 +5797,10 @@ GBool TextOutputDev::findCharRange(int pos, int length,
 				   double *xMin, double *yMin,
 				   double *xMax, double *yMax) {
   return text->findCharRange(pos, length, xMin, yMin, xMax, yMax);
+}
+
+void TextOutputDev::setMergeCombining(GBool merge) {
+  text->setMergeCombining(merge);
 }
 
 #if TEXTOUT_WORD_LIST

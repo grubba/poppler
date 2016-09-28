@@ -46,6 +46,12 @@
 /* Define to 1 if you have the `ftell64' function. */
 #cmakedefine HAVE_FTELL64 1
 
+/* Define to 1 if you have the `pread64' function. */
+#cmakedefine HAVE_PREAD64 1
+
+/* Define to 1 if you have the `lseek64' function. */
+#cmakedefine HAVE_LSEEK64 1
+
 /* Defines if gettimeofday is available on your system */
 #cmakedefine HAVE_GETTIMEOFDAY 1
 
@@ -75,6 +81,9 @@
 
 /* Define to 1 if you have the `mkstemps' function. */
 #cmakedefine HAVE_MKSTEMPS 1
+
+/* Define to 1 if you have the `rand_r' function. */
+#cmakedefine HAVE_RAND_R 1
 
 /* Define to 1 if you have the <ndir.h> header file, and it defines `DIR'. */
 #cmakedefine HAVE_NDIR_H 1
@@ -160,10 +169,13 @@
 #define PACKAGE_VERSION "${POPPLER_VERSION}"
 
 /* Poppler data dir */
-#define POPPLER_DATADIR "${CMAKE_INSTALL_PREFIX}/share/poppler"
+#define POPPLER_DATADIR "${POPPLER_DATADIR}"
 
 /* Support for curl based doc builder is compiled in. */
 #cmakedefine POPPLER_HAS_CURL_SUPPORT 1
+
+/* Include support for CMYK rasterization */
+#cmakedefine SPLASH_CMYK 1
 
 /* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1
@@ -210,16 +222,16 @@
 #define HAVE_BOOLEAN
 #endif
 
-/* MS has defined snprintf as deprecated */
-#ifdef _MSC_VER
+/* MS defined snprintf as deprecated but then added it in Visual Studio 2015. */
+#if defined(_MSC_VER) && _MSC_VER < 1900
 #define snprintf _snprintf
 #endif
 
 /* Number of bits in a file offset, on hosts where this is settable. */
-/* #undef _FILE_OFFSET_BITS */
+#cmakedefine _FILE_OFFSET_BITS @_FILE_OFFSET_BITS@
 
 /* Define to 1 to make fseeko visible on some hosts (e.g. glibc 2.2). */
-/* #undef _LARGEFILE_SOURCE */
+/* TODO This is wrong, port if needed #undef _LARGEFILE_SOURCE */
 
 /* Define for large files, on AIX-style hosts. */
-/* #undef _LARGE_FILES */
+/* TODO This is wrong, port if needed #undef _LARGE_FILES */

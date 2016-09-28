@@ -12,6 +12,7 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2013 Thomas Freitag <Thomas.Freitag@alfa.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -334,7 +335,7 @@ SplashClipResult SplashClip::testSpan(int spanXMin, int spanXMax, int spanY) {
   return splashClipAllInside;
 }
 
-void SplashClip::clipAALine(SplashBitmap *aaBuf, int *x0, int *x1, int y) {
+void SplashClip::clipAALine(SplashBitmap *aaBuf, int *x0, int *x1, int y, GBool adjustVertLine) {
   int xx0, xx1, xx, yy, i;
   SplashColorPtr p;
 
@@ -351,7 +352,7 @@ void SplashClip::clipAALine(SplashBitmap *aaBuf, int *x0, int *x1, int y) {
       for (xx = xx0; xx + 7 < xx1; xx += 8) {
 	*p++ = 0;
       }
-      if (xx < xx1) {
+      if (xx < xx1 && !adjustVertLine) {
 	*p &= 0xff >> (xx1 & 7);
       }
     }
@@ -364,7 +365,7 @@ void SplashClip::clipAALine(SplashBitmap *aaBuf, int *x0, int *x1, int y) {
     xx0 = 0;
   }
   xx1 = (*x1 + 1) * splashAASize;
-  if (xx0 < xx1) {
+  if (xx0 < xx1 && !adjustVertLine) {
     for (yy = 0; yy < splashAASize; ++yy) {
       p = aaBuf->getDataPtr() + yy * aaBuf->getRowSize() + (xx0 >> 3);
       xx = xx0;
@@ -383,5 +384,28 @@ void SplashClip::clipAALine(SplashBitmap *aaBuf, int *x0, int *x1, int y) {
   // check the paths
   for (i = 0; i < length; ++i) {
     scanners[i]->clipAALine(aaBuf, x0, x1, y);
+  }
+  if (*x0 > *x1) {
+    *x0 = *x1;
+  }
+  if (*x0 < 0) {
+    *x0 = 0;
+  }
+  if ((*x0>>1) >= aaBuf->getRowSize()) {
+    xx0 = *x0;
+    *x0 = (aaBuf->getRowSize() - 1) << 1;
+    if (xx0 & 1) {
+      *x0 = *x0 + 1;
+    }
+  }
+  if (*x1 < *x0) {
+    *x1 = *x0;
+  }
+  if ((*x1>>1) >= aaBuf->getRowSize()) {
+    xx0 = *x1;
+    *x1 = (aaBuf->getRowSize() - 1) << 1;
+    if (xx0 & 1) {
+      *x1 = *x1 + 1;
+    }
   }
 }

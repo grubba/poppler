@@ -47,7 +47,11 @@ CFILE_GLOB=$(top_srcdir)/glib/*.cc
 
 # Header files to ignore when scanning.
 # e.g. IGNORE_HFILES=gtkdebug.h gtkintl.h
-IGNORE_HFILES=demo
+IGNORE_HFILES=				\
+	poppler-private.h		\
+	poppler-input-stream.h		\
+	poppler-cached-file-loader.h	\
+	demo
 
 # Images to copy into HTML directory.
 # e.g. HTML_IMAGES=$(top_srcdir)/gtk/stock-icons/stock_about_24.png
@@ -67,7 +71,8 @@ expand_content_files=
 # signals and properties.
 # e.g. INCLUDES=-I$(top_srcdir) -I$(top_builddir) $(GTK_DEBUG_FLAGS)
 # e.g. GTKDOC_LIBS=$(top_builddir)/gtk/$(gtktargetlib)
-INCLUDES=-I$(top_srcdir)/glib -I$(top_builddir)/glib	\
+GTKDOC_CFLAGS=						\
+	-I$(top_srcdir)/glib -I$(top_builddir)/glib	\
 	$(CAIRO_CFLAGS)					\
 	$(POPPLER_GLIB_CFLAGS)				\
 	$(FREETYPE_CFLAGS)

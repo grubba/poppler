@@ -1,10 +1,12 @@
 /* poppler-private.h: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, 2008, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2006-2009, 2011 by Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2006-2009, 2011, 2012 by Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2007-2009, 2011 by Pino Toscano <pino@kde.org>
  * Copyright (C) 2011 Andreas Hartmetz <ahartmetz@gmail.com>
  * Copyright (C) 2011 Hib Eris <hib@hiberis.nl>
+ * Copyright (C) 2012, 2013 Thomas Freitag <Thomas.Freitag@alfa.de>
+ * Copyright (C) 2013 Julien Nabet <serval2412@yahoo.fr>
  * Inspired on code by
  * Copyright (C) 2004 by Albert Astals Cid <tsdgeos@terra.es>
  * Copyright (C) 2004 by Enrico Ros <eros.kde@email.it>
@@ -86,7 +88,7 @@ namespace Poppler {
 		wchar_t *fileName = new WCHAR[filePath.length()];
 		int length = filePath.toWCharArray(fileName); 
 		doc = new PDFDoc(fileName, length, ownerPassword, userPassword);
-		delete fileName;
+		delete[] fileName;
 #else
 		GooString *fileName = new GooString(QFile::encodeName(filePath));
 		doc = new PDFDoc(fileName, ownerPassword, userPassword);
@@ -112,62 +114,11 @@ namespace Poppler {
 	
 	~DocumentData();
 	
-	OutputDev *getOutputDev()
-	{
-		if (!m_outputDev)
-		{
-			switch (m_backend)
-			{
-			case Document::ArthurBackend:
-			// create a splash backend even in case of the Arthur Backend
-			case Document::SplashBackend:
-			{
-#if defined(HAVE_SPLASH)
-			SplashColor bgColor;
-			bgColor[0] = paperColor.blue();
-			bgColor[1] = paperColor.green();
-			bgColor[2] = paperColor.red();
-			GBool AA = m_hints & Document::TextAntialiasing ? gTrue : gFalse;
-			SplashOutputDev * splashOutputDev = new SplashOutputDev(splashModeXBGR8, 4, gFalse, bgColor, gTrue, AA);
-			splashOutputDev->setVectorAntialias(m_hints & Document::Antialiasing ? gTrue : gFalse);
-			splashOutputDev->setFreeTypeHinting(m_hints & Document::TextHinting ? gTrue : gFalse, m_hints & Document::TextSlightHinting ? gTrue : gFalse);
-			splashOutputDev->startDoc(doc);
-			m_outputDev = splashOutputDev;
-#endif
-			break;
-			}
-			}
-		}
-		return m_outputDev;
-	}
-	
 	void addTocChildren( QDomDocument * docSyn, QDomNode * parent, GooList * items );
 	
 	void setPaperColor(const QColor &color)
 	{
-		if (color == paperColor)
-			return;
-
 		paperColor = color;
-		if ( m_outputDev == NULL )
-			return;
-
-		switch ( m_backend )
-		{
-			case Document::SplashBackend:
-			{
-#if defined(HAVE_SPLASH)
-				SplashOutputDev *splash_output = static_cast<SplashOutputDev *>( m_outputDev );
-				SplashColor bgColor;
-				bgColor[0] = paperColor.blue();
-				bgColor[1] = paperColor.green();
-				bgColor[2] = paperColor.red();
-				splash_output->setPaperColor(bgColor);
-#endif
-				break;
-			}
-			default: ;
-		}
 	}
 	
 	void fillMembers()
@@ -191,7 +142,6 @@ namespace Poppler {
 	bool locked;
 	FontIterator *m_fontInfoIterator;
 	Document::RenderBackend m_backend;
-	OutputDev *m_outputDev;
 	QList<EmbeddedFile*> m_embeddedFiles;
 	QPointer<OptContentModel> m_optContentModel;
 	QColor paperColor;

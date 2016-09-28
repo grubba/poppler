@@ -13,14 +13,34 @@ poppler_goo_include_HEADERS =			\
 	gmem.h					\
 	gfile.h					\
 	FixedPoint.h				\
+	NetPBMWriter.h				\
 	PNGWriter.h				\
 	JpegWriter.h				\
 	TiffWriter.h				\
 	ImgWriter.h				\
 	GooLikely.h				\
-	gstrtod.h
+	gstrtod.h				\
+	grandom.h
 
 endif
+
+libgoo_la_SOURCES =				\
+	gfile.cc				\
+	gmempp.cc				\
+	GooHash.cc				\
+	GooList.cc				\
+	GooTimer.cc				\
+	GooString.cc				\
+	gmem.cc					\
+	FixedPoint.cc				\
+	NetPBMWriter.cc				\
+	PNGWriter.cc				\
+	JpegWriter.cc				\
+	TiffWriter.cc				\
+	ImgWriter.cc				\
+	gtypes_p.h				\
+	gstrtod.cc				\
+	grandom.cc
 
 if BUILD_LIBJPEG
 libjpeg_includes = $(LIBJPEG_CFLAGS)
@@ -38,25 +58,9 @@ if BUILD_LIBPNG
 libpng_includes = $(LIBPNG_CFLAGS)
 endif
 
-INCLUDES =					\
+libgoo_la_CPPFLAGS =				\
 	-I$(top_srcdir)				\
 	$(libjpeg_includes)                     \
 	$(libtiff_includes)                     \
 	$(libjpeg2000_includes)                 \
 	$(libpng_includes)
-
-libgoo_la_SOURCES =				\
-	gfile.cc				\
-	gmempp.cc				\
-	GooHash.cc				\
-	GooList.cc				\
-	GooTimer.cc				\
-	GooString.cc				\
-	gmem.cc					\
-	FixedPoint.cc				\
-	PNGWriter.cc				\
-	JpegWriter.cc				\
-	TiffWriter.cc				\
-	ImgWriter.cc				\
-	gtypes_p.h				\
-	gstrtod.cc

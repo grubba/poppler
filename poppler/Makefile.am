@@ -1,3 +1,16 @@
+CFLAGS+=$(PTHREAD_CFLAGS)
+CXXFLAGS+=$(PTHREAD_CFLAGS)
+
+AM_CPPFLAGS =					\
+	-I$(top_srcdir)				\
+	-I$(top_srcdir)/goo
+
+lib_LTLIBRARIES = libpoppler.la
+
+if BUILD_CAIRO_OUTPUT
+noinst_LTLIBRARIES = libpoppler-cairo.la
+endif
+
 if BUILD_SPLASH_OUTPUT
 
 splash_sources =				\
@@ -12,44 +25,6 @@ splash_includes =				\
 splash_libs =					\
 	$(SPLASH_LIBS)				\
 	$(top_builddir)/splash/libsplash.la
-
-endif
-
-if BUILD_POPPLER_QT4
-
-poppler_arthur = libpoppler-arthur.la
-
-libpoppler_arthur_la_SOURCES =			\
-	ArthurOutputDev.h			\
-	ArthurOutputDev.cc
-
-arthur_includes =				\
-	$(POPPLER_QT4_CFLAGS)
-
-arthur_libs =					\
-	$(POPPLER_QT4_LIBS)
-
-endif
-
-
-
-if BUILD_CAIRO_OUTPUT
-
-poppler_cairo = libpoppler-cairo.la
-
-cairo_includes =				\
-	$(CAIRO_CFLAGS)
-
-cairo_libs =					\
-	$(CAIRO_LIBS)
-
-libpoppler_cairo_la_SOURCES =			\
-	CairoFontEngine.cc			\
-	CairoFontEngine.h			\
-	CairoOutputDev.cc			\
-	CairoOutputDev.h			\
-	CairoRescaleBox.cc			\
-	CairoRescaleBox.h
 
 endif
 
@@ -138,47 +113,6 @@ cms_includes = $(LCMS_CFLAGS)
 cms_libs = $(LCMS_LIBS)
 endif
 
-INCLUDES =					\
-	-I$(top_srcdir)				\
-	-I$(top_srcdir)/goo			\
-	$(cms_includes)				\
-	$(splash_includes)			\
-	$(cairo_includes)			\
-	$(arthur_includes)			\
-	$(libjpeg_includes)			\
-	$(libtiff_includes)			\
-	$(libjpeg2000_includes)			\
-	$(libpng_includes)			\
-	$(libcurl_includes)			\
-	$(FREETYPE_CFLAGS)			\
-	$(FONTCONFIG_CFLAGS)
-
-lib_LTLIBRARIES = libpoppler.la
-
-noinst_LTLIBRARIES = $(poppler_cairo)		\
-	$(poppler_arthur)
-
-CFLAGS+=$(PTHREAD_CFLAGS)
-CXXFLAGS+=$(PTHREAD_CFLAGS)
-
-libpoppler_la_LIBADD =				\
-	$(top_builddir)/goo/libgoo.la		\
-	$(top_builddir)/fofi/libfofi.la		\
-	$(cms_libs)				\
-	$(splash_libs)				\
-	$(libtiff_libs)				\
-	$(libjpeg_libs)				\
-	$(libpng_libs)				\
-	$(zlib_libs)				\
-	$(libcurl_libs)				\
-	$(libjpeg2000_libs)			\
-	$(FREETYPE_LIBS)			\
-	$(FONTCONFIG_LIBS)			\
-	$(PTHREAD_LIBS)				\
-	$(win32_libs)
-
-libpoppler_la_LDFLAGS = -version-info 25:0:0 @create_shared_lib@ @auto_import_flags@
-
 if ENABLE_XPDF_HEADERS
 
 poppler_includedir = $(includedir)/poppler
@@ -236,6 +170,8 @@ poppler_include_HEADERS =	\
 	StdinPDFDocBuilder.h	\
 	Stream-CCITT.h		\
 	Stream.h		\
+	StructElement.h		\
+	StructTreeRoot.h	\
 	UnicodeMap.h		\
 	UnicodeMapTables.h	\
 	UnicodeTypeTable.h	\
@@ -250,7 +186,9 @@ poppler_include_HEADERS =	\
 	NameToUnicodeTable.h	\
 	PSOutputDev.h		\
 	TextOutputDev.h		\
+	MarkedContentOutputDev.h \
 	SecurityHandler.h	\
+	UTF.h			\
 	UTF8.h			\
 	XpdfPluginAPI.h		\
 	Sound.h
@@ -260,8 +198,6 @@ endif
 
 libpoppler_la_SOURCES =		\
 	$(splash_sources)	\
-	$(cairo_sources)	\
-	$(arthur_sources)	\
 	$(libjpeg_sources)	\
 	$(zlib_sources)		\
 	$(libjpeg2000_sources)	\
@@ -314,18 +250,68 @@ libpoppler_la_SOURCES =		\
 	StdinCachedFile.cc	\
 	StdinPDFDocBuilder.cc	\
 	Stream.cc 		\
+	StructTreeRoot.cc	\
+	StructElement.cc	\
 	strtok_r.cpp		\
 	UnicodeMap.cc		\
 	UnicodeTypeTable.cc	\
+	UTF.cc                  \
 	ViewerPreferences.cc	\
 	XRef.cc			\
 	PSOutputDev.cc		\
 	TextOutputDev.cc	\
+	MarkedContentOutputDev.cc \
 	PageLabelInfo.h		\
 	PageLabelInfo.cc	\
 	SecurityHandler.cc	\
 	Sound.cc		\
 	XpdfPluginAPI.cc
 
+libpoppler_la_CPPFLAGS =			\
+	$(cms_includes)				\
+	$(splash_includes)			\
+	$(libjpeg_includes)			\
+	$(libtiff_includes)			\
+	$(libjpeg2000_includes)			\
+	$(libpng_includes)			\
+	$(libcurl_includes)			\
+	$(FREETYPE_CFLAGS)			\
+	$(FONTCONFIG_CFLAGS)			\
+	$(AM_CPPFLAGS)
+
+libpoppler_la_LIBADD =				\
+	$(top_builddir)/goo/libgoo.la		\
+	$(top_builddir)/fofi/libfofi.la		\
+	$(cms_libs)				\
+	$(splash_libs)				\
+	$(libtiff_libs)				\
+	$(libjpeg_libs)				\
+	$(libpng_libs)				\
+	$(zlib_libs)				\
+	$(libcurl_libs)				\
+	$(libjpeg2000_libs)			\
+	$(FREETYPE_LIBS)			\
+	$(FONTCONFIG_LIBS)			\
+	$(PTHREAD_LIBS)				\
+	$(win32_libs)
+
+libpoppler_la_LDFLAGS =				\
+	-version-info 58:0:0			\
+	@create_shared_lib@			\
+	@auto_import_flags@
+
+libpoppler_cairo_la_SOURCES =			\
+	CairoFontEngine.cc			\
+	CairoFontEngine.h			\
+	CairoOutputDev.cc			\
+	CairoOutputDev.h			\
+	CairoRescaleBox.cc			\
+	CairoRescaleBox.h
+
+libpoppler_cairo_la_CPPFLAGS =			\
+	$(CAIRO_CFLAGS)				\
+	$(AM_CPPFLAGS)
+
 EXTRA_DIST = gen-unicode-tables.py	\
-             GlobalParamsWin.cc
+             GlobalParamsWin.cc         \
+             PageLabelInfo_p.h

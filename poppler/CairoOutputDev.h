@@ -17,10 +17,11 @@
 // Copyright (C) 2005-2008 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
-// Copyright (C) 2006-2011 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2008, 2009, 2011, 2012 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2006-2011, 2013 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2008, 2009, 2011-2015 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
-// Copyright (C) 2010-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2010-2013 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2015 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -111,7 +112,7 @@ public:
 #if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
   virtual GBool useShadedFills(int type) { return type <= 7; }
 #else
-  virtual GBool useShadedFills(int type) { return type < 4; }
+  virtual GBool useShadedFills(int type) { return type > 1 && type < 4; }
 #endif
 
   // Does this device use FillColorStop()?
@@ -121,10 +122,14 @@ public:
   // text in Type 3 fonts will be drawn with drawChar/drawString.
   virtual GBool interpretType3Chars() { return gFalse; }
 
+  // Does this device need to clip pages to the crop box even when the
+  // box is the crop box?
+  virtual GBool needClipToCropBox() { return gTrue; }
+
   //----- initialization and control
 
   // Start a page.
-  virtual void startPage(int pageNum, GfxState *state);
+  virtual void startPage(int pageNum, GfxState *state, XRef *xref);
 
   // End a page.
   virtual void endPage();
@@ -164,6 +169,9 @@ public:
 				  double *mat, double *bbox,
 				  int x0, int y0, int x1, int y1,
 				  double xStep, double yStep);
+#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
+  virtual GBool functionShadedFill(GfxState *state, GfxFunctionShading *shading);
+#endif
   virtual GBool axialShadedFill(GfxState *state, GfxAxialShading *shading, double tMin, double tMax);
   virtual GBool axialShadedSupportExtend(GfxState *state, GfxAxialShading *shading);
   virtual GBool radialShadedFill(GfxState *state, GfxRadialShading *shading, double sMin, double sMax);
@@ -192,7 +200,6 @@ public:
 			       CharCode code, Unicode *u, int uLen);
   virtual void endType3Char(GfxState *state);
   virtual void beginTextObject(GfxState *state);
-  virtual GBool deviceHasTextClip(GfxState *state) { return textClipPath; }
   virtual void endTextObject(GfxState *state);
 
   //----- image drawing
@@ -267,14 +274,19 @@ public:
 protected:
   void doPath(cairo_t *cairo, GfxState *state, GfxPath *path);
   cairo_surface_t *downscaleSurface(cairo_surface_t *orig_surface);
-  void getScaledSize(int orig_width, int orig_height,
+  void getScaledSize(const cairo_matrix_t *matrix,
+                     int orig_width, int orig_height,
 		     int *scaledWidth, int *scaledHeight);
   cairo_filter_t getFilterForSurface(cairo_surface_t *image,
 				     GBool interpolate);
   GBool getStreamData (Stream *str, char **buffer, int *length);
-  void setMimeData(Stream *str, Object *ref, cairo_surface_t *image);
+  void setMimeData(GfxState *state, Stream *str, Object *ref,
+		   GfxImageColorMap *colorMap, cairo_surface_t *image);
   void fillToStrokePathClip(GfxState *state);
   void alignStrokeCoords(GfxSubpath *subpath, int i, double *x, double *y);
+#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 14, 0)
+  GBool setMimeDataForJBIG2Globals (Stream *str, cairo_surface_t *image);
+#endif
 
   GfxRGB fill_color, stroke_color;
   cairo_pattern_t *fill_pattern, *stroke_pattern;
@@ -284,6 +296,7 @@ protected:
   GBool adjusted_stroke_width;
   GBool align_stroke_coords;
   CairoFont *currentFont;
+  XRef *xref;
 
   struct StrokePathClip {
     GfxPath *path;
@@ -310,6 +323,7 @@ protected:
   GBool needFontUpdate;                // set when the font needs to be updated
   GBool printing;
   GBool use_show_text_glyphs;
+  GBool text_matrix_valid;
   cairo_surface_t *surface;
   cairo_glyph_t *glyphs;
   int glyphCount;
@@ -319,6 +333,7 @@ protected:
   int utf8Count;
   int utf8Max;
   cairo_path_t *textClipPath;
+  GBool inUncoloredPattern;     // inside a uncolored pattern (PaintType = 2)
   GBool inType3Char;		// inside a Type 3 CharProc
   double t3_glyph_wx, t3_glyph_wy;
   GBool t3_glyph_has_bbox;
@@ -465,6 +480,11 @@ public:
 			       Stream *maskStr,
 			       int maskWidth, int maskHeight,
 			       GBool maskInvert, GBool maskInterpolate);
+  virtual void setSoftMaskFromImageMask(GfxState *state, Object *ref, Stream *str,
+                                        int width, int height, GBool invert,
+                                        GBool inlineImg, double *baseMatrix);
+  virtual void unsetSoftMaskFromImageMask(GfxState *state, double *baseMatrix) {}
+
 
   //----- transparency groups and soft masks
   virtual void beginTransparencyGroup(GfxState * /*state*/, double * /*bbox*/,
@@ -487,6 +507,8 @@ public:
 
 private:
   void saveImage(CairoImage *image);
+  void getBBox(GfxState *state, int width, int height,
+               double *x1, double *y1, double *x2, double *y2);
   
   CairoImage **images;
   int numImages;

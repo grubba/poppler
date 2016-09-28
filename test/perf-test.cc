@@ -1,5 +1,5 @@
 /* Copyright Krzysztof Kowalczyk 2006-2007
-   Copyright Hib Eris <hib@hiberis.nl> 2008
+   Copyright Hib Eris <hib@hiberis.nl> 2008, 2013
    License: GPLv2 */
 /*
   A tool to stress-test poppler rendering and measure rendering times for
@@ -20,6 +20,8 @@
 #pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='x86' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #endif
 
+#include <config.h>
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -33,7 +35,6 @@
 //#define COPY_FILE 1
 
 #include <assert.h>
-#include <config.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <ctype.h>
@@ -325,7 +326,7 @@ void sleep_milliseconds(int milliseconds)
 #endif
 }
 
-#ifndef _MSC_VER
+#ifndef HAVE_STRCPY_S
 void strcpy_s(char* dst, size_t dst_size, const char* src)
 {
     size_t src_size = strlen(src) + 1;
@@ -338,7 +339,9 @@ void strcpy_s(char* dst, size_t dst_size, const char* src)
         }
     }
 }
+#endif
 
+#ifndef HAVE_STRCAT_S
 void strcat_s(char *dst, size_t dst_size, const char* src)
 {
     size_t dst_len = strlen(dst);
@@ -467,7 +470,6 @@ struct FindFileState {
 };
 
 #ifdef _WIN32
-#include <windows.h>
 #include <sys/timeb.h>
 #include <direct.h>
 
@@ -742,7 +744,7 @@ void OutputDebugString(const char *txt)
 #define _vsnprintf vsnprintf
 #endif
 
-void my_error(void *, ErrorCategory, int pos, char *msg) {
+void my_error(void *, ErrorCategory, Goffset pos, char *msg) {
 #if 0
     char        buf[4096], *p = buf;
 
@@ -752,7 +754,7 @@ void my_error(void *, ErrorCategory, int pos, char *msg) {
     }
 
     if (pos >= 0) {
-        p += _snprintf(p, sizeof(buf)-1, "Error (%d): ", pos);
+      p += _snprintf(p, sizeof(buf)-1, "Error (%lld): ", (long long)pos);
         *p   = '\0';
         OutputDebugString(p);
     } else {
@@ -769,7 +771,7 @@ void my_error(void *, ErrorCategory, int pos, char *msg) {
     OutputDebugString(buf);
 
     if (pos >= 0) {
-        p += _snprintf(p, sizeof(buf)-1, "Error (%d): ", pos);
+        p += _snprintf(p, sizeof(buf)-1, "Error (%lld): ", (long long)pos);
         *p   = '\0';
         OutputDebugString(buf);
         if (gErrFile)

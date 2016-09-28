@@ -6,9 +6,11 @@
 //
 // Copyright 2006 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright 2007, 2008, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright 2007-2010 Albert Astals Cid <aacid@kde.org>
+// Copyright 2007-2010, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright 2010 Mark Riedesel <mark@klowner.com>
 // Copyright 2011 Pino Toscano <pino@kde.org>
+// Copyright 2012 Fabio D'Urso <fabiodurso@hotmail.it>
+// Copyright 2013 Adrian Johnson <ajohnson@redneon.com>
 //
 //========================================================================
 
@@ -20,6 +22,7 @@
 #endif
 
 #include "Object.h"
+#include "Annot.h"
 
 #include <set>
 
@@ -100,6 +103,7 @@ public:
   bool isReadOnly() const;
 
   LinkAction *getActivationAction();
+  LinkAction *getAdditionalAction(Annot::FormAdditionalActionsType type);
 
   // return the unique ID corresponding to pageNum/fieldNum
   static int encodeID (unsigned pageNum, unsigned fieldNum);
@@ -108,6 +112,8 @@ public:
 
   void createWidgetAnnotation();
   AnnotWidget *getWidgetAnnotation() const { return widget; }
+
+  virtual void updateWidgetAppearance() = 0;
 
 #ifdef DEBUG_FORMS
   void print(int indent = 0);
@@ -154,18 +160,9 @@ public:
 
   char* getOnStr();
   void setAppearanceState(const char *state);
-
-  void setNumSiblingsID (int i);
-  void setSiblingsID (int i, unsigned id) { siblingsID[i] = id; }
-
-  //For radio buttons, return the IDs of the other radio buttons in the same group
-  unsigned* getSiblingsID () const { return siblingsID; }
-  int getNumSiblingsID () const { return numSiblingsID; }
+  void updateWidgetAppearance();
 
 protected:
-  unsigned* siblingsID; // IDs of dependent buttons (each button of a radio field has all the others buttons
-                        // of the same field in this array)
-  int numSiblingsID;
   GooString *onStr;
   FormFieldButton *parent;
 };
@@ -184,6 +181,8 @@ public:
 
   //except a UTF16BE string
   void setContent(GooString* new_content);
+
+  void updateWidgetAppearance();
 
   bool isMultiline () const; 
   bool isPassword () const; 
@@ -224,6 +223,7 @@ public:
 
   GooString* getEditChoice ();
 
+  void updateWidgetAppearance();
   bool isSelected (int i);
 
   bool isCombo () const; 
@@ -244,6 +244,7 @@ protected:
 class FormWidgetSignature: public FormWidget {
 public:
   FormWidgetSignature(PDFDoc *docA, Object *dict, unsigned num, Ref ref, FormField *p);
+  void updateWidgetAppearance();
 protected:
   FormFieldSignature *parent;
 };
@@ -269,8 +270,6 @@ public:
   void setReadOnly (bool b) { readOnly = b; }
   bool isReadOnly () const { return readOnly; }
 
-  GBool isModified () const;
-
   GooString* getDefaultAppearance() const { return defaultAppearance; }
   GBool hasTextQuadding() const { return hasQuadding; }
   VariableTextQuadding getTextQuadding() const { return quadding; }
@@ -281,6 +280,7 @@ public:
   GooString *getFullyQualifiedName();
 
   FormWidget* findWidgetByRef (Ref aref);
+  int getNumWidgets() { return terminal ? numChildren : 0; }
   FormWidget *getWidget(int i) { return terminal ? widgets[i] : NULL; }
 
   // only implemented in FormFieldButton
@@ -297,6 +297,7 @@ public:
  protected:
   void _createWidget (Object *obj, Ref aref);
   void createChildren(std::set<int> *usedParents);
+  void updateChildrenAppearance();
 
   FormFieldType type;           // field type
   Ref ref;
@@ -309,7 +310,6 @@ public:
   int numChildren;
   FormWidget **widgets;
   bool readOnly;
-  GBool modified;
 
   GooString *partialName; // T field
   GooString *alternateUiName; // TU field
@@ -345,6 +345,13 @@ public:
   char *getAppearanceState() { return appearanceState.isName() ? appearanceState.getName() : NULL; }
 
   void fillChildrenSiblingsID ();
+  
+  void setNumSiblings (int num);
+  void setSibling (int i, FormFieldButton *id) { siblings[i] = id; }
+
+  //For radio buttons, return the fields of the other radio buttons in the same group
+  FormFieldButton* getSibling (int i) const { return siblings[i]; }
+  int getNumSiblings () const { return numSiblings; }
 
 #ifdef DEBUG_FORMS
   void print(int indent = 0);
@@ -353,6 +360,10 @@ public:
   virtual ~FormFieldButton();
 protected:
   void updateState(char *state);
+
+  FormFieldButton** siblings; // IDs of dependent buttons (each button of a radio field has all the others buttons
+                               // of the same field in this array)
+  int numSiblings;
 
   FormButtonType btype;
   int size;

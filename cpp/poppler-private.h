@@ -1,5 +1,7 @@
 /*
  * Copyright (C) 2009, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2013 Adrian Johnson <ajohnson@redneon.com>
+ * Copyright (C) 2014, Hans-Peter Deifel <hpdeifel@gmx.de>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,7 +40,9 @@ namespace poppler
 namespace detail
 {
 
-void error_function(void *data, ErrorCategory category, int pos, char *msg);
+extern debug_func user_debug_function;
+extern void *debug_closure;
+void error_function(void *data, ErrorCategory category, Goffset pos, char *msg);
 
 rectf pdfrectangle_to_rectf(const PDFRectangle &pdfrect);
 

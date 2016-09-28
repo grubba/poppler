@@ -21,7 +21,7 @@
 #include "poppler-input-stream.h"
 
 PopplerInputStream::PopplerInputStream(GInputStream *inputStreamA, GCancellable *cancellableA,
-                                       Guint startA, GBool limitedA, Guint lengthA, Object *dictA)
+                                       Goffset startA, GBool limitedA, Goffset lengthA, Object *dictA)
   : BaseStream(dictA, lengthA)
 {
   inputStream = (GInputStream *)g_object_ref(inputStreamA);
@@ -31,6 +31,8 @@ PopplerInputStream::PopplerInputStream(GInputStream *inputStreamA, GCancellable 
   length = lengthA;
   bufPtr = bufEnd = buf;
   bufPos = start;
+  savePos = 0;
+  saved = gFalse;
 }
 
 PopplerInputStream::~PopplerInputStream()
@@ -41,8 +43,12 @@ PopplerInputStream::~PopplerInputStream()
     g_object_unref(cancellable);
 }
 
-Stream *PopplerInputStream::makeSubStream(Guint startA, GBool limitedA,
-                                          Guint lengthA, Object *dictA)
+BaseStream *PopplerInputStream::copy() {
+  return new PopplerInputStream(inputStream, cancellable, start, limited, length, &dict);
+}
+
+Stream *PopplerInputStream::makeSubStream(Goffset startA, GBool limitedA,
+                                          Goffset lengthA, Object *dictA)
 {
   return new PopplerInputStream(inputStream, cancellable, startA, limitedA, lengthA, dictA);
 }
@@ -66,13 +72,14 @@ void PopplerInputStream::close()
   saved = gFalse;
 }
 
-void PopplerInputStream::setPos(Guint pos, int dir)
+void PopplerInputStream::setPos(Goffset pos, int dir)
 {
   Guint size;
   GSeekable *seekable = G_SEEKABLE(inputStream);
 
   if (dir >= 0) {
     g_seekable_seek(seekable, pos, G_SEEK_SET, cancellable, NULL);
+    bufPos = pos;
   } else {
     g_seekable_seek(seekable, 0, G_SEEK_END, cancellable, NULL);
     size = (Guint)g_seekable_tell(seekable);
@@ -86,7 +93,7 @@ void PopplerInputStream::setPos(Guint pos, int dir)
   bufPtr = bufEnd = buf;
 }
 
-void PopplerInputStream::moveStart(int delta)
+void PopplerInputStream::moveStart(Goffset delta)
 {
   start += delta;
   bufPtr = bufEnd = buf;
@@ -106,7 +113,7 @@ GBool PopplerInputStream::fillBuf()
   if (limited && bufPos + inputStreamBufSize > start + length) {
     n = start + length - bufPos;
   } else {
-    n = inputStreamBufSize;
+    n = inputStreamBufSize - (bufPos % inputStreamBufSize);
   }
 
   n = g_input_stream_read(inputStream, buf, n, cancellable, NULL);

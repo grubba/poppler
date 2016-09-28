@@ -7,13 +7,14 @@
 // Copyright 2006-2008 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright 2007-2012 Albert Astals Cid <aacid@kde.org>
 // Copyright 2007-2008, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright 2007 Adrian Johnson <ajohnson@redneon.com>
+// Copyright 2007, 2013 Adrian Johnson <ajohnson@redneon.com>
 // Copyright 2007 Iñigo Martínez <inigomartinez@gmail.com>
 // Copyright 2008, 2011 Pino Toscano <pino@kde.org>
 // Copyright 2008 Michael Vrable <mvrable@cs.ucsd.edu>
 // Copyright 2009 Matthias Drochner <M.Drochner@fz-juelich.de>
 // Copyright 2009 KDAB via Guillermo Amaral <gamaral@amaral.com.mx>
 // Copyright 2010, 2012 Mark Riedesel <mark@klowner.com>
+// Copyright 2012 Fabio D'Urso <fabiodurso@hotmail.it>
 // 
 //========================================================================
 
@@ -124,10 +125,6 @@ bool FormWidget::isReadOnly() const
   return field->isReadOnly();
 }
 
-GBool FormWidget::isModified() const {
-  return field->isModified();
-}
-
 int FormWidget::encodeID (unsigned pageNum, unsigned fieldNum)
 {
   return (pageNum << 4*sizeof(unsigned)) + fieldNum;
@@ -159,14 +156,16 @@ LinkAction *FormWidget::getActivationAction() {
   return widget ? widget->getAction() : NULL;
 }
 
+LinkAction *FormWidget::getAdditionalAction(Annot::FormAdditionalActionsType type) {
+  return widget ? widget->getFormAdditionalAction(type) : NULL;
+}
+
 FormWidgetButton::FormWidgetButton (PDFDoc *docA, Object *aobj, unsigned num, Ref ref, FormField *p) :
 	FormWidget(docA, aobj, num, ref, p)
 {
   type = formButton;
   parent = static_cast<FormFieldButton*>(field);
   onStr = NULL;
-  siblingsID = NULL;
-  numSiblingsID = 0;
 
   Object obj1, obj2;
 
@@ -199,8 +198,6 @@ char *FormWidgetButton::getOnStr() {
 
 FormWidgetButton::~FormWidgetButton ()
 {
-  if (siblingsID)
-    gfree(siblingsID);
   delete onStr;
 }
 
@@ -213,6 +210,11 @@ void FormWidgetButton::setAppearanceState(const char *state) {
   if (!widget)
     return;
   widget->setAppearanceState(state);
+}
+
+void FormWidgetButton::updateWidgetAppearance()
+{
+  // The appearance stream must NOT be regenerated for this widget type
 }
 
 void FormWidgetButton::setState (GBool astate)
@@ -234,12 +236,6 @@ GBool FormWidgetButton::getState ()
   return onStr ? parent->getState(onStr->getCString()) : gFalse;
 }
 
-void FormWidgetButton::setNumSiblingsID (int i)
-{ 
-  numSiblingsID = i; 
-  siblingsID = (unsigned*)greallocn(siblingsID, numSiblingsID, sizeof(unsigned));
-}
-
 
 FormWidgetText::FormWidgetText (PDFDoc *docA, Object *aobj, unsigned num, Ref ref, FormField *p) :
 	FormWidget(docA, aobj, num, ref, p)
@@ -257,7 +253,13 @@ GooString* FormWidgetText::getContentCopy ()
 {
   return parent->getContentCopy();
 }
-  
+
+void FormWidgetText::updateWidgetAppearance()
+{
+  if (widget)
+    widget->updateAppearanceStream();
+}
+
 bool FormWidgetText::isMultiline () const 
 { 
   return parent->isMultiline(); 
@@ -366,6 +368,12 @@ GooString* FormWidgetChoice::getEditChoice ()
   return parent->getEditChoice();
 }
 
+void FormWidgetChoice::updateWidgetAppearance()
+{
+  if (widget)
+    widget->updateAppearanceStream();
+}
+
 bool FormWidgetChoice::isSelected (int i)
 {
   if (!_checkRange(i)) return false;
@@ -433,6 +441,11 @@ FormWidgetSignature::FormWidgetSignature(PDFDoc *docA, Object *aobj, unsigned nu
   parent = static_cast<FormFieldSignature*>(field);
 }
 
+void FormWidgetSignature::updateWidgetAppearance()
+{
+  // Unimplemented
+}
+
 
 //========================================================================
 // FormField
@@ -456,7 +469,6 @@ FormField::FormField(PDFDoc *docA, Object *aobj, const Ref& aref, FormField *par
   fullyQualifiedName = NULL;
   quadding = quaddingLeftJustified;
   hasQuadding = gFalse;
-  modified = gFalse;
 
   ref = aref;
 
@@ -521,8 +533,8 @@ FormField::FormField(PDFDoc *docA, Object *aobj, const Ref& aref, FormField *par
     obj1.free();
     if (dict->lookup("Subtype", &obj1)->isName("Widget"))
       _createWidget(&obj, ref);
-    obj1.free();
   }
+  obj1.free();
 
   //flags
   if (Form::fieldLookup(dict, "Ff", &obj1)->isInt()) {
@@ -631,10 +643,6 @@ void FormField::createWidgetAnnotations() {
     for (int i = 0; i < numChildren; i++)
       children[i]->createWidgetAnnotations();
   }
-}
-
-GBool FormField::isModified() const {
-  return modified ? gTrue : parent ? parent->isModified() : gFalse;
 }
 
 void FormField::_createWidget (Object *obj, Ref aref)
@@ -768,6 +776,18 @@ GooString* FormField::getFullyQualifiedName() {
   return fullyQualifiedName;
 }
 
+void FormField::updateChildrenAppearance()
+{
+  // Recursively update each child's appearance
+  if (terminal) {
+    for (int i = 0; i < numChildren; i++)
+      widgets[i]->updateWidgetAppearance();
+  } else {
+    for (int i = 0; i < numChildren; i++)
+      children[i]->updateChildrenAppearance();
+  }
+}
+
 //------------------------------------------------------------------------
 // FormFieldButton
 //------------------------------------------------------------------------
@@ -777,6 +797,8 @@ FormFieldButton::FormFieldButton(PDFDoc *docA, Object *aobj, const Ref& ref, For
   Dict* dict = obj.getDict();
   active_child = -1;
   noAllOff = false;
+  siblings = NULL;
+  numSiblings = 0;
   appearanceState.initNull();
 
   Object obj1;
@@ -827,20 +849,31 @@ void FormFieldButton::print(int indent)
 }
 #endif
 
+void FormFieldButton::setNumSiblings (int num)
+{ 
+  numSiblings = num; 
+  siblings = (FormFieldButton**)greallocn(siblings, numSiblings, sizeof(FormFieldButton*));
+}
+
 void FormFieldButton::fillChildrenSiblingsID()
 {
   if (!terminal) {
     for(int i=0; i<numChildren; i++) {
-      children[i]->fillChildrenSiblingsID();
-    }
-  } else {
-    for(int i=0; i<numChildren; i++) {
-      FormWidgetButton *btn = static_cast<FormWidgetButton*>(widgets[i]);
-      btn->setNumSiblingsID(numChildren-1);
-      for(int j=0, counter=0; j<numChildren; j++) {
-        if (i == j) continue;
-        btn->setSiblingsID(counter, widgets[j]->getID());
-        counter++;
+      FormFieldButton *child = dynamic_cast<FormFieldButton*>(children[i]);
+      if (child != NULL) {
+        // Fill the siblings of this node childs
+        child->setNumSiblings(numChildren-1);
+        for(int j=0, counter=0; j<numChildren; j++) {
+          FormFieldButton *otherChild = dynamic_cast<FormFieldButton*>(children[j]);
+          if (i == j) continue;
+          if (child == otherChild) continue;
+          child->setSibling(counter, otherChild);
+          counter++;
+        }
+
+        // now call ourselves on the child
+        // to fill its children data
+        child->fillChildrenSiblingsID();
       }
     }
   }
@@ -861,7 +894,6 @@ GBool FormFieldButton::setState(char *state)
   if (terminal && parent && parent->getType() == formButton && appearanceState.isNull()) {
     // It's button in a set, set state on parent
     if (static_cast<FormFieldButton*>(parent)->setState(state)) {
-      modified = gTrue;
       return gTrue;
     }
     return gFalse;
@@ -907,7 +939,6 @@ GBool FormFieldButton::setState(char *state)
   }
 
   updateState(state);
-  modified = gTrue;
 
   return gTrue;
 }
@@ -933,6 +964,8 @@ void FormFieldButton::updateState(char *state) {
 FormFieldButton::~FormFieldButton()
 {
   appearanceState.free();
+  if (siblings)
+    gfree(siblings);
 }
 
 //------------------------------------------------------------------------
@@ -1019,7 +1052,7 @@ void FormFieldText::setContentCopy (GooString* new_content)
   obj1.initString(content ? content->copy() : new GooString(""));
   obj.getDict()->set("V", &obj1);
   xref->setModifiedObject(&obj, ref);
-  modified = gTrue;
+  updateChildrenAppearance();
 }
 
 FormFieldText::~FormFieldText()
@@ -1101,44 +1134,70 @@ FormFieldChoice::FormFieldChoice(PDFDoc *docA, Object *aobj, const Ref& ref, For
   }
   obj1.free();
 
-  // find selected items and convert choice's human readable strings to UTF16
-  if (Form::fieldLookup(dict, "V", &obj1)->isString()) {
-    for (int i = 0; i < numChoices; i++) {
-      if (!choices[i].optionName)
-        continue;
-
-      if (choices[i].optionName->cmp(obj1.getString()) == 0)
-        choices[i].selected = true;
-
-      if (!choices[i].optionName->hasUnicodeMarker()) {
-        int len;
-        char* buffer = pdfDocEncodingToUTF16(choices[i].optionName, &len);
-        choices[i].optionName->Set(buffer, len);
-        delete [] buffer;
+  // Find selected items
+  // Note: PDF specs say that /V has precedence over /I, but acroread seems to
+  // do the opposite. We do the same.
+  if (Form::fieldLookup(dict, "I", &obj1)->isArray()) {
+    for (int i = 0; i < obj1.arrayGetLength(); i++) {
+      Object obj2;
+      if (obj1.arrayGet(i, &obj2)->isInt() && obj2.getInt() >= 0 && obj2.getInt() < numChoices) {
+        choices[obj2.getInt()].selected = true;
       }
+      obj2.free();
     }
-  } else if (obj1.isArray()) {
-    for (int i = 0; i < numChoices; i++) {
-      if (!choices[i].optionName)
-        continue;
+  } else {
+    obj1.free();
+    // Note: According to PDF specs, /V should *never* contain the exportVal.
+    // However, if /Opt is an array of (exportVal,optionName) pairs, acroread
+    // seems to expect the exportVal instead of the optionName and so we do too.
+    if (Form::fieldLookup(dict, "V", &obj1)->isString()) {
+      GBool optionFound = gFalse;
 
-      for (int j = 0; j < obj1.arrayGetLength(); j++) {
-        Object obj2;
-
-        obj1.arrayGet(i, &obj2);
-        if (choices[i].optionName->cmp(obj2.getString()) == 0) {
-          choices[i].selected = true;
-          obj2.free();
-          break;
+      for (int i = 0; i < numChoices; i++) {
+        if (choices[i].exportVal) {
+          if (choices[i].exportVal->cmp(obj1.getString()) == 0) {
+            optionFound = gTrue;
+          }
+        } else if (choices[i].optionName) {
+          if (choices[i].optionName->cmp(obj1.getString()) == 0) {
+            optionFound = gTrue;
+          }
         }
-        obj2.free();
+
+        if (optionFound) {
+          choices[i].selected = true;
+          break; // We've determined that this option is selected. No need to keep on scanning
+        }
       }
 
-      if (!choices[i].optionName->hasUnicodeMarker()) {
-        int len;
-        char* buffer = pdfDocEncodingToUTF16(choices[i].optionName, &len);
-        choices[i].optionName->Set(buffer, len);
-        delete [] buffer;
+      // Set custom value if /V doesn't refer to any predefined option and the field is user-editable
+      if (!optionFound && edit) {
+        editedChoice = obj1.getString()->copy();
+      }
+    } else if (obj1.isArray()) {
+      for (int i = 0; i < numChoices; i++) {
+        for (int j = 0; j < obj1.arrayGetLength(); j++) {
+          Object obj2;
+          obj1.arrayGet(j, &obj2);
+          GBool matches = gFalse;
+
+          if (choices[i].exportVal) {
+            if (choices[i].exportVal->cmp(obj2.getString()) == 0) {
+              matches = gTrue;
+            }
+          } else if (choices[i].optionName) {
+            if (choices[i].optionName->cmp(obj2.getString()) == 0) {
+              matches = gTrue;
+            }
+          }
+
+          obj2.free();
+
+          if (matches) {
+            choices[i].selected = true;
+            break; // We've determined that this option is selected. No need to keep on scanning
+          }
+        }
       }
     }
   }
@@ -1164,37 +1223,63 @@ void FormFieldChoice::print(int indent)
 #endif
 
 void FormFieldChoice::updateSelection() {
-  Object obj1;
+  Object objV, objI, obj1;
+  objI.initNull();
 
-  //this is an editable combo-box with user-entered text
   if (edit && editedChoice) {
-    obj1.initString(editedChoice->copy());
+    // This is an editable combo-box with user-entered text
+    objV.initString(editedChoice->copy());
   } else {
-    int numSelected = getNumSelected();
+    const int numSelected = getNumSelected();
+
+    // Create /I array only if multiple selection is allowed (as per PDF spec)
+    if (multiselect) {
+      objI.initArray(xref);
+    }
+
     if (numSelected == 0) {
-      obj1.initString(new GooString(""));
+      // No options are selected
+      objV.initString(new GooString(""));
     } else if (numSelected == 1) {
-      for (int i = 0; numChoices; i++) {
-        if (choices[i].optionName && choices[i].selected) {
-          obj1.initString(choices[i].optionName->copy());
-          break;
+      // Only one option is selected
+      for (int i = 0; i < numChoices; i++) {
+        if (choices[i].selected) {
+          if (multiselect) {
+            objI.arrayAdd(obj1.initInt(i));
+          }
+
+          if (choices[i].exportVal) {
+            objV.initString(choices[i].exportVal->copy());
+          } else if (choices[i].optionName) {
+            objV.initString(choices[i].optionName->copy());
+          }
+
+          break; // We've just written the selected option. No need to keep on scanning
         }
       }
     } else {
-      obj1.initArray(xref);
+      // More than one option is selected
+      objV.initArray(xref);
       for (int i = 0; i < numChoices; i++) {
-        if (choices[i].optionName && choices[i].selected) {
-          Object obj2;
-          obj2.initString(choices[i].optionName->copy());
-          obj1.arrayAdd(&obj2);
+        if (choices[i].selected) {
+          if (multiselect) {
+            objI.arrayAdd(obj1.initInt(i));
+          }
+
+          if (choices[i].exportVal) {
+            objV.arrayAdd(obj1.initString(choices[i].exportVal->copy()));
+          } else if (choices[i].optionName) {
+            objV.arrayAdd(obj1.initString(choices[i].optionName->copy()));
+          }
         }
       }
     }
   }
 
-  obj.getDict()->set("V", &obj1);
+  obj.getDict()->set("V", &objV);
+  obj.getDict()->set("I", &objI);
   xref->setModifiedObject(&obj, ref);
-  modified = gTrue;
+  updateChildrenAppearance();
 }
 
 void FormFieldChoice::unselectAll ()
@@ -1205,20 +1290,30 @@ void FormFieldChoice::unselectAll ()
 }
 
 void FormFieldChoice::deselectAll () {
+  delete editedChoice;
+  editedChoice = NULL;
+
   unselectAll();
   updateSelection();
 }
 
 void FormFieldChoice::toggle (int i)
 {
+  delete editedChoice;
+  editedChoice = NULL;
+
   choices[i].selected = !choices[i].selected;
   updateSelection();
 }
 
 void FormFieldChoice::select (int i)
 {
+  delete editedChoice;
+  editedChoice = NULL;
+
   if (!multiselect)
     unselectAll();
+
   choices[i].selected = true;
   updateSelection();
 }
@@ -1350,7 +1445,7 @@ Form::Form(PDFDoc *docA, Object* acroFormA)
       }
 
       if (!obj2.isDict()) {
-        error(errSyntaxWarning, -1, "Reference in Fields array to an invalid or non existant object");
+        error(errSyntaxWarning, -1, "Reference in Fields array to an invalid or non existent object");
 	obj2.free();
 	oref.free();
 	continue;
