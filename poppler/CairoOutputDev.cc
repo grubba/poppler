@@ -20,11 +20,11 @@
 // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
 // Copyright (C) 2006-2010 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2008 Carl Worth <cworth@cworth.org>
-// Copyright (C) 2008, 2009 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2008-2010 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
 // Copyright (C) 2008, 2009 Chris Wilson <chris@chris-wilson.co.uk>
 // Copyright (C) 2008 Hib Eris <hib@hiberis.nl>
-// Copyright (C) 2009 David Benjamin <davidben@mit.edu>
+// Copyright (C) 2009, 2010 David Benjamin <davidben@mit.edu>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -500,7 +500,7 @@ void CairoOutputDev::updateFillColorStop(GfxState *state, double offset) {
 }
 
 void CairoOutputDev::updateBlendMode(GfxState *state) {
-#ifdef CAIRO_HAS_BLEND_MODES
+#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 9, 4)
   switch (state->getBlendMode()) {
   default:
   case gfxBlendNormal:
@@ -553,7 +553,7 @@ void CairoOutputDev::updateBlendMode(GfxState *state) {
     break;
   }
   LOG(printf ("blend mode: %d\n", (int)state->getBlendMode()));
-#endif /* CAIRO_HAS_BLEND_MODES */
+#endif /* CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 9, 4) */
 }
 
 void CairoOutputDev::updateFont(GfxState *state) {
@@ -1370,27 +1370,13 @@ get_singular_values (const cairo_matrix_t *matrix,
 		*minor = sqrt (f - delta);
 }
 
-
-cairo_surface_t *CairoOutputDev::downscaleSurface(cairo_surface_t *orig_surface) {
-  cairo_surface_t *dest_surface;
-  unsigned char *dest_buffer;
-  int dest_stride;
-  unsigned char *orig_buffer;
-  int orig_width, orig_height;
-  int orig_stride;
-  GBool res;
-
-  if (printing)
-    return NULL;
-
-
-  orig_width = cairo_image_surface_get_width (orig_surface);
-  orig_height = cairo_image_surface_get_height (orig_surface);
-
+void CairoOutputDev::getScaledSize(int  orig_width,
+				   int  orig_height,
+				   int *scaledWidth,
+				   int *scaledHeight) {
   cairo_matrix_t matrix;
   cairo_get_matrix(cairo, &matrix);
 
-  /* this whole computation should be factored out */
   double xScale;
   double yScale;
   if (orig_width > orig_height)
@@ -1399,8 +1385,6 @@ cairo_surface_t *CairoOutputDev::downscaleSurface(cairo_surface_t *orig_surface)
     get_singular_values (&matrix, &yScale, &xScale);
 
   int tx, tx2, ty, ty2; /* the integer co-oridinates of the resulting image */
-  int scaledHeight;
-  int scaledWidth;
   if (xScale >= 0) {
     tx = splashRound(matrix.x0 - 0.01);
     tx2 = splashRound(matrix.x0 + xScale + 0.01) - 1;
@@ -1408,13 +1392,13 @@ cairo_surface_t *CairoOutputDev::downscaleSurface(cairo_surface_t *orig_surface)
     tx = splashRound(matrix.x0 + 0.01) - 1;
     tx2 = splashRound(matrix.x0 + xScale - 0.01);
   }
-  scaledWidth = abs(tx2 - tx) + 1;
+  *scaledWidth = abs(tx2 - tx) + 1;
   //scaledWidth = splashRound(fabs(xScale));
-  if (scaledWidth == 0) {
+  if (*scaledWidth == 0) {
     // technically, this should draw nothing, but it generally seems
     // better to draw a one-pixel-wide stripe rather than throwing it
     // away
-    scaledWidth = 1;
+    *scaledWidth = 1;
   }
   if (yScale >= 0) {
     ty = splashFloor(matrix.y0 + 0.01);
@@ -1423,13 +1407,29 @@ cairo_surface_t *CairoOutputDev::downscaleSurface(cairo_surface_t *orig_surface)
     ty = splashCeil(matrix.y0 - 0.01);
     ty2 = splashFloor(matrix.y0 + yScale + 0.01);
   }
-  scaledHeight = abs(ty2 - ty);
-  if (scaledHeight == 0) {
-    scaledHeight = 1;
+  *scaledHeight = abs(ty2 - ty);
+  if (*scaledHeight == 0) {
+    *scaledHeight = 1;
   }
+}
+
+cairo_surface_t *CairoOutputDev::downscaleSurface(cairo_surface_t *orig_surface) {
+  cairo_surface_t *dest_surface;
+  unsigned char *dest_buffer;
+  int dest_stride;
+  unsigned char *orig_buffer;
+  int orig_width, orig_height;
+  int orig_stride;
+  int scaledHeight;
+  int scaledWidth;
+  GBool res;
+
+  if (printing)
+    return NULL;
 
   orig_width = cairo_image_surface_get_width (orig_surface);
   orig_height = cairo_image_surface_get_height (orig_surface);
+  getScaledSize (orig_width, orig_height, &scaledWidth, &scaledHeight);
   if (scaledWidth >= orig_width || scaledHeight >= orig_height)
     return NULL;
 
@@ -1454,6 +1454,25 @@ cairo_surface_t *CairoOutputDev::downscaleSurface(cairo_surface_t *orig_surface)
 
   return dest_surface;
 
+}
+
+cairo_filter_t
+CairoOutputDev::getFilterForSurface(cairo_surface_t *image,
+				    GBool interpolate)
+{
+  if (interpolate)
+    return CAIRO_FILTER_BILINEAR;
+
+  int orig_width = cairo_image_surface_get_width (image);
+  int orig_height = cairo_image_surface_get_height (image);
+  int scaled_width, scaled_height;
+  getScaledSize (orig_width, orig_height, &scaled_width, &scaled_height);
+
+  /* When scale factor is >= 400% we don't interpolate. See bugs #25268, #9860 */
+  if (scaled_width / orig_width >= 4 || scaled_height / orig_height >= 4)
+	  return CAIRO_FILTER_NEAREST;
+
+  return CAIRO_FILTER_BILINEAR;
 }
 
 void CairoOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
@@ -1518,6 +1537,7 @@ void CairoOutputDev::drawImageMaskRegular(GfxState *state, Object *ref, Stream *
   cairo_matrix_t matrix;
   int invert_bit;
   int row_stride;
+  cairo_filter_t filter;
 
   /* TODO: Do we want to cache these? */
   imgStr = new ImageStream(str, width, 1, 1);
@@ -1544,6 +1564,8 @@ void CairoOutputDev::drawImageMaskRegular(GfxState *state, Object *ref, Stream *
     }
   }
 
+  filter = getFilterForSurface (image, interpolate);
+
   cairo_surface_mark_dirty (image);
   pattern = cairo_pattern_create_for_surface (image);
   cairo_surface_destroy (image);
@@ -1552,12 +1574,10 @@ void CairoOutputDev::drawImageMaskRegular(GfxState *state, Object *ref, Stream *
 
   LOG (printf ("drawImageMask %dx%d\n", width, height));
 
-  /* we should actually be using CAIRO_FILTER_NEAREST here. However,
-   * cairo doesn't yet do minifaction filtering causing scaled down
-   * images with CAIRO_FILTER_NEAREST to look really bad */
-  cairo_pattern_set_filter (pattern,
-			    interpolate ? CAIRO_FILTER_BEST : CAIRO_FILTER_FAST);
-  cairo_pattern_set_extend (pattern, CAIRO_EXTEND_PAD);
+  cairo_pattern_set_filter (pattern, filter);
+
+  if (!printing)
+    cairo_pattern_set_extend (pattern, CAIRO_EXTEND_PAD);
 
   cairo_matrix_init_translate (&matrix, 0, height);
   cairo_matrix_scale (&matrix, width, -height);
@@ -1565,19 +1585,25 @@ void CairoOutputDev::drawImageMaskRegular(GfxState *state, Object *ref, Stream *
 
   if (state->getFillColorSpace()->getMode() == csPattern) {
     mask = cairo_pattern_reference (pattern);
-  } else {
+  } else if (!printing) {
     cairo_save (cairo);
     cairo_rectangle (cairo, 0., 0., 1., 1.);
     cairo_clip (cairo);
     cairo_mask (cairo, pattern);
     cairo_restore (cairo);
+  } else {
+    cairo_mask (cairo, pattern);
   }
 
   if (cairo_shape) {
     cairo_save (cairo_shape);
     cairo_set_source (cairo_shape, pattern);
-    cairo_rectangle (cairo_shape, 0., 0., 1., 1.);
-    cairo_fill (cairo_shape);
+    if (!printing) {
+      cairo_rectangle (cairo_shape, 0., 0., 1., 1.);
+      cairo_fill (cairo_shape);
+    } else {
+      cairo_mask (cairo_shape, pattern);
+    }
     cairo_restore (cairo_shape);
   }
 
@@ -1890,6 +1916,8 @@ void CairoOutputDev::drawMaskedImage(GfxState *state, Object *ref,
   Guchar *pix;
   int x, y;
   int invert_bit;
+  cairo_filter_t filter;
+  cairo_filter_t maskFilter;
 
   maskImgStr = new ImageStream(maskStr, maskWidth, 1, 1);
   maskImgStr->reset();
@@ -1919,6 +1947,8 @@ void CairoOutputDev::drawMaskedImage(GfxState *state, Object *ref,
 
   maskImgStr->close();
   delete maskImgStr;
+
+  maskFilter = getFilterForSurface (maskImage, maskInterpolate);
 
   cairo_surface_mark_dirty (maskImage);
   maskPattern = cairo_pattern_create_for_surface (maskImage);
@@ -1953,6 +1983,8 @@ void CairoOutputDev::drawMaskedImage(GfxState *state, Object *ref,
     colorMap->getRGBLine (pix, dest, width);
   }
 
+  filter = getFilterForSurface (image, interpolate);
+
   cairo_surface_mark_dirty (image);
   pattern = cairo_pattern_create_for_surface (image);
   cairo_surface_destroy (image);
@@ -1961,12 +1993,13 @@ void CairoOutputDev::drawMaskedImage(GfxState *state, Object *ref,
 
   LOG (printf ("drawMaskedImage %dx%d\n", width, height));
 
-  cairo_pattern_set_filter (pattern,
-			    interpolate ? CAIRO_FILTER_BILINEAR : CAIRO_FILTER_FAST);
-  cairo_pattern_set_extend (pattern, CAIRO_EXTEND_PAD);
-  cairo_pattern_set_filter (maskPattern,
-			    maskInterpolate ? CAIRO_FILTER_BILINEAR : CAIRO_FILTER_FAST);
-  cairo_pattern_set_extend (maskPattern, CAIRO_EXTEND_PAD);
+  cairo_pattern_set_filter (pattern, filter);
+  cairo_pattern_set_filter (maskPattern, maskFilter);
+
+  if (!printing) {
+    cairo_pattern_set_extend (pattern, CAIRO_EXTEND_PAD);
+    cairo_pattern_set_extend (maskPattern, CAIRO_EXTEND_PAD);
+  }
 
   cairo_matrix_init_translate (&matrix, 0, height);
   cairo_matrix_scale (&matrix, width, -height);
@@ -1976,18 +2009,27 @@ void CairoOutputDev::drawMaskedImage(GfxState *state, Object *ref,
   cairo_matrix_scale (&maskMatrix, maskWidth, -maskHeight);
   cairo_pattern_set_matrix (maskPattern, &maskMatrix);
 
-  cairo_save (cairo);
-  cairo_set_source (cairo, pattern);
-  cairo_rectangle (cairo, 0., 0., 1., 1.);
-  cairo_clip (cairo);
-  cairo_mask (cairo, maskPattern);
-  cairo_restore (cairo);
+  if (!printing) {
+    cairo_save (cairo);
+    cairo_set_source (cairo, pattern);
+    cairo_rectangle (cairo, 0., 0., 1., 1.);
+    cairo_clip (cairo);
+    cairo_mask (cairo, maskPattern);
+    cairo_restore (cairo);
+  } else {
+    cairo_set_source (cairo, pattern);
+    cairo_mask (cairo, maskPattern);
+  }
 
   if (cairo_shape) {
     cairo_save (cairo_shape);
     cairo_set_source (cairo_shape, pattern);
-    cairo_rectangle (cairo_shape, 0., 0., 1., 1.);
-    cairo_fill (cairo_shape);
+    if (!printing) {
+      cairo_rectangle (cairo_shape, 0., 0., 1., 1.);
+      cairo_fill (cairo_shape);
+    } else {
+      cairo_mask (cairo_shape, pattern);
+    }
     cairo_restore (cairo_shape);
   }
 
@@ -2020,6 +2062,8 @@ void CairoOutputDev::drawSoftMaskedImage(GfxState *state, Object *ref, Stream *s
   cairo_matrix_t maskMatrix, matrix;
   Guchar *pix;
   int y;
+  cairo_filter_t filter;
+  cairo_filter_t maskFilter;
 
   maskImgStr = new ImageStream(maskStr, maskWidth,
 			       maskColorMap->getNumPixelComps(),
@@ -2043,6 +2087,8 @@ void CairoOutputDev::drawSoftMaskedImage(GfxState *state, Object *ref, Stream *s
 
   maskImgStr->close();
   delete maskImgStr;
+
+  maskFilter = getFilterForSurface (maskImage, maskInterpolate);
 
   cairo_surface_mark_dirty (maskImage);
   maskPattern = cairo_pattern_create_for_surface (maskImage);
@@ -2077,6 +2123,8 @@ void CairoOutputDev::drawSoftMaskedImage(GfxState *state, Object *ref, Stream *s
     colorMap->getRGBLine (pix, dest, width);
   }
 
+  filter = getFilterForSurface (image, interpolate);
+
   cairo_surface_mark_dirty (image);
   pattern = cairo_pattern_create_for_surface (image);
   cairo_surface_destroy (image);
@@ -2085,13 +2133,13 @@ void CairoOutputDev::drawSoftMaskedImage(GfxState *state, Object *ref, Stream *s
 
   LOG (printf ("drawSoftMaskedImage %dx%d\n", width, height));
 
-  //XXX: should set mask filter
-  cairo_pattern_set_filter (pattern,
-			    interpolate ? CAIRO_FILTER_BILINEAR : CAIRO_FILTER_FAST);
-  cairo_pattern_set_extend (pattern, CAIRO_EXTEND_PAD);
-  cairo_pattern_set_filter (maskPattern,
-			    maskInterpolate ? CAIRO_FILTER_BILINEAR : CAIRO_FILTER_FAST);
-  cairo_pattern_set_extend (maskPattern, CAIRO_EXTEND_PAD);
+  cairo_pattern_set_filter (pattern, filter);
+  cairo_pattern_set_filter (maskPattern, maskFilter);
+
+  if (!printing) {
+    cairo_pattern_set_extend (pattern, CAIRO_EXTEND_PAD);
+    cairo_pattern_set_extend (maskPattern, CAIRO_EXTEND_PAD);
+  }
 
   cairo_matrix_init_translate (&matrix, 0, height);
   cairo_matrix_scale (&matrix, width, -height);
@@ -2101,22 +2149,31 @@ void CairoOutputDev::drawSoftMaskedImage(GfxState *state, Object *ref, Stream *s
   cairo_matrix_scale (&maskMatrix, maskWidth, -maskHeight);
   cairo_pattern_set_matrix (maskPattern, &maskMatrix);
 
-  cairo_save (cairo);
-  cairo_set_source (cairo, pattern);
-  cairo_rectangle (cairo, 0., 0.,
-		   MIN (width, maskWidth) / (double)width,
-		   MIN (height, maskHeight) / (double)height);
-  cairo_clip (cairo);
-  cairo_mask (cairo, maskPattern);
-  cairo_restore (cairo);
+  if (!printing) {
+    cairo_save (cairo);
+    cairo_set_source (cairo, pattern);
+    cairo_rectangle (cairo, 0., 0.,
+		     MIN (width, maskWidth) / (double)width,
+		     MIN (height, maskHeight) / (double)height);
+    cairo_clip (cairo);
+    cairo_mask (cairo, maskPattern);
+    cairo_restore (cairo);
+  } else {
+    cairo_set_source (cairo, pattern);
+    cairo_mask (cairo, maskPattern);
+  }
 
   if (cairo_shape) {
     cairo_save (cairo_shape);
     cairo_set_source (cairo_shape, pattern);
-    cairo_rectangle (cairo_shape, 0., 0.,
-		     MIN (width, maskWidth) / (double)width,
-		     MIN (height, maskHeight) / (double)height);
-    cairo_fill (cairo_shape);
+    if (!printing) {
+      cairo_rectangle (cairo_shape, 0., 0.,
+		       MIN (width, maskWidth) / (double)width,
+		       MIN (height, maskHeight) / (double)height);
+      cairo_fill (cairo_shape);
+    } else {
+      cairo_mask (cairo_shape, pattern);
+    }
     cairo_restore (cairo_shape);
   }
 
@@ -2126,6 +2183,31 @@ void CairoOutputDev::drawSoftMaskedImage(GfxState *state, Object *ref, Stream *s
 cleanup:
   imgStr->close();
   delete imgStr;
+}
+
+GBool CairoOutputDev::getStreamData (Stream *str, char **buffer, int *length)
+{
+  int len, i;
+  char *strBuffer;
+
+  len = 0;
+  str->close();
+  str->reset();
+  while (str->getChar() != EOF) len++;
+  if (len == 0)
+    return gFalse;
+
+  strBuffer = (char *)gmalloc (len);
+
+  str->close();
+  str->reset();
+  for (i = 0; i < len; ++i)
+    strBuffer[i] = str->getChar();
+
+  *buffer = strBuffer;
+  *length = len;
+
+  return gTrue;
 }
 
 void CairoOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
@@ -2141,6 +2223,7 @@ void CairoOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
   unsigned char *buffer;
   int stride, i;
   GfxRGB *lookup = NULL;
+  cairo_filter_t filter = CAIRO_FILTER_BILINEAR;
 
   /* TODO: Do we want to cache these? */
   imgStr = new ImageStream(str, width,
@@ -2234,18 +2317,39 @@ void CairoOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
     image = scaled_surface;
     width = cairo_image_surface_get_width (image);
     height = cairo_image_surface_get_height (image);
+  } else {
+    filter = getFilterForSurface (image, interpolate);
   }
 
   cairo_surface_mark_dirty (image);
+
+#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 9, 6)
+  if (printing && (str->getKind() == strDCT || str->getKind() == strJPX)) {
+    char *strBuffer;
+    int len;
+
+    if (getStreamData (str->getNextStream(), &strBuffer, &len)) {
+      cairo_status_t st;
+      st = cairo_surface_set_mime_data (image,
+					str->getKind() == strDCT ?
+					CAIRO_MIME_TYPE_JPEG : CAIRO_MIME_TYPE_JP2,
+					(const unsigned char *)strBuffer, len,
+					gfree, strBuffer);
+      if (st)
+        gfree (strBuffer);
+    }
+  }
+#endif /* CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 9, 6) */
+
   pattern = cairo_pattern_create_for_surface (image);
   cairo_surface_destroy (image);
   if (cairo_pattern_status (pattern))
     goto cleanup;
 
-  cairo_pattern_set_filter (pattern,
-			    interpolate ?
-			    CAIRO_FILTER_BILINEAR : CAIRO_FILTER_FAST);
-  cairo_pattern_set_extend (pattern, CAIRO_EXTEND_PAD);
+  cairo_pattern_set_filter (pattern, filter);
+
+  if (!printing)
+    cairo_pattern_set_extend (pattern, CAIRO_EXTEND_PAD);
 
   cairo_matrix_init_translate (&matrix, 0, height);
   cairo_matrix_scale (&matrix, width, -height);
@@ -2261,7 +2365,10 @@ void CairoOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
 
   cairo_save (cairo);
   cairo_set_source (cairo, pattern);
-  cairo_rectangle (cairo, 0., 0., 1., 1.);
+  if (printing)
+    cairo_rectangle (cairo, 0., 0., width, height);
+  else
+    cairo_rectangle (cairo, 0., 0., 1., 1.);
   if (maskPattern) {
     cairo_clip (cairo);
     cairo_mask (cairo, maskPattern);
@@ -2275,7 +2382,10 @@ void CairoOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
   if (cairo_shape) {
     cairo_save (cairo_shape);
     cairo_set_source (cairo_shape, pattern);
-    cairo_rectangle (cairo_shape, 0., 0., 1., 1.);
+    if (printing)
+      cairo_rectangle (cairo_shape, 0., 0., width, height);
+    else
+      cairo_rectangle (cairo_shape, 0., 0., 1., 1.);
     cairo_fill (cairo_shape);
     cairo_restore (cairo_shape);
   }

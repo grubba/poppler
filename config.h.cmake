@@ -1,8 +1,5 @@
 /* config.h.  Generated from config.h.cmake by cmake.  */
 
-/* Whether cairo has blend modes support */
-#cmakedefine CAIRO_HAS_BLEND_MODES 1
-
 /* Use libjpeg instead of builtin jpeg decoder. */
 #cmakedefine ENABLE_LIBJPEG 1
 
@@ -48,6 +45,9 @@
 
 /* Defines if gmtime_r is available on your system */
 #cmakedefine HAVE_GMTIME_R 1
+
+/* Define if you have the iconv() function and it works. */
+#cmakedefine HAVE_ICONV 1
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #cmakedefine HAVE_INTTYPES_H 1
@@ -120,6 +120,9 @@
 /* Define to 1 if you have the <zlib.h> header file. */
 #cmakedefine HAVE_ZLIB_H 1
 
+/* Define as const if the declaration of iconv() needs const. */
+#define ICONV_CONST ${ICONV_CONST}
+
 /* Enable multithreading support. */
 #cmakedefine MULTITHREADED 1
 
@@ -165,10 +168,10 @@
 /* Throw exceptions to deal with not enough memory and similar problems */
 #cmakedefine USE_EXCEPTIONS 1
 
-/* Use fixed point arithmetic */
+/* Use fixed point arithmetic in the Splash backend */
 #cmakedefine USE_FIXEDPOINT 1
 
-/* Use single precision arithmetic */
+/* Use single precision arithmetic in the Splash backend */
 #cmakedefine USE_FLOAT 1
 
 /* Version number of package */

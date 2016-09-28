@@ -1,6 +1,6 @@
 m4_define([poppler_version_major],[0])
 m4_define([poppler_version_minor],[13])
-m4_define([poppler_version_micro],[0])
+m4_define([poppler_version_micro],[1])
 m4_define([poppler_version],[poppler_version_major.poppler_version_minor.poppler_version_micro])
 
 AC_PREREQ(2.59)
@@ -70,11 +70,11 @@ AM_CONDITIONAL(ENABLE_XPDF_HEADERS, test x$enable_xpdf_headers = xyes)
 
 AC_ARG_ENABLE(single-precision,
 [  --enable-single-precision     use single precision arithmetic (instead of double precision) in the Splash backend],
-AC_DEFINE(USE_FLOAT,      [1], [Use single precision arithmetic]))
+AC_DEFINE(USE_FLOAT,      [1], [Use single precision arithmetic in the Splash backend]))
 
 AC_ARG_ENABLE(fixedpoint,
 [  --enable-fixedpoint     use fixed point (instead of double precision) arithmetic in the Splash backend],
-AC_DEFINE(USE_FIXEDPOINT, [1], [Use fixed point arithmetic]))
+AC_DEFINE(USE_FIXEDPOINT, [1], [Use fixed point arithmetic in the Splash backend]))
 
 dnl Relocation support
 AC_ARG_ENABLE(relocatable,
@@ -228,16 +228,20 @@ AH_TEMPLATE([ENABLE_LIBJPEG],
 dnl Test for libpng
 AC_ARG_ENABLE(libpng,
 	      AC_HELP_STRING([--disable-libpng],
-	                     [Don't build against libpng.]),
+	                     [Do not build against libpng.]),
               enable_libpng=$enableval,
               enable_libpng="try")
+
 if test x$enable_libpng != xno; then
-  POPPLER_FIND_PNG
+  PKG_CHECK_MODULES(LIBPNG, libpng, [enable_libpng="yes"],
+      [enable_libpng="no"])
+fi
+
+if test x$enable_libpng = xyes; then
+  AC_DEFINE(ENABLE_LIBPNG, 1, [Build against libpng.])
 fi
 
 AM_CONDITIONAL(BUILD_LIBPNG, test x$enable_libpng = xyes)
-AH_TEMPLATE([ENABLE_LIBPNG],
-            [Build against libpng.])
 
 dnl Check for freetype headers
 FREETYPE_LIBS=
@@ -353,30 +357,6 @@ if test x$enable_cairo_output = xyes; then
   CAIRO_FEATURE="#define POPPLER_HAS_CAIRO 1"
   CAIRO_REQ="cairo"
   AC_CHECK_HEADERS(fcntl.h sys/mman.h sys/stat.h)
-  AC_LANG_PUSH([C])
-  _SAVE_CFLAGS=$CFLAGS
-  _SAVE_LIBS=$LIBS
-  CFLAGS="$CFLAGS $CAIRO_CFLAGS"
-  LIBS="$LIBS $CAIRO_LIBS"
-  AC_CACHE_CHECK([for cairo blend modes support],
-                 ac_cv_cairo_has_blend_modes,
-		 [AC_COMPILE_IFELSE(
-		   [AC_LANG_SOURCE([[
-#include <cairo.h>
-int main() {
-  cairo_t *cr;
-  cairo_set_operator(cr, CAIRO_OPERATOR_MULTIPLY);
-  return 0;
-}
-                   ]])],
-		   [ac_cv_cairo_has_blend_modes="yes"],
-                   [ac_cv_cairo_has_blend_modes="no"])])
-  CFLAGS=$_SAVE_CFLAGS
-  LIBS=$_SAVE_LIBS
-  AC_LANG_POP([C])
-  if test "$ac_cv_cairo_has_blend_modes" = "yes"; then
-    AC_DEFINE(CAIRO_HAS_BLEND_MODES, [1], [Whether cairo has blend modes support])
-  fi
 else
   CAIRO_FEATURE="#undef POPPLER_HAS_CAIRO"
   CAIRO_REQ=""
@@ -531,6 +511,25 @@ fi
 
 AM_CONDITIONAL(BUILD_POPPLER_QT4, test "x$enable_poppler_qt4" = "xyes")
 
+dnl
+dnl CPP frontend
+dnl
+
+AC_ARG_ENABLE(poppler-cpp,
+              AC_HELP_STRING([--disable-poppler-cpp],
+                             [Don't compile poppler cpp wrapper.]),
+              enable_poppler_cpp=$enableval,
+              enable_poppler_cpp="yes")
+if test x$enable_poppler_cpp = xyes; then
+  AM_ICONV()
+  if test x$am_func_iconv != xyes; then
+    enable_poppler_cpp=no
+  fi
+fi
+
+AM_CONDITIONAL(BUILD_POPPLER_CPP, test "x$enable_poppler_cpp" = "xyes")
+
+
 AC_ARG_ENABLE(gtk-test,
               AC_HELP_STRING([--disable-gtk-test],
 	                     [Don't compile GTK+ test program.]),
@@ -621,6 +620,7 @@ AC_SUBST(PC_REQUIRES_PRIVATE)
 AC_SUBST([POPPLER_MAJOR_VERSION],[poppler_version_major])
 AC_SUBST([POPPLER_MINOR_VERSION],[poppler_version_minor])
 AC_SUBST([POPPLER_MICRO_VERSION],[poppler_version_micro])
+AC_SUBST([POPPLER_VERSION],[poppler_version])
 
 AC_OUTPUT([
 Makefile
@@ -639,12 +639,16 @@ qt4/Makefile
 qt4/src/Makefile
 qt4/tests/Makefile
 qt4/demos/Makefile
+cpp/Makefile
+cpp/poppler-version.h
+cpp/tests/Makefile
 poppler.pc
 poppler-cairo.pc
 poppler-splash.pc
 poppler-glib.pc
 poppler-qt.pc
-poppler-qt4.pc])
+poppler-qt4.pc
+poppler-cpp.pc])
 
 
 echo ""
@@ -657,6 +661,7 @@ echo "  qt wrapper:         $enable_poppler_qt"
 echo "  qt4 wrapper:        $enable_poppler_qt4"
 echo "  glib wrapper:       $enable_poppler_glib"
 echo "    use GDK:          $enable_gdk"
+echo "  cpp wrapper:        $enable_poppler_cpp"
 echo "  use gtk-doc:        $enable_gtk_doc"
 echo "  use libjpeg:        $enable_libjpeg"
 echo "  use libpng:         $enable_libpng"

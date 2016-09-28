@@ -13,6 +13,8 @@ splash_libs =					\
 	$(SPLASH_LIBS)				\
 	$(top_builddir)/splash/libsplash.la
 
+endif
+
 if BUILD_POPPLER_QT4
 
 poppler_arthur = libpoppler-arthur.la
@@ -26,8 +28,6 @@ arthur_includes =				\
 
 arthur_libs =					\
 	$(POPPLER_QT4_LIBS)
-
-endif
 
 endif
 
@@ -68,6 +68,8 @@ if BUILD_LIBPNG
 
 libpng_libs =					\
 	$(LIBPNG_LIBS)
+libpng_includes =				\
+	$(LIBPNG_CFLAGS)
 
 endif
 
@@ -127,6 +129,7 @@ INCLUDES =					\
 	$(cairo_includes)			\
 	$(arthur_includes)			\
 	$(abiword_includes)			\
+	$(libpng_includes)			\
 	$(FREETYPE_CFLAGS)			\
 	$(FONTCONFIG_CFLAGS)
 
