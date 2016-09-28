@@ -246,7 +246,7 @@ DisplayFontParam *GlobalParams::getDisplayFont(GfxFont *font) {
       dfp = (DisplayFontParam *)displayFonts->lookup(fontName);
     if (!dfp) {
       substFontName = (char *) findSubstituteName(fontName->getCString());
-      error(-1, "Couldn't find a font for '%s', subst is '%s'", fontName->getCString(), substFontName);
+      error(errIO, -1, "Couldn't find a font for '%s', subst is '%s'", fontName->getCString(), substFontName);
       dfp = (DisplayFontParam *)displayFonts->lookup(substFontName);
       if (!dfp) {
         if (loadPlatformFont(substFontName))
