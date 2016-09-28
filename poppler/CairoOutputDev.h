@@ -20,7 +20,7 @@
 // Copyright (C) 2006-2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2008, 2009, 2011, 2012 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
-// Copyright (C) 2010, 2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2010-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -202,8 +202,8 @@ public:
   virtual void setSoftMaskFromImageMask(GfxState *state,
 					Object *ref, Stream *str,
 					int width, int height, GBool invert,
-					GBool inlineImg);
-  virtual void unsetSoftMaskFromImageMask(GfxState *state);
+					GBool inlineImg, double *baseMatrix);
+  virtual void unsetSoftMaskFromImageMask(GfxState *state, double *baseMatrix);
   void drawImageMaskPrescaled(GfxState *state, Object *ref, Stream *str,
 			      int width, int height, GBool invert, GBool interpolate,
 			      GBool inlineImg);
@@ -273,8 +273,8 @@ protected:
 				     GBool interpolate);
   GBool getStreamData (Stream *str, char **buffer, int *length);
   void setMimeData(Stream *str, Object *ref, cairo_surface_t *image);
-  void fillToStrokePathClip();
-  void alignStrokeCoords(double *x, double *y);
+  void fillToStrokePathClip(GfxState *state);
+  void alignStrokeCoords(GfxSubpath *subpath, int i, double *x, double *y);
 
   GfxRGB fill_color, stroke_color;
   cairo_pattern_t *fill_pattern, *stroke_pattern;
@@ -286,7 +286,7 @@ protected:
   CairoFont *currentFont;
 
   struct StrokePathClip {
-    cairo_path_t *path;
+    GfxPath *path;
     cairo_matrix_t ctm;
     double line_width;
     double *dashes;

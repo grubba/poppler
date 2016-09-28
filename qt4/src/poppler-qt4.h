@@ -1,7 +1,7 @@
 /* poppler-qt.h: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, 2007, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2005-2011, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2005-2012, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2005, Stefan Kebekus <stefan.kebekus@math.uni-koeln.de>
  * Copyright (C) 2006-2011, Pino Toscano <pino@kde.org>
  * Copyright (C) 2009 Shawn Rutledge <shawn.t.rutledge@gmail.com>
@@ -10,6 +10,7 @@
  * Copyright (C) 2011 Andreas Hartmetz <ahartmetz@gmail.com>
  * Copyright (C) 2011 Glad Deschrijver <glad.deschrijver@gmail.com>
  * Copyright (C) 2012, Guillermo A. Amaral B. <gamaral@kde.org>
+ * Copyright (C) 2012, Fabio D'Urso <fabiodurso@hotmail.it>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -43,7 +44,6 @@
 class EmbFile;
 class Sound;
 class AnnotMovie;
-class AnnotScreen;
 
 /**
    The %Poppler Qt4 binding.
@@ -309,7 +309,7 @@ delete it;
     */
     class POPPLER_QT4_EXPORT EmbeddedFile {
 	friend class DocumentData;
-	friend class Page;
+	friend class AnnotationPrivate;
     public:
 	/// \cond PRIVATE
 	EmbeddedFile(EmbFile *embfile);
@@ -676,8 +676,30 @@ delete it;
 	
 	/**
 	 Returns the annotations of the page
+
+	 \note If you call this method twice, you get different objects
+	       pointing to the same annotations (see Annotation).
+	       The caller owns the returned objects and they should be deleted
+	       when no longer required.
 	*/
 	QList<Annotation*> annotations() const;
+
+	/**
+	 Adds an annotation to the page
+
+	 \note Ownership of the annotation object stays with the caller, who can
+	       delete it at any time.
+	 \since 0.20
+	*/
+	void addAnnotation( const Annotation *ann );
+
+	/**
+	 Removes an annotation from the page and destroys the annotation object
+
+	 \note There mustn't be other Annotation objects pointing this annotation
+	 \since 0.20
+	*/
+	void removeAnnotation( const Annotation *ann );
 
 	/**
 	 Returns the form fields on the page
@@ -1427,7 +1449,8 @@ height = dummy.height();
                 Printing = 0x00000001,              ///< The PS is generated for printing purposes
                 StrictMargins = 0x00000002,
                 ForceRasterization = 0x00000004,
-                PrintToEPS = 0x00000008             ///< Output EPS instead of PS \since 0.20
+                PrintToEPS = 0x00000008,            ///< Output EPS instead of PS \since 0.20
+                HideAnnotations = 0x00000010        ///< Don't print annotations \since 0.20
             };
             Q_DECLARE_FLAGS( PSOptions, PSOption )
 
@@ -1671,7 +1694,7 @@ height = dummy.height();
        \since 0.10
     */
     class POPPLER_QT4_EXPORT MovieObject {
-    friend class Page;
+    friend class AnnotationPrivate;
     public:
 	/**
 	   The play mode for playing the movie

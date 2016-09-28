@@ -266,8 +266,8 @@ public:
   virtual void setSoftMaskFromImageMask(GfxState *state,
 					Object *ref, Stream *str,
 					int width, int height, GBool invert,
-					GBool inlineImg);
-  virtual void unsetSoftMaskFromImageMask(GfxState *state);
+					GBool inlineImg, double *baseMatrix);
+  virtual void unsetSoftMaskFromImageMask(GfxState *state, double *baseMatrix);
   virtual void drawImage(GfxState *state, Object *ref, Stream *str,
 			 int width, int height, GfxImageColorMap *colorMap,
 			 GBool interpolate, int *maskColors, GBool inlineImg);
@@ -292,6 +292,7 @@ public:
 		       double llx, double lly, double urx, double ury);
 
   //----- transparency groups and soft masks
+  virtual GBool checkTransparencyGroup(GfxState *state, GBool knockout);
   virtual void beginTransparencyGroup(GfxState *state, double *bbox,
 				      GfxColorSpace *blendingColorSpace,
 				      GBool isolated, GBool knockout,

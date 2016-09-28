@@ -15,7 +15,7 @@
 // Copyright (C) 2005 Marco Pesenti Gritti <mpg@redhat.com>
 // Copyright (C) 2010-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
-// Copyright (C) 2011 William Bader <williambader@hotmail.com>
+// Copyright (C) 2011, 2012 William Bader <williambader@hotmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -135,6 +135,10 @@ struct SplashPipe {
   // non-isolated group alpha0
   Guchar *alpha0Ptr;
 
+  // knockout groups
+  GBool knockout;
+  Guchar knockoutOpacity;
+
   // soft mask
   SplashColorPtr softMaskPtr;
 
@@ -240,7 +244,8 @@ inline void Splash::updateModY(int y) {
 inline void Splash::pipeInit(SplashPipe *pipe, int x, int y,
 			     SplashPattern *pattern, SplashColorPtr cSrc,
 			     Guchar aInput, GBool usesShape,
-			     GBool nonIsolatedGroup) {
+			     GBool nonIsolatedGroup,
+			     GBool knockout, Guchar knockoutOpacity) {
   pipeSetXY(pipe, x, y);
   pipe->pattern = NULL;
 
@@ -259,6 +264,10 @@ inline void Splash::pipeInit(SplashPipe *pipe, int x, int y,
   // source alpha
   pipe->aInput = aInput;
   pipe->usesShape = usesShape;
+
+  // knockout
+  pipe->knockout = knockout;
+  pipe->knockoutOpacity = knockoutOpacity;
 
   // result alpha
   if (aInput == 255 && !state->softMask && !usesShape &&
@@ -391,17 +400,17 @@ void Splash::pipeRun(SplashPipe *pipe) {
       if (state->overprintMask & 2) {
 	pipe->destColorPtr[1] = (state->overprintAdditive) ? 
               std::min<int>(pipe->destColorPtr[1] + state->cmykTransferM[pipe->cSrc[1]], 255) :
-              state->cmykTransferC[pipe->cSrc[1]];
+              state->cmykTransferM[pipe->cSrc[1]];
       }
       if (state->overprintMask & 4) {
 	pipe->destColorPtr[2] = (state->overprintAdditive) ? 
               std::min<int>(pipe->destColorPtr[2] + state->cmykTransferY[pipe->cSrc[2]], 255) :
-              state->cmykTransferC[pipe->cSrc[2]];
+              state->cmykTransferY[pipe->cSrc[2]];
       }
       if (state->overprintMask & 8) {
 	pipe->destColorPtr[3] = (state->overprintAdditive) ? 
               std::min<int>(pipe->destColorPtr[3] + state->cmykTransferK[pipe->cSrc[3]], 255) :
-              state->cmykTransferC[pipe->cSrc[3]];
+              state->cmykTransferK[pipe->cSrc[3]];
       }
       pipe->destColorPtr += 4;
       break;
@@ -500,6 +509,10 @@ void Splash::pipeRun(SplashPipe *pipe) {
 	  break;
 	}
 	cSrc = cSrcNonIso;
+        // knockout: remove backdrop color
+        if (pipe->knockout && pipe->shape >= pipe->knockoutOpacity) {
+          aDest = 0;
+        }
       }
     } else {
       cSrc = pipe->cSrc;
@@ -835,17 +848,17 @@ void Splash::pipeRunSimpleCMYK8(SplashPipe *pipe) {
   if (state->overprintMask & 2) {
     pipe->destColorPtr[1] = (state->overprintAdditive) ? 
               std::min<int>(pipe->destColorPtr[1] + state->cmykTransferM[pipe->cSrc[1]], 255) :
-              state->cmykTransferC[pipe->cSrc[1]];
+              state->cmykTransferM[pipe->cSrc[1]];
   }
   if (state->overprintMask & 4) {
     pipe->destColorPtr[2] = (state->overprintAdditive) ? 
               std::min<int>(pipe->destColorPtr[2] + state->cmykTransferY[pipe->cSrc[2]], 255) :
-              state->cmykTransferC[pipe->cSrc[2]];
+              state->cmykTransferY[pipe->cSrc[2]];
   }
   if (state->overprintMask & 8) {
     pipe->destColorPtr[3] = (state->overprintAdditive) ? 
               std::min<int>(pipe->destColorPtr[3] + state->cmykTransferK[pipe->cSrc[3]], 255) :
-              state->cmykTransferC[pipe->cSrc[3]];
+              state->cmykTransferK[pipe->cSrc[3]];
   }
   pipe->destColorPtr += 4;
   *pipe->destAlphaPtr++ = 255;
@@ -4651,7 +4664,8 @@ void Splash::blitImageClipped(SplashBitmap *src, GBool srcAlpha,
 
 SplashError Splash::composite(SplashBitmap *src, int xSrc, int ySrc,
 			      int xDest, int yDest, int w, int h,
-			      GBool noClip, GBool nonIsolated) {
+			      GBool noClip, GBool nonIsolated,
+			      GBool knockout, SplashCoord knockoutOpacity) {
   SplashPipe pipe;
   SplashColor pixel;
   Guchar alpha;
@@ -4664,7 +4678,8 @@ SplashError Splash::composite(SplashBitmap *src, int xSrc, int ySrc,
 
   if (src->alpha) {
     pipeInit(&pipe, xDest, yDest, NULL, pixel,
-	     (Guchar)splashRound(state->fillAlpha * 255), gTrue, nonIsolated);
+	     (Guchar)splashRound(state->fillAlpha * 255), gTrue, nonIsolated,
+	     knockout, (Guchar)splashRound(knockoutOpacity * 255));
     if (noClip) {
       for (y = 0; y < h; ++y) {
 	pipeSetXY(&pipe, xDest, yDest + y);
@@ -5260,7 +5275,7 @@ SplashError Splash::blitTransparent(SplashBitmap *src, int xSrc, int ySrc,
   case splashModeCMYK8:
     for (y = 0; y < h; ++y) {
       p = &bitmap->data[(yDest + y) * bitmap->rowSize + 4 * xDest];
-      sp = &src->data[(ySrc + y) * bitmap->rowSize + 4 * xSrc];
+      sp = &src->data[(ySrc + y) * src->rowSize + 4 * xSrc];
       for (x = 0; x < w; ++x) {
 	*p++ = *sp++;
 	*p++ = *sp++;

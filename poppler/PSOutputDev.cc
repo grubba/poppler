@@ -26,6 +26,7 @@
 // Copyright (C) 2009, 2011, 2012 William Bader <williambader@hotmail.com>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
 // Copyright (C) 2009-2011 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -1552,19 +1553,13 @@ void PSOutputDev::writeDocSetup(PDFDoc *doc, Catalog *catalog,
     if ((resDict = page->getResourceDict())) {
       setupResources(resDict);
     }
-    annots = new Annots(doc, page->getAnnots(&obj1));
-    obj1.free();
+    annots = page->getAnnots();
     for (i = 0; i < annots->getNumAnnots(); ++i) {
-      if (annots->getAnnot(i)->getAppearance(&obj1)->isStream()) {
-	obj1.streamGetDict()->lookup("Resources", &obj2);
-	if (obj2.isDict()) {
-	  setupResources(obj2.getDict());
-	}
-	obj2.free();
+      if (annots->getAnnot(i)->getAppearanceResDict(&obj1)->isDict()) {
+        setupResources(obj1.getDict());
       }
       obj1.free();
     }
-    delete annots;
   }
   if ((acroForm = catalog->getAcroForm()) && acroForm->isDict()) {
     if (acroForm->dictLookup("DR", &obj1)->isDict()) {
@@ -3033,7 +3028,9 @@ GBool PSOutputDev::checkPageSlice(Page *page, double /*hDPI*/, double /*vDPI*/,
 				  int sliceW, int sliceH,
 				  GBool printing,
 				  GBool (*abortCheckCbk)(void *data),
-				  void *abortCheckCbkData) {
+				  void *abortCheckCbkData,
+				  GBool (*annotDisplayDecideCbk)(Annot *annot, void *user_data),
+				  void *annotDisplayDecideCbkData) {
   PreScanOutputDev *scan;
   GBool rasterize;
 #if HAVE_SPLASH
@@ -3065,7 +3062,8 @@ GBool PSOutputDev::checkPageSlice(Page *page, double /*hDPI*/, double /*vDPI*/,
     scan = new PreScanOutputDev(doc);
     page->displaySlice(scan, 72, 72, rotateA, useMediaBox, crop,
 		       sliceX, sliceY, sliceW, sliceH,
-		       printing, abortCheckCbk, abortCheckCbkData);
+		       printing, abortCheckCbk, abortCheckCbkData,
+		       annotDisplayDecideCbk, annotDisplayDecideCbkData);
     rasterize = scan->usesTransparency() || scan->usesPatternImageMask();
     delete scan;
   }
@@ -3148,7 +3146,8 @@ GBool PSOutputDev::checkPageSlice(Page *page, double /*hDPI*/, double /*vDPI*/,
     page->displaySlice(splashOut, hDPI2, vDPI2,
 		       (360 - page->getRotate()) % 360, useMediaBox, crop,
 		       sliceX, stripeY, sliceW, stripeH,
-		       printing, abortCheckCbk, abortCheckCbkData);
+		       printing, abortCheckCbk, abortCheckCbkData,
+		       annotDisplayDecideCbk, annotDisplayDecideCbkData);
 
     // draw the rasterized image
     bitmap = splashOut->getBitmap();
@@ -4947,13 +4946,13 @@ void PSOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
 
 void PSOutputDev::setSoftMaskFromImageMask(GfxState *state, Object *ref, Stream *str,
 				int width, int height, GBool invert,
-				GBool inlineImg) {
+				GBool inlineImg, double *baseMatrix) {
   if (level != psLevel1 && level != psLevel1Sep) {
     maskToClippingPath(str, width, height, invert);
   }
 }
 
-void PSOutputDev::unsetSoftMaskFromImageMask(GfxState * state) {
+void PSOutputDev::unsetSoftMaskFromImageMask(GfxState * state, double *baseMatrix) {
   if (level != psLevel1 && level != psLevel1Sep) {
     writePS("pdfImClipEnd\n");
   }

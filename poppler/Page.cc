@@ -15,7 +15,7 @@
 //
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005 Jeff Muizelaar <jeff@infidigm.net>
-// Copyright (C) 2005-2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005-2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2006-2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2006 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
 // Copyright (C) 2006 Scott Turner <scotty1024@mac.com>
@@ -24,6 +24,7 @@
 // Copyright (C) 2008 Iñigo Martínez <inigomartinez@gmail.com>
 // Copyright (C) 2008 Brad Hards <bradh@kde.org>
 // Copyright (C) 2008 Ilya Gorenbein <igorenbein@finjan.com>
+// Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -394,6 +395,41 @@ void Page::addAnnot(Annot *annot) {
   annot->setPage(&pageRef, num);
 }
 
+void Page::removeAnnot(Annot *annot) {
+  Ref annotRef = annot->getRef();
+  Object annArray;
+
+  getAnnots(&annArray);
+  if (annArray.isArray()) {
+    int idx = -1;
+    // Get annotation position
+    for (int i = 0; idx == -1 && i < annArray.arrayGetLength(); ++i) {
+      Object tmp;
+      Ref currAnnot = annArray.arrayGetNF(i, &tmp)->getRef();
+      tmp.free();
+      if (currAnnot.num == annotRef.num && currAnnot.gen == annotRef.gen) {
+        idx = i;
+      }
+    }
+
+    if (idx == -1) {
+      error(errInternal, -1, "Annotation doesn't belong to this page");
+      annArray.free();
+      return;
+    }
+    annots->removeAnnot(annot); // Gracefully fails on popup windows
+    annArray.arrayRemove(idx);
+    xref->removeIndirectObject(annotRef);
+
+    if (annotsObj.isRef()) {
+      xref->setModifiedObject (&annArray, annotsObj.getRef());
+    } else {
+      xref->setModifiedObject (&pageObj, pageRef);
+    }
+  }
+  annArray.free();
+}
+
 Links *Page::getLinks() {
   return new Links(getAnnots());
 }
@@ -419,9 +455,7 @@ Gfx *Page::createGfx(OutputDev *out, double hDPI, double vDPI,
 		     int sliceX, int sliceY, int sliceW, int sliceH,
 		     GBool printing,
 		     GBool (*abortCheckCbk)(void *data),
-		     void *abortCheckCbkData,
-		     GBool (*annotDisplayDecideCbk)(Annot *annot, void *user_data),
-		     void *annotDisplayDecideCbkData) {
+		     void *abortCheckCbkData) {
   PDFRectangle *mediaBox, *cropBox;
   PDFRectangle box;
   Gfx *gfx;
@@ -469,15 +503,15 @@ void Page::displaySlice(OutputDev *out, double hDPI, double vDPI,
   if (!out->checkPageSlice(this, hDPI, vDPI, rotate, useMediaBox, crop,
 			   sliceX, sliceY, sliceW, sliceH,
 			   printing,
-			   abortCheckCbk, abortCheckCbkData)) {
+			   abortCheckCbk, abortCheckCbkData,
+			   annotDisplayDecideCbk, annotDisplayDecideCbkData)) {
     return;
   }
 
   gfx = createGfx(out, hDPI, vDPI, rotate, useMediaBox, crop,
 		  sliceX, sliceY, sliceW, sliceH,
 		  printing,
-		  abortCheckCbk, abortCheckCbkData,
-		  annotDisplayDecideCbk, annotDisplayDecideCbkData);
+		  abortCheckCbk, abortCheckCbkData);
 
   contents.fetch(xref, &obj);
   if (!obj.isNull()) {

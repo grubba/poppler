@@ -1,6 +1,6 @@
 m4_define([poppler_version_major],[0])
-m4_define([poppler_version_minor],[19])
-m4_define([poppler_version_micro],[1])
+m4_define([poppler_version_minor],[20])
+m4_define([poppler_version_micro],[0])
 m4_define([poppler_version],[poppler_version_major.poppler_version_minor.poppler_version_micro])
 
 AC_PREREQ(2.59)
@@ -31,7 +31,13 @@ if test "x$GXX" = "xyes"; then
     cygwin* | mingw*)
     ;;
     *)
-      CXXFLAGS="$CXXFLAGS -ansi"
+      case "${CXXFLAGS}" in
+      *-std=*)
+        ;;
+      *)
+        CXXFLAGS="$CXXFLAGS -ansi"
+        ;;
+      esac
     ;;
   esac
 fi
@@ -41,7 +47,7 @@ dnl ##### Check for pkgconfig
 PKG_PROG_PKG_CONFIG
 
 dnl ##### Export the version
-AC_DEFINE([POPPLER_VERSION], [poppler_version], [Defines the poppler version])
+AC_DEFINE_UNQUOTED([POPPLER_VERSION], ["poppler_version"], [Defines the poppler version])
 
 dnl Enable these unconditionally.
 AC_DEFINE([OPI_SUPPORT], [1], [Generate OPI comments in PS output.])
@@ -193,21 +199,46 @@ AC_ARG_ENABLE(libtiff,
 		enable_libtiff=$enableval,
 		enable_libtiff="try")
 
+AC_ARG_VAR([LIBTIFF_CFLAGS], [C compiler flags for LIBTIFF])
+AC_ARG_VAR([LIBTIFF_LIBS], [linker flags to link LIBTIFF (default is -ltiff)])
+ac_save_CPPFLAGS="$CPPFLAGS"
+ac_save_CXXFLAGS="$CXXFLAGS"
+ac_save_LIBS="$LDFLAGS"
+CPPFLAGS="$CPPFLAGS $LIBTIFF_CFLAGS"
+CXXFLAGS="$CXXFLAGS $LIBTIFF_CFLAGS"
+LIBS="$LIBS $LIBTIFF_LIBS"
 if test x$enable_libtiff = xyes; then
-  AC_CHECK_LIB([tiff], [TIFFOpen],,
-		AC_MSG_ERROR("*** libtiff library not found ***"))
+  if test x"$LIBTIFF_LIBS" != ; then
+    AC_CHECK_FUNC([TIFFOpen],,
+		  AC_MSG_ERROR("*** libtiff library not found ***"))
+  else
+    AC_CHECK_LIB([tiff], [TIFFOpen],,
+		  AC_MSG_ERROR("*** libtiff library not found ***"))
+  fi
   AC_CHECK_HEADERS([tiffio.h],,
 		AC_MSG_ERROR("*** libtiff headers not found ***"))
 elif test x$enable_libtiff = xtry; then
-  AC_CHECK_LIB([tiff], [TIFFOpen],
-		[enable_libtiff="yes"],
-		[enable_libtiff="no"])
+  if test x"$LIBTIFF_LIBS" != x; then
+    AC_CHECK_FUNC([TIFFOpen],
+		  [enable_libtiff="yes"],
+		  [enable_libtiff="no"])
+  else
+    AC_CHECK_LIB([tiff], [TIFFOpen],
+		 [enable_libtiff="yes"],
+		 [enable_libtiff="no"])
+  fi
   AC_CHECK_HEADERS([tiffio.h],,
 		[enable_libtiff="no"])
 fi
+CPPFLAGS="$ac_save_CPPFLAGS"
+CXXFLAGS="$ac_save_CXXFLAGS"
+LIBS="$ac_save_LIBS"
 
 if test x$enable_libtiff = xyes; then
-  LIBTIFF_LIBS="-ltiff"
+  if test x"$LIBTIFF_LIBS" = x; then
+    LIBTIFF_LIBS="-ltiff"
+  fi
+  AC_SUBST(LIBTIFF_CFLAGSS)
   AC_SUBST(LIBTIFF_LIBS)
   AC_DEFINE(ENABLE_LIBTIFF)
 fi
@@ -283,8 +314,63 @@ AC_ARG_ENABLE(libjpeg,
 	                     [Don't build against libjpeg.]),
               enable_libjpeg=$enableval,
               enable_libjpeg="try")
+AC_ARG_VAR([LIBJPEG_CFLAGS], [C compiler flags for LIBJPEG])
 if test x$enable_libjpeg != xno; then
+
+  dnl
+  dnl POPPLER_FIND_JPEG uses "USER_INCLUDES" and "USER_LIBS"
+  dnl to receive the flags for header and library directories.
+  dnl
+  ac_save_USER_INCLUDES="$USER_INCLUDES"
+  ac_save_USER_LDFLAGS="$USER_LDFLAGS"
+  USER_INCLUDES="$USER_INCLUDES $LIBJPEG_CFLAGS"
+  USER_LDFLAGS="$USER_LDFLAGS $LIBJPEG_CFLAGS"
   POPPLER_FIND_JPEG
+
+  dnl check INT16, INT32 typedef conflict in jmorecfg.h
+  ac_save_CPPFLAGS="$CPPFLAGS"
+  ac_save_CFLAGS="$CFLAGS"
+  CPPFLAGS="$CPPFLAGS $LIBJPEG_CFLAGS"
+  CFLAGS="$CFLAGS $LIBJPEG_CFLAGS"
+  AC_MSG_CHECKING([libjpeg.h works correctly])
+  AC_COMPILE_IFELSE([
+    AC_LANG_PROGRAM([
+#ifdef _WIN32
+#include <windows.h>
+#endif
+#include <sys/types.h>
+#include <stdio.h>
+#include <jpeglib.h>
+],[{return 0;}])],[
+    AC_MSG_RESULT([ok])
+  ],[
+    AC_MSG_RESULT([no])
+    AC_MSG_CHECKING([libjpeg.h problem can be fixed by XMD_H macro])
+    CPPFLAGS="$CPPFLAGS -DXMD_H"
+    CFLAGS="$CFLAGS -DXMD_H"
+    AC_COMPILE_IFELSE([
+      AC_LANG_PROGRAM([
+#ifdef _WIN32
+#include <windows.h>
+#endif
+#include <sys/types.h>
+#include <stdio.h>
+#include <jpeglib.h>
+],[{return 0;}])],[
+      AC_MSG_RESULT([ok, -DXMD_H is added to LIBJPEG_CFLAGS])
+      LIBJPEG_CFLAGS="$LIBJPEG_CFLAGS -DXMD_H"
+    ],[
+      AC_MSG_RESULT([no, disable libjpeg])
+      enable_libjpeg="no"
+    ])
+  ])
+  CPPFLAGS="$ac_save_CPPFLAGS"
+  CFLAGS="$ac_save_CFLAGS"
+
+  dnl POPPLER_FIND_JPEG sets LIBJPEG_LIBS
+  AC_SUBST(LIBJPEG_CFLAGS)
+  USER_INCLUDES="$ac_save_USER_INCLUDES"
+  USER_LDFLAGS="$ac_save_USER_LDFLAGS"
 fi
 
 AM_CONDITIONAL(BUILD_LIBJPEG, test x$enable_libjpeg = xyes)
@@ -310,8 +396,6 @@ fi
 AM_CONDITIONAL(BUILD_LIBPNG, test x$enable_libpng = xyes)
 
 dnl Check for freetype headers
-FREETYPE_LIBS=
-FREETYPE_CFLAGS=
 
 PKG_CHECK_MODULES(FREETYPE, freetype2,
                   [freetype_pkgconfig=yes], [freetype_pkgconfig=no])
@@ -321,6 +405,9 @@ if test "x$freetype_pkgconfig" = "xyes"; then
   AC_DEFINE(HAVE_FREETYPE_H, 1, [Have FreeType2 include files])
 
 else
+
+  FREETYPE_LIBS=
+  FREETYPE_CFLAGS=
 
   AC_PATH_PROG(FREETYPE_CONFIG, freetype-config, no)
   if test "x$FREETYPE_CONFIG" != "xno" ; then
@@ -459,12 +546,12 @@ if test x$enable_cairo_output = xyes; then
               		       enable_poppler_glib=$enableval,
 			       enable_poppler_glib="try")
   if test x$enable_poppler_glib = xyes; then
-    PKG_CHECK_MODULES(POPPLER_GLIB, glib-2.0 >= $GLIB_REQUIRED gobject-2.0 >= $GLIB_REQUIRED cairo >= $CAIRO_VERSION)
+    PKG_CHECK_MODULES(POPPLER_GLIB, glib-2.0 >= $GLIB_REQUIRED gobject-2.0 >= $GLIB_REQUIRED gio-2.0 >= $GLIB_REQUIRED cairo >= $CAIRO_VERSION)
   elif test x$enable_poppler_glib = xtry; then
-    PKG_CHECK_MODULES(POPPLER_GLIB, glib-2.0 >= $GLIB_REQUIRED gobject-2.0 >= $GLIB_REQUIRED cairo >= $CAIRO_VERSION,
+    PKG_CHECK_MODULES(POPPLER_GLIB, glib-2.0 >= $GLIB_REQUIRED gobject-2.0 >= $GLIB_REQUIRED gio-2.0 >= $GLIB_REQUIRED cairo >= $CAIRO_VERSION,
                       [enable_poppler_glib="yes"],
                       [enable_poppler_glib="no"
-                      use_glib="no (requires glib-2.0 >= $GLIB_REQUIRED gobject-2.0 >= $GLIB_REQUIRED cairo >= $CAIRO_VERSION)"])
+                      use_glib="no (requires glib-2.0 >= $GLIB_REQUIRED gobject-2.0 >= $GLIB_REQUIRED gio-2.0 >= $GLIB_REQUIRED cairo >= $CAIRO_VERSION)"])
   fi
   if test x$enable_poppler_glib = xyes; then
     # Check for introspection
@@ -481,8 +568,8 @@ else
   use_glib="no (requires cairo output)"
   enable_poppler_glib="no"
 fi
-if test x$use_glib = x; then
-   use_glib=$enable_poppler_glib
+if test x"$use_glib" = x; then
+   use_glib="$enable_poppler_glib"
 fi
 AM_CONDITIONAL(BUILD_POPPLER_GLIB, test x$enable_poppler_glib = xyes)
 AM_CONDITIONAL(HAVE_INTROSPECTION, test "x$found_introspection" = "xyes")
@@ -572,9 +659,9 @@ AC_ARG_ENABLE(gtk-test,
               enable_gtk_test=$enableval,
               enable_gtk_test="try")
 if test x$enable_gtk_test = xyes; then
-  PKG_CHECK_MODULES(GTK_TEST, gtk+-2.0 >= 2.14 gdk-pixbuf-2.0 gthread-2.0 gio-2.0)
+  PKG_CHECK_MODULES(GTK_TEST, gtk+-3.0 >= 3.0 gdk-pixbuf-2.0)
 elif test x$enable_gtk_test = xtry; then
-  PKG_CHECK_MODULES(GTK_TEST, gtk+-2.0 >= 2.14 gdk-pixbuf-2.0 gthread-2.0 gio-2.0,
+  PKG_CHECK_MODULES(GTK_TEST, gtk+-3.0 >= 3.0 gdk-pixbuf-2.0,
                     [enable_gtk_test="yes"],
                     [enable_gtk_test="no"])
 fi
@@ -626,7 +713,7 @@ AM_CONDITIONAL(USE_CMS, test x$enable_cms = xyes)
 AM_CONDITIONAL(USE_LCMS1, test x$lcms1 = xyes)
 
 AC_ARG_WITH([testdatadir],
-   [AS_HELP_STRING([--testdatadir=/path/to/testdatadir],
+   [AS_HELP_STRING([--with-testdatadir=/path/to/testdatadir],
                    [Specify test data dir])],
    [case $withval in
        [[\\/]]* | ?:[[\\/]]* )  # Absolute name.
@@ -661,7 +748,7 @@ else
 
  You should checkout the test data as a sibling of your
  poppler source folder or specify the location of your
- checkout with --testdatadir=/path/to/checkoutdir/test.
+ checkout with --with-testdatadir=/path/to/checkoutdir/test.
 ])
 fi
 AC_SUBST(TESTDATADIR)

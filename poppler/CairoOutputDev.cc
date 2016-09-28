@@ -25,7 +25,7 @@
 // Copyright (C) 2008, 2009 Chris Wilson <chris@chris-wilson.co.uk>
 // Copyright (C) 2008 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2009, 2010 David Benjamin <davidben@mit.edu>
-// Copyright (C) 2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2011, 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2012 Patrick Pfeifer <p2000@mailinator.com>
 //
 // To see a description of the changes please see the Changelog file that
@@ -417,9 +417,25 @@ void CairoOutputDev::updateMiterLimit(GfxState *state) {
 void CairoOutputDev::updateLineWidth(GfxState *state) {
   LOG(printf ("line width: %f\n", state->getLineWidth()));
   adjusted_stroke_width = gFalse;
-  if (state->getLineWidth() == 0.0) {
-    /* find out how big pixels (device unit) are in the x and y directions
-     * choose the smaller of the two as our line width */
+  double width = state->getLineWidth();
+  if (stroke_adjust && !printing) {
+    double x, y;
+    x = y = width;
+
+    /* find out line width in device units */
+    cairo_user_to_device_distance(cairo, &x, &y);
+    if (fabs(x) <= 1.0 && fabs(y) <= 1.0) {
+      /* adjust width to at least one device pixel */
+      x = y = 1.0;
+      cairo_device_to_user_distance(cairo, &x, &y);
+      width = MIN(fabs(x),fabs(y));
+      adjusted_stroke_width = gTrue;
+    }
+  } else if (width == 0.0) {
+    /* Cairo does not support 0 line width == 1 device pixel. Find out
+     * how big pixels (device unit) are in the x and y
+     * directions. Choose the smaller of the two as our line width.
+     */
     double x = 1.0, y = 1.0;
     if (printing) {
       // assume printer pixel size is 1/600 inch
@@ -427,25 +443,9 @@ void CairoOutputDev::updateLineWidth(GfxState *state) {
       y = 72.0/600;
     }
     cairo_device_to_user_distance(cairo, &x, &y);
-    cairo_set_line_width (cairo, MIN(fabs(x),fabs(y)));
-  } else {
-    double width = state->getLineWidth();
-    if (stroke_adjust && !printing) {
-      double x, y;
-      x = y = width;
-
-      /* find out line width in device units */
-      cairo_user_to_device_distance(cairo, &x, &y);
-      if (fabs(x) <= 1.0 && fabs(y) <= 1.0) {
-	/* adjust width to at least one device pixel */
-	x = y = 1.0;
-	cairo_device_to_user_distance(cairo, &x, &y);
-	width = MIN(fabs(x),fabs(y));
-	adjusted_stroke_width = gTrue;
-      }
-    }
-    cairo_set_line_width (cairo, width);
+    width = MIN(fabs(x),fabs(y));
   }
+  cairo_set_line_width (cairo, width);
   if (cairo_shape)
     cairo_set_line_width (cairo_shape, cairo_get_line_width (cairo));
 }
@@ -454,7 +454,8 @@ void CairoOutputDev::updateFillColor(GfxState *state) {
   GfxRGB color = fill_color;
 
   state->getFillRGB(&fill_color);
-  if (color.r != fill_color.r ||
+  if (cairo_pattern_get_type (fill_pattern) != CAIRO_PATTERN_TYPE_SOLID ||
+      color.r != fill_color.r ||
       color.g != fill_color.g ||
       color.b != fill_color.b)
   {
@@ -473,7 +474,8 @@ void CairoOutputDev::updateStrokeColor(GfxState *state) {
   GfxRGB color = stroke_color;
 
   state->getStrokeRGB(&stroke_color);
-  if (color.r != stroke_color.r ||
+  if (cairo_pattern_get_type (fill_pattern) != CAIRO_PATTERN_TYPE_SOLID ||
+      color.r != stroke_color.r ||
       color.g != stroke_color.g ||
       color.b != stroke_color.b)
   {
@@ -638,48 +640,90 @@ void CairoOutputDev::updateFont(GfxState *state) {
   cairo_set_font_matrix (cairo, &matrix);
 }
 
-void CairoOutputDev::alignStrokeCoords(double *x, double *y)
+/* Tolerance in pixels for checking if strokes are horizontal or vertical
+ * lines in device space */
+#define STROKE_COORD_TOLERANCE 0.5
+
+/* Align stroke coordinate i if the point is the start or end of a
+ * horizontal or vertical line */
+void CairoOutputDev::alignStrokeCoords(GfxSubpath *subpath, int i, double *x, double *y)
 {
-  /* see http://www.cairographics.org/FAQ/#sharp_lines */
-  cairo_user_to_device (cairo, x, y);
-  *x = floor(*x) + 0.5;
-  *y = floor(*y) + 0.5;
-  cairo_device_to_user (cairo, x, y);
+  double x1, y1, x2, y2;
+  GBool align = gFalse;
+
+  x1 = subpath->getX(i);
+  y1 = subpath->getY(i);
+  cairo_user_to_device (cairo, &x1, &y1);
+
+  // Does the current coord and prev coord form a horiz or vert line?
+  if (i > 0 && !subpath->getCurve(i - 1)) {
+    x2 = subpath->getX(i - 1);
+    y2 = subpath->getY(i - 1);
+    cairo_user_to_device (cairo, &x2, &y2);
+    if (fabs(x2 - x1) < STROKE_COORD_TOLERANCE || fabs(y2 - y1) < STROKE_COORD_TOLERANCE)
+      align = gTrue;
+  }
+
+  // Does the current coord and next coord form a horiz or vert line?
+  if (i < subpath->getNumPoints() - 1 && !subpath->getCurve(i + 1)) {
+    x2 = subpath->getX(i + 1);
+    y2 = subpath->getY(i + 1);
+    cairo_user_to_device (cairo, &x2, &y2);
+    if (fabs(x2 - x1) < STROKE_COORD_TOLERANCE || fabs(y2 - y1) < STROKE_COORD_TOLERANCE)
+      align = gTrue;
+  }
+
+  *x = subpath->getX(i);
+  *y = subpath->getY(i);
+  if (align) {
+    /* see http://www.cairographics.org/FAQ/#sharp_lines */
+    cairo_user_to_device (cairo, x, y);
+    *x = floor(*x) + 0.5;
+    *y = floor(*y) + 0.5;
+    cairo_device_to_user (cairo, x, y);
+  }
 }
+
+#undef STROKE_COORD_TOLERANCE
 
 void CairoOutputDev::doPath(cairo_t *cairo, GfxState *state, GfxPath *path) {
   GfxSubpath *subpath;
   int i, j;
+  double x, y;
   cairo_new_path (cairo);
   for (i = 0; i < path->getNumSubpaths(); ++i) {
     subpath = path->getSubpath(i);
     if (subpath->getNumPoints() > 0) {
       if (align_stroke_coords) {
-	double x = subpath->getX(0);
-	double y = subpath->getY(0);
-	alignStrokeCoords(&x, &y);
-	cairo_move_to (cairo, x, y);
+        alignStrokeCoords(subpath, 0, &x, &y);
       } else {
-	cairo_move_to (cairo, subpath->getX(0), subpath->getY(0));
+        x = subpath->getX(0);
+        y = subpath->getY(0);
       }
+      cairo_move_to (cairo, x, y);
       j = 1;
       while (j < subpath->getNumPoints()) {
 	if (subpath->getCurve(j)) {
+	  if (align_stroke_coords) {
+            alignStrokeCoords(subpath, j + 2, &x, &y);
+          } else {
+            x = subpath->getX(j+2);
+            y = subpath->getY(j+2);
+          }
 	  cairo_curve_to( cairo,
 			  subpath->getX(j), subpath->getY(j),
 			  subpath->getX(j+1), subpath->getY(j+1),
-			  subpath->getX(j+2), subpath->getY(j+2));
+			  x, y);
 
 	  j += 3;
 	} else {
 	  if (align_stroke_coords) {
-	    double x = subpath->getX(j);
-	    double y = subpath->getY(j);
-	    alignStrokeCoords(&x, &y);
-	    cairo_line_to (cairo, x, y);
-	  } else {
-	    cairo_line_to (cairo, subpath->getX(j), subpath->getY(j));
-	  }
+            alignStrokeCoords(subpath, j, &x, &y);
+          } else {
+            x = subpath->getX(j);
+            y = subpath->getY(j);
+          }
+          cairo_line_to (cairo, x, y);
 	  ++j;
 	}
       }
@@ -732,7 +776,7 @@ void CairoOutputDev::fill(GfxState *state) {
     cairo_mask (cairo, mask);
     cairo_restore (cairo);
   } else if (strokePathClip) {
-    fillToStrokePathClip();
+    fillToStrokePathClip(state);
   } else {
     cairo_fill (cairo);
   }
@@ -821,7 +865,7 @@ GBool CairoOutputDev::tilingPatternFill(GfxState *state, Gfx *gfx1, Catalog *cat
   cairo_set_source (cairo, pattern);
   cairo_pattern_set_extend (pattern, CAIRO_EXTEND_REPEAT);
   if (strokePathClip) {
-    fillToStrokePathClip();
+    fillToStrokePathClip(state);
   } else {
     cairo_fill (cairo);
   }
@@ -1056,8 +1100,7 @@ void CairoOutputDev::eoClip(GfxState *state) {
 void CairoOutputDev::clipToStrokePath(GfxState *state) {
   LOG(printf("clip-to-stroke-path\n"));
   strokePathClip = (StrokePathClip*)gmalloc (sizeof(*strokePathClip));
-  doPath (cairo, state, state->getPath());
-  strokePathClip->path = cairo_copy_path (cairo);
+  strokePathClip->path = state->getPath()->copy();
   cairo_get_matrix (cairo, &strokePathClip->ctm);
   strokePathClip->line_width = cairo_get_line_width (cairo);
   strokePathClip->dash_count = cairo_get_dash_count (cairo);
@@ -1072,7 +1115,7 @@ void CairoOutputDev::clipToStrokePath(GfxState *state) {
   strokePathClip->miter = cairo_get_miter_limit (cairo);
 }
 
-void CairoOutputDev::fillToStrokePathClip() {
+void CairoOutputDev::fillToStrokePathClip(GfxState *state) {
   cairo_save (cairo);
 
   cairo_set_matrix (cairo, &strokePathClip->ctm);
@@ -1082,14 +1125,12 @@ void CairoOutputDev::fillToStrokePathClip() {
   cairo_set_line_cap (cairo, strokePathClip->cap);
   cairo_set_line_join (cairo, strokePathClip->join);
   cairo_set_miter_limit (cairo, strokePathClip->miter);
-
-  cairo_new_path (cairo);
-  cairo_append_path (cairo, strokePathClip->path);
+  doPath (cairo, state, strokePathClip->path);
   cairo_stroke (cairo);
 
   cairo_restore (cairo);
 
-  cairo_path_destroy (strokePathClip->path);
+  delete strokePathClip->path;
   if (strokePathClip->dashes)
     gfree (strokePathClip->dashes);
   gfree (strokePathClip);
@@ -1458,11 +1499,17 @@ void CairoOutputDev::paintTransparencyGroup(GfxState * /*state*/, double * /*bbo
     if (status)
       printf("BAD status: %s\n", cairo_status_to_string(status));
   } else {
+    if (fill_opacity < 1.0) {
+      cairo_push_group(cairo);
+    }
     cairo_save(cairo);
     cairo_set_matrix(cairo, &mask_matrix);
     cairo_mask(cairo, mask);
     cairo_restore(cairo);
-
+    if (fill_opacity < 1.0) {
+      cairo_pop_group_to_source(cairo);
+      cairo_paint_with_alpha (cairo, fill_opacity);
+    }
     cairo_pattern_destroy(mask);
     mask = NULL;
   }
@@ -1811,7 +1858,7 @@ void CairoOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
 
 void CairoOutputDev::setSoftMaskFromImageMask(GfxState *state, Object *ref, Stream *str,
 				   int width, int height, GBool invert,
-				   GBool inlineImg) {
+				   GBool inlineImg, double *baseMatrix) {
 
   /* FIXME: Doesn't the image mask support any colorspace? */
   cairo_set_source (cairo, fill_pattern);
@@ -1875,7 +1922,7 @@ void CairoOutputDev::setSoftMaskFromImageMask(GfxState *state, Object *ref, Stre
                          gTrue, gFalse, gFalse);
 }
 
-void CairoOutputDev::unsetSoftMaskFromImageMask(GfxState *state) {
+void CairoOutputDev::unsetSoftMaskFromImageMask(GfxState *state, double *baseMatrix) {
   double bbox[4] = {0,0,1,1}; // dummy
 
   endTransparencyGroup(state);

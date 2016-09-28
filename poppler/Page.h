@@ -20,6 +20,7 @@
 // Copyright (C) 2007 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright (C) 2008 Iñigo Martínez <inigomartinez@gmail.com>
 // Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
+// Copyright (C) 2012 Albert Astals Cid <aacid@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -171,11 +172,14 @@ public:
   Object *getAnnots(Object *obj) { return annotsObj.fetch(xref, obj); }
   // Add a new annotation to the page
   void addAnnot(Annot *annot);
+  // Remove an existing annotation from the page
+  // Note: Caller is responsible for deleting popup and appearance streams too
+  void removeAnnot(Annot *annot);
 
   // Return a list of links.
   Links *getLinks();
 
-  // Return a list of annots. Ownership is transferred to the caller.
+  // Return a list of annots. It will be valid until the page is destroyed
   Annots *getAnnots();
 
   // Get contents.
@@ -204,9 +208,7 @@ public:
 		 int sliceX, int sliceY, int sliceW, int sliceH,
 		 GBool printing,
 		 GBool (*abortCheckCbk)(void *data),
-		 void *abortCheckCbkData,
-		 GBool (*annotDisplayDecideCbk)(Annot *annot, void *user_data),
-		 void *annotDisplayDecideCbkData);
+		 void *abortCheckCbkData);
 
   // Display a page.
   void display(OutputDev *out, double hDPI, double vDPI,

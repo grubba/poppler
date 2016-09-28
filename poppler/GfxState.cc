@@ -16,9 +16,9 @@
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2006, 2007 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2006, 2010 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2006-2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006-2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009, 2012 Koji Otani <sho@bbr.jp>
-// Copyright (C) 2009, 2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009, 2011, 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Christian Persch <chpe@gnome.org>
 // Copyright (C) 2010 Paweł Wiejacha <pawel.wiejacha@gmail.com>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
@@ -354,9 +354,8 @@ cmsHPROFILE loadColorProfile(const char *fileName)
     }
     return hp;
   }
-  // try to load from user directory
-  GooString *path = globalParams->getBaseDir();
-  path->append(COLOR_PROFILE_DIR);
+  // try to load from global directory
+  GooString *path = new GooString(GLOBAL_COLOR_PROFILE_DIR);
   path->append(fileName);
   // check if open the file
   if ((fp = fopen(path->getCString(),"r")) != NULL) {
@@ -364,17 +363,6 @@ cmsHPROFILE loadColorProfile(const char *fileName)
     hp = cmsOpenProfileFromFile(path->getCString(),"r");
   }
   delete path;
-  if (hp == NULL) {
-    // load from global directory
-    path = new GooString(GLOBAL_COLOR_PROFILE_DIR);
-    path->append(fileName);
-    // check if open the file
-    if ((fp = fopen(path->getCString(),"r")) != NULL) {
-      fclose(fp);
-      hp = cmsOpenProfileFromFile(path->getCString(),"r");
-    }
-    delete path;
-  }
   return hp;
 }
 
@@ -2010,9 +1998,16 @@ GfxColor *GfxIndexedColorSpace::mapColorToBase(GfxColor *color,
 
   n = base->getNComps();
   base->getDefaultRanges(low, range, indexHigh);
-  p = &lookup[(int)(colToDbl(color->c[0]) + 0.5) * n];
-  for (i = 0; i < n; ++i) {
-    baseColor->c[i] = dblToCol(low[i] + (p[i] / 255.0) * range[i]);
+  const int idx = (int)(colToDbl(color->c[0]) + 0.5) * n;
+  if (likely(idx + n < (indexHigh + 1) * base->getNComps())) {
+    p = &lookup[idx];
+    for (i = 0; i < n; ++i) {
+      baseColor->c[i] = dblToCol(low[i] + (p[i] / 255.0) * range[i]);
+    }
+  } else {
+    for (i = 0; i < n; ++i) {
+      baseColor->c[i] = 0;
+    }
   }
   return baseColor;
 }
@@ -4464,6 +4459,9 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
 	}
 	break;
       case 1:
+	if (nPatchesA == 0) {
+	  goto err1;
+	}
 	p->x[0][0] = patchesA[nPatchesA-1].x[0][3];
 	p->y[0][0] = patchesA[nPatchesA-1].y[0][3];
 	p->x[0][1] = patchesA[nPatchesA-1].x[1][3];
@@ -4496,6 +4494,9 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
 	}
 	break;
       case 2:
+	if (nPatchesA == 0) {
+	  goto err1;
+	}
 	p->x[0][0] = patchesA[nPatchesA-1].x[3][3];
 	p->y[0][0] = patchesA[nPatchesA-1].y[3][3];
 	p->x[0][1] = patchesA[nPatchesA-1].x[3][2];
@@ -4528,6 +4529,9 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
 	}
 	break;
       case 3:
+	if (nPatchesA == 0) {
+	  goto err1;
+	}
 	p->x[0][0] = patchesA[nPatchesA-1].x[3][0];
 	p->y[0][0] = patchesA[nPatchesA-1].y[3][0];
 	p->x[0][1] = patchesA[nPatchesA-1].x[2][0];
@@ -4603,6 +4607,9 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
 	}
 	break;
       case 1:
+	if (nPatchesA == 0) {
+	  goto err1;
+	}
 	p->x[0][0] = patchesA[nPatchesA-1].x[0][3];
 	p->y[0][0] = patchesA[nPatchesA-1].y[0][3];
 	p->x[0][1] = patchesA[nPatchesA-1].x[1][3];
@@ -4643,6 +4650,9 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
 	}
 	break;
       case 2:
+	if (nPatchesA == 0) {
+	  goto err1;
+	}
 	p->x[0][0] = patchesA[nPatchesA-1].x[3][3];
 	p->y[0][0] = patchesA[nPatchesA-1].y[3][3];
 	p->x[0][1] = patchesA[nPatchesA-1].x[3][2];
@@ -4683,6 +4693,9 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
 	}
 	break;
       case 3:
+	if (nPatchesA == 0) {
+	  goto err1;
+	}
 	p->x[0][0] = patchesA[nPatchesA-1].x[3][0];
 	p->y[0][0] = patchesA[nPatchesA-1].y[3][0];
 	p->x[0][1] = patchesA[nPatchesA-1].x[2][0];
@@ -5584,6 +5597,8 @@ GfxState::GfxState(double hDPIA, double vDPIA, PDFRectangle *pageBox,
   lineCap = 0;
   miterLimit = 10;
   strokeAdjust = gFalse;
+  alphaIsShape = gFalse;
+  textKnockout = gFalse;
 
   font = NULL;
   fontSize = 0;

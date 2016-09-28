@@ -19,7 +19,7 @@
 // Copyright (C) 2006 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2008 Adam Batkin <adam@batkin.net>
 // Copyright (C) 2008, 2010 Hib Eris <hib@hiberis.nl>
-// Copyright (C) 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2009, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
 //
 // To see a description of the changes please see the Changelog file that
@@ -59,52 +59,6 @@
 #endif
 
 //------------------------------------------------------------------------
-
-GooString *getHomeDir() {
-#ifdef VMS
-  //---------- VMS ----------
-  return new GooString("SYS$LOGIN:");
-
-#elif defined(__EMX__) || defined(_WIN32)
-  //---------- OS/2+EMX and Win32 ----------
-  char *s;
-  GooString *ret;
-
-  if ((s = getenv("HOME")))
-    ret = new GooString(s);
-  else
-    ret = new GooString(".");
-  return ret;
-
-#elif defined(ACORN)
-  //---------- RISCOS ----------
-  return new GooString("@");
-
-#elif defined(MACOS)
-  //---------- MacOS ----------
-  return new GooString(":");
-
-#else
-  //---------- Unix ----------
-  char *s;
-  struct passwd *pw;
-  GooString *ret;
-
-  if ((s = getenv("HOME"))) {
-    ret = new GooString(s);
-  } else {
-    if ((s = getenv("USER")))
-      pw = getpwnam(s);
-    else
-      pw = getpwuid(getuid());
-    if (pw)
-      ret = new GooString(pw->pw_dir);
-    else
-      ret = new GooString(".");
-  }
-  return ret;
-#endif
-}
 
 GooString *getCurrentDir() {
   char buf[PATH_MAX+1];
@@ -363,88 +317,6 @@ GBool isAbsolutePath(char *path) {
 #endif
 }
 
-GooString *makePathAbsolute(GooString *path) {
-#ifdef VMS
-  //---------- VMS ----------
-  char buf[PATH_MAX+1];
-
-  if (!isAbsolutePath(path->getCString())) {
-    if (getcwd(buf, sizeof(buf))) {
-      path->insert(0, buf);
-    }
-  }
-  return path;
-
-#elif defined(_WIN32)
-  //---------- Win32 ----------
-  char buf[MAX_PATH];
-  char *fp;
-
-  buf[0] = '\0';
-  if (!GetFullPathName(path->getCString(), MAX_PATH, buf, &fp)) {
-    path->clear();
-    return path;
-  }
-  path->clear();
-  path->append(buf);
-  return path;
-
-#elif defined(ACORN)
-  //---------- RISCOS ----------
-  path->insert(0, '@');
-  return path;
-
-#elif defined(MACOS)
-  //---------- MacOS ----------
-  path->del(0, 1);
-  return path;
-
-#else
-  //---------- Unix and OS/2+EMX ----------
-  struct passwd *pw;
-  char buf[PATH_MAX+1];
-  GooString *s;
-  char *p1, *p2;
-  int n;
-
-  if (path->getChar(0) == '~') {
-    if (path->getChar(1) == '/' ||
-#ifdef __EMX__
-	path->getChar(1) == '\\' ||
-#endif
-	path->getLength() == 1) {
-      path->del(0, 1);
-      s = getHomeDir();
-      path->insert(0, s);
-      delete s;
-    } else {
-      p1 = path->getCString() + 1;
-#ifdef __EMX__
-      for (p2 = p1; *p2 && *p2 != '/' && *p2 != '\\'; ++p2) ;
-#else
-      for (p2 = p1; *p2 && *p2 != '/'; ++p2) ;
-#endif
-      if ((n = p2 - p1) > PATH_MAX)
-	n = PATH_MAX;
-      strncpy(buf, p1, n);
-      buf[n] = '\0';
-      if ((pw = getpwnam(buf))) {
-	path->del(0, p2 - p1 + 1);
-	path->insert(0, pw->pw_dir);
-      }
-    }
-  } else if (!isAbsolutePath(path->getCString())) {
-    if (getcwd(buf, sizeof(buf))) {
-#ifndef __EMX__
-      path->insert(0, '/');
-#endif
-      path->insert(0, buf);
-    }
-  }
-  return path;
-#endif
-}
-
 time_t getModTime(char *fileName) {
 #ifdef _WIN32
   //~ should implement this, but it's (currently) only used in xpdf
@@ -542,14 +414,6 @@ GBool openTempFile(GooString **name, FILE **f, const char *mode) {
     return gFalse;
   }
   return gTrue;
-#endif
-}
-
-GBool executeCommand(char *cmd) {
-#ifdef VMS
-  return system(cmd) ? gTrue : gFalse;
-#else
-  return system(cmd) ? gFalse : gTrue;
 #endif
 }
 

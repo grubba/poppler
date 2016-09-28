@@ -368,7 +368,32 @@ public:
     appearDown
   };
 
-  AnnotAppearance(Dict *dict);
+  AnnotAppearance(PDFDoc *docA, Object *dict);
+  ~AnnotAppearance();
+
+  // State is ignored if no subdictionary is present
+  void getAppearanceStream(AnnotAppearanceType type, const char *state, Object *dest);
+
+  // Access keys in normal appearance subdictionary (N)
+  GooString * getStateKey(int i);
+  int getNumStates();
+
+  // Removes all associated streams in the xref table. Caller is required to
+  // reset parent annotation's AP and AS after this call.
+  void removeAllStreams();
+
+  // Test if this AnnotAppearance references the specified stream
+  GBool referencesStream(Ref targetStreamRef);
+
+private:
+  static GBool referencesStream(Object *stateObj, Ref targetStreamRef);
+  void removeStream(Ref refToStream);
+  void removeStateStreams(Object *state);
+
+protected:
+  PDFDoc *doc;
+  XRef *xref;                   // the xref table for this PDF file
+  Object appearDict;            // Annotation's AP
 };
 
 //------------------------------------------------------------------------
@@ -413,6 +438,32 @@ protected:
   // IX
   AnnotIconFit *iconFit;                  // IF
   AnnotAppearanceCharacsTextPos position; // TP (Default 0)
+};
+
+//------------------------------------------------------------------------
+// AnnotAppearanceBBox
+//------------------------------------------------------------------------
+
+class AnnotAppearanceBBox
+{
+public:
+  AnnotAppearanceBBox(PDFRectangle *init);
+
+  void setBorderWidth(double w) { borderWidth = w; }
+
+  // The following functions operate on coords relative to [origX origY]
+  void extendTo(double x, double y);
+  void getBBoxRect(double bbox[4]) const;
+
+  // Get boundaries in page coordinates
+  double getPageXMin() const;
+  double getPageYMin() const;
+  double getPageXMax() const;
+  double getPageYMax() const;
+
+private:
+  double origX, origY, borderWidth;
+  double minX, minY, maxX, maxY;
 };
 
 //------------------------------------------------------------------------
@@ -473,8 +524,8 @@ public:
   void decRefCnt();
 
   virtual void draw(Gfx *gfx, GBool printing);
-  // Get appearance object.
-  Object *getAppearance(Object *obj) { return appearance.fetch(xref, obj); }
+  // Get the resource dict of the appearance stream
+  virtual Object *getAppearanceResDict(Object *dest);
 
   GBool match(Ref *refA)
     { return ref.num == refA->num && ref.gen == refA->gen; }
@@ -504,6 +555,9 @@ public:
 
   void setAppearanceState(const char *state);
 
+  // Delete appearance streams and reset appearance state
+  void invalidateAppearance();
+
   // getters
   PDFDoc *getDoc() const { return doc; }
   XRef *getXRef() const { return xref; }
@@ -517,7 +571,7 @@ public:
   GooString *getName() const { return name; }
   GooString *getModified() const { return modified; }
   Guint getFlags() const { return flags; }
-  /*Dict *getAppearDict() const { return appearDict; }*/
+  AnnotAppearance *getAppearStreams() const { return appearStreams; }
   GooString *getAppearState() const { return appearState; }
   AnnotBorder *getBorder() const { return border; }
   AnnotColor *getColor() const { return color; }
@@ -541,6 +595,10 @@ protected:
   void drawCircle(double cx, double cy, double r, GBool fill);
   void drawCircleTopLeft(double cx, double cy, double r);
   void drawCircleBottomRight(double cx, double cy, double r);
+  void layoutText(GooString *text, GooString *outBuf, int *i, GfxFont *font,
+		  double *width, double widthLimit, int *charCount,
+		  GBool noReencode);
+  void writeString(GooString *str, GooString *appearBuf);
   void createForm(double *bbox, GBool transparencyGroup, Object *resDict, Object *aStream);
   void createResourcesDict(const char *formName, Object *formStream, const char *stateName,
 			   double opacity, const char *blendMode, Object *resDict);
@@ -564,10 +622,10 @@ protected:
   GooString *name;                  // NM
   GooString *modified;              // M
   Guint flags;                      // F (must be a 32 bit unsigned int)
-  //Dict *appearDict;                 // AP (should be correctly parsed)
-  Ref appRef;                       //the reference to the indirect appearance object in XRef 
+  AnnotAppearance *appearStreams;   // AP
   Object appearance;     // a reference to the Form XObject stream
                          //   for the normal appearance
+  AnnotAppearanceBBox *appearBBox;  // BBox of generated appearance
   GooString *appearState;           // AS
   int treeKey;                      // Struct Parent;
   Object oc;                        // OC
@@ -816,6 +874,9 @@ public:
   AnnotFreeText(PDFDoc *docA, Dict *dict, Object *obj);
   ~AnnotFreeText();
 
+  virtual void draw(Gfx *gfx, GBool printing);
+  virtual Object *getAppearanceResDict(Object *dest);
+
   void setAppearanceString(GooString *new_string);
   void setQuadding(AnnotFreeTextQuadding new_quadding);
   void setStyleString(GooString *new_string);
@@ -836,6 +897,8 @@ public:
 protected:
 
   void initialize(PDFDoc *docA, Dict *dict);
+  static void parseAppearanceString(GooString *da, double &fontsize, AnnotColor* &fontcolor);
+  void generateFreeTextAppearance();
 
   // required
   GooString *appearanceString;      // DA
@@ -875,6 +938,7 @@ public:
   ~AnnotLine();
 
   virtual void draw(Gfx *gfx, GBool printing);
+  virtual Object *getAppearanceResDict(Object *dest);
 
   void setVertices(double x1, double y1, double x2, double y2);
   void setStartEndStyle(AnnotLineEndingStyle start, AnnotLineEndingStyle end);
@@ -905,6 +969,7 @@ public:
 protected:
 
   void initialize(PDFDoc *docA, Dict *dict);
+  void generateLineAppearance();
 
   // required
   AnnotCoord *coord1, *coord2;
@@ -1024,6 +1089,8 @@ public:
   AnnotPolygon(PDFDoc *docA, Dict *dict, Object *obj);
   ~AnnotPolygon();
 
+  virtual void draw(Gfx *gfx, GBool printing);
+
   void setType(AnnotSubtype new_type); // typePolygon or typePolyLine
   void setVertices(AnnotPath *path);
   void setStartEndStyle(AnnotLineEndingStyle start, AnnotLineEndingStyle end);
@@ -1096,6 +1163,8 @@ public:
   AnnotInk(PDFDoc *docA, PDFRectangle *rect, AnnotPath **paths, int n_paths);
   AnnotInk(PDFDoc *docA, Dict *dict, Object *obj);
   ~AnnotInk();
+
+  virtual void draw(Gfx *gfx, GBool printing);
 
   void setInkList(AnnotPath **paths, int n_paths);
 
@@ -1217,10 +1286,6 @@ private:
 		GBool password=false);
   void drawListBox(FormFieldChoice *fieldChoice,
 		   GooString *da, GfxResources *resources, int quadding);
-  void layoutText(GooString *text, GooString *outBuf, int *i, GfxFont *font,
-		  double *width, double widthLimit, int *charCount,
-		  GBool noReencode);
-  void writeString(GooString *str, GooString *appearBuf);
 
   Form *form;
   FormField *field;                       // FormField object for this annotation
@@ -1309,6 +1374,7 @@ public:
   int getNumAnnots() { return nAnnots; }
   Annot *getAnnot(int i) { return annots[i]; }
   void appendAnnot(Annot *annot);
+  GBool removeAnnot(Annot *annot);
 
 private:
   Annot* createAnnot(Dict* dict, Object *obj);

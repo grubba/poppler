@@ -174,9 +174,7 @@ HtmlString::HtmlString(GfxState *state, double fontSize, HtmlFontAccu* _fonts) :
     yMax = y - descent * fontSize;
     GfxRGB rgb;
     state->getFillRGB(&rgb);
-    GooString *name = state->getFont()->getName();
-    if (!name) name = HtmlFont::getDefaultFont(); //new GooString("default");
-    HtmlFont hfont=HtmlFont(name, static_cast<int>(fontSize-1), rgb);
+    HtmlFont hfont=HtmlFont(font, static_cast<int>(fontSize-1), rgb);
     if (isMatRotOrSkew(state->getTextMat())) {
       double normalizedMatrix[4];
       memcpy(normalizedMatrix, state->getTextMat(), sizeof(normalizedMatrix));
@@ -1192,7 +1190,7 @@ HtmlOutputDev::HtmlOutputDev(Catalog *catalogA, char *fileName, char *title,
     {
       fprintf(page, "<?xml version=\"1.0\" encoding=\"%s\"?>\n", htmlEncoding->getCString());
       fputs("<!DOCTYPE pdf2xml SYSTEM \"pdf2xml.dtd\">\n\n", page);
-      fputs("<pdf2xml>\n",page);
+      fprintf(page,"<pdf2xml producer=\"%s\" version=\"%s\">\n", PACKAGE_NAME, PACKAGE_VERSION);
     } 
     else 
     {
@@ -1222,14 +1220,16 @@ HtmlOutputDev::~HtmlOutputDev() {
       fputs("</BODY>\n</HTML>\n",fContentsFrame);  
       fclose(fContentsFrame);
     }
-    if (xml) {
-      fputs("</pdf2xml>\n",page);  
-      fclose(page);
-    } else
-    if ( !complexMode || xml || noframes )
-    { 
-      fputs("</BODY>\n</HTML>\n",page);  
-      fclose(page);
+    if (page != NULL) {
+      if (xml) {
+        fputs("</pdf2xml>\n",page);  
+        fclose(page);
+      } else
+      if ( !complexMode || xml || noframes )
+      { 
+        fputs("</BODY>\n</HTML>\n",page);  
+        fclose(page);
+      }
     }
     if (pages)
       delete pages;
@@ -1428,7 +1428,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
 
       // invert for PNG
       for(int i = 0; i < width; i++)
-        png_row[i] = bit_row[i] ? 0x00 : 0xff ;
+        png_row[i] = bit_row[i] ? 0xff : 0x00;
 
       if (!writer->writeRow( &png_row ))
       {

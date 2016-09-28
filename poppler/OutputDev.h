@@ -17,10 +17,11 @@
 // Copyright (C) 2006 Thorkild Stray <thorkild@ifi.uio.no>
 // Copyright (C) 2007 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2007, 2011 Adrian Johnson <ajohnson@redneon.com>
-// Copyright (C) 2009-2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009-2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2009, 2012 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
+// Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -39,6 +40,7 @@
 #include "CharTypes.h"
 #include "Object.h"
 
+class Annot;
 class Dict;
 class GooHash;
 class GooString;
@@ -124,7 +126,9 @@ public:
 			       int sliceX, int sliceY, int sliceW, int sliceH,
 			       GBool printing,
 			       GBool (* abortCheckCbk)(void *data) = NULL,
-			       void * abortCheckCbkData = NULL)
+			       void * abortCheckCbkData = NULL,
+			       GBool (*annotDisplayDecideCbk)(Annot *annot, void *user_data) = NULL,
+			       void *annotDisplayDecideCbkData = NULL)
     { return gTrue; }
 
   // Start a page.
@@ -247,8 +251,8 @@ public:
   virtual void setSoftMaskFromImageMask(GfxState *state,
 					Object *ref, Stream *str,
 					int width, int height, GBool invert,
-					GBool inlineImg);
-  virtual void unsetSoftMaskFromImageMask(GfxState *state);
+					GBool inlineImg, double *baseMatrix);
+  virtual void unsetSoftMaskFromImageMask(GfxState *state, double *baseMatrix);
   virtual void drawImage(GfxState *state, Object *ref, Stream *str,
 			 int width, int height, GfxImageColorMap *colorMap,
 			 GBool interpolate, int *maskColors, GBool inlineImg);
@@ -268,6 +272,8 @@ public:
 
   //----- grouping operators
 
+  virtual void endMarkedContent(GfxState *state);
+  virtual void beginMarkedContent(char *name, Dict *properties);
   virtual void markPoint(char *name);
   virtual void markPoint(char *name, Dict *properties);
 
@@ -296,6 +302,7 @@ public:
   virtual GooHash *endProfile();
 
   //----- transparency groups and soft masks
+  virtual GBool checkTransparencyGroup(GfxState * /*state*/, GBool /*knockout*/) { return gTrue; }
   virtual void beginTransparencyGroup(GfxState * /*state*/, double * /*bbox*/,
 				      GfxColorSpace * /*blendingColorSpace*/,
 				      GBool /*isolated*/, GBool /*knockout*/,

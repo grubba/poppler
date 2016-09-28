@@ -270,7 +270,7 @@ poppler_page_get_text_page (PopplerPage *page)
 				gTrue, /* Crop */
 				-1, -1, -1, -1,
 				gFalse, /* printing */
-				NULL, NULL, NULL, NULL);
+				NULL, NULL);
     page->page->display(gfx);
     text_dev->endPage();
 
@@ -924,7 +924,7 @@ poppler_page_get_image_output_dev (PopplerPage *page,
 			      gTrue, /* Crop */
 			      -1, -1, -1, -1,
 			      gFalse, /* printing */
-			      NULL, NULL, NULL, NULL);
+			      NULL, NULL);
   page->page->display(gfx);
   delete gfx;
 
@@ -1429,6 +1429,25 @@ poppler_page_add_annot (PopplerPage  *page,
   g_return_if_fail (POPPLER_IS_ANNOT (annot));
 
   page->page->addAnnot (annot->annot);
+}
+
+/**
+ * poppler_page_remove_annot:
+ * @page: a #PopplerPage
+ * @annot: a #PopplerAnnot to remove
+ *
+ * Removes annotation @annot from @page
+ *
+ * Since: 0.22
+ */
+void
+poppler_page_remove_annot (PopplerPage  *page,
+                           PopplerAnnot *annot)
+{
+  g_return_if_fail (POPPLER_IS_PAGE (page));
+  g_return_if_fail (POPPLER_IS_ANNOT (annot));
+
+  page->page->removeAnnot (annot->annot);
 }
 
 /* PopplerRectangle type */

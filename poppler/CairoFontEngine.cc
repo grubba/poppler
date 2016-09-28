@@ -21,7 +21,7 @@
 // Copyright (C) 2006, 2007, 2010, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2008, 2009 Chris Wilson <chris@chris-wilson.co.uk>
-// Copyright (C) 2008 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2008, 2012 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2009 Darren Kenny <darren.kenny@sun.com>
 // Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
 // Copyright (C) 2010 Jan Kümmel <jan+freedesktop@snorc.org>
@@ -570,6 +570,29 @@ _free_type3_font_info(void *closure)
 }
 
 static cairo_status_t
+_init_type3_glyph (cairo_scaled_font_t  *scaled_font,
+                   cairo_t              *cr,
+                   cairo_font_extents_t *extents)
+{
+  type3_font_info_t *info;
+  GfxFont *font;
+  double *mat;
+
+  info = (type3_font_info_t *)
+    cairo_font_face_get_user_data (cairo_scaled_font_get_font_face (scaled_font),
+				   &type3_font_key);
+  font = info->font;
+  mat = font->getFontBBox();
+  extents->ascent = mat[3]; /* y2 */
+  extents->descent = -mat[3]; /* -y1 */
+  extents->height = extents->ascent + extents->descent;
+  extents->max_x_advance = mat[2] - mat[1]; /* x2 - x1 */
+  extents->max_y_advance = 0;
+
+  return CAIRO_STATUS_SUCCESS;
+}
+
+static cairo_status_t
 _render_type3_glyph (cairo_scaled_font_t  *scaled_font,
 		     unsigned long         glyph,
 		     cairo_t              *cr,
@@ -667,6 +690,7 @@ CairoType3Font *CairoType3Font::create(GfxFont *gfxFont, PDFDoc *doc,
   info = (type3_font_info_t *) malloc(sizeof(*info));
   ref = *gfxFont->getID();
   font_face = cairo_user_font_face_create();
+  cairo_user_font_face_set_init_func (font_face, _init_type3_glyph);
   cairo_user_font_face_set_render_glyph_func (font_face, _render_type3_glyph);
   gfxFont->incRefCnt();
   info->font = gfxFont;

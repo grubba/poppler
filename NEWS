@@ -1,3 +1,81 @@
+Release 0.20.0
+        core:
+         * Reconstruct xref table if xref needed but missing (Bug #40719)
+         * Fix getFullyQualifiedName with unicode field names (Bug #49256)
+         * SplashOutputDev: Fix rendering of knockout groups (Bug #12185)
+         * SplashOutputDev: Fix cmyk transfer bug (Bug #49341)
+         * Fix crashes in broken documents
+         * Bring back the Outputdev::begin/endMarkedContent virtuals
+         * Build fixes
+        
+        qt4:
+         * Convert propertly unicode encoded field qualified names
+        
+        glib:
+         * glib: Use delete[] to free array allocated with new[] (Bug #48447)
+
+Release 0.19.4
+        core:
+         * Annotation improvements
+         * More compatible file writing
+         * SplashOutputDev: Fix slow rendering of pdf with a lot of image masks in pattern colorspace
+         * Fix crashes in broken documents
+         * Fix spurious warning messages
+        
+        utils:
+         * pdftotext: Add missing section heading to man page
+         * pdftohtml: Fix crash when the destination file does not exist
+        
+        build system:
+         * autoconf: Do not append "-ansi" to CXXFLAG, if "-std=XXX" is already specified.
+         * autoconf: Do not clear FREETYPE_CFLAGS, FREETYPE_LIBS before PKG_CHECK_MODULES()
+         * autoconf: Copying graphics library CFLAGS to cpp frontend Makefile.am
+
+Release 0.19.3
+        core:
+         * Annotation improvements
+         * CairoOutputDev: Fix regression caused by mesh gradients
+         * CairoOutputDev: Use correct userfont font bbox (Bug #48399)
+         * CairoOutputDev: Fix paintTransparencyGroup when both mask and fill opacity are required (Bug #48453)
+         * CairoOutputDev: Ensure 0 width lines with stroke_adjust are aligned
+         * CairoOutputDev: Only align stroke coords for horizontal and vertical lines (Bug #48318)
+         * CairoOutputDev: Fix stroke pattern with transparency group (Bug #48468)
+         * Fix crash in JBIG2Stream decoding
+         * Fix memory leak when looking for a substitute font
+         * Fix page labels to not have a null character at the end
+         * Fix Splash CMYK merge error
+         * ttc<->ttf fallback is expected for CJK font list in for Windows (Bug #48046)
+        
+        qt4:
+         * Annotations can now be modified
+         * Annotations can now be added
+         * Annotations can now be removed
+
+        utils:
+         * pdftohtml: Add producer and version to xml output
+         * pdftohtml: Fix the mask inversion for PNG
+         
+Release 0.19.2
+        core:
+         * Annotation improvements
+         * CairoOutputDev: update cairo mesh pattern to 1.12 api
+         * CairoOutputDev: fix some transparency issues (Bug #47739)
+         * CairoOutputDev: Fix regression in some shadings
+         * TextOutputDev: Don't add newline to last line extracted by TextSelectionDumper (Bug #45955)
+         * CJK font improvements
+         * Improve font matching for non embedded fonts
+         * Fix regression regarding forceRasterize in PSOutputDev
+         * Fix typos glyph names in truetype 'post' table standard mac ordering
+        
+        build system:
+         * minor cmake fixes
+         * misc autoconf fixes
+         * POPPLER_VERSION is now wrapped in quotes
+
+        utils:
+         * pdftohtml: extract mask images even if they are not JPEG (Bug #47186)
+         * pdftohtml: Flip images if they need to (Bug #32340)
+         
 Release 0.19.1
         core:
          * Improve CJK suport in PSOutputDev
@@ -19,7 +97,7 @@ Release 0.19.1
          * Support for LinkMovie object (Bug #40561)
          * Support for Media Rendition
          
-         glib:
+        glib:
          * Add poppler_fonts_iter_get_encoding
          * Improvements to the demo
 
