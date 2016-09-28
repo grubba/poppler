@@ -78,6 +78,22 @@ libjpeg2000_sources =				\
 
 endif
 
+if BUILD_NSS
+
+nss_sources =                   \
+	SignatureHandler.cc
+
+nss_libs =                      \
+	$(NSS3_LIBS)
+
+nss_includes =                  \
+	$(NSS3_CFLAGS)
+
+nss_headers =
+	SignatureHandler.h
+
+endif	
+
 
 if BUILD_ZLIB
 
@@ -119,6 +135,7 @@ poppler_includedir = $(includedir)/poppler
 poppler_include_HEADERS =	\
 	$(splash_headers)	\
 	$(curl_headers)		\
+	$(nss_headers) 		\
 	Annot.h			\
 	Array.h			\
 	BuiltinFont.h		\
@@ -166,6 +183,7 @@ poppler_include_HEADERS =	\
 	PreScanOutputDev.h	\
 	PSTokenizer.h		\
 	Rendition.h		\
+	SignatureInfo.h		\
 	StdinCachedFile.h	\
 	StdinPDFDocBuilder.h	\
 	Stream-CCITT.h		\
@@ -200,6 +218,7 @@ libpoppler_la_SOURCES =		\
 	$(splash_sources)	\
 	$(libjpeg_sources)	\
 	$(zlib_sources)		\
+	$(nss_sources)      \
 	$(libjpeg2000_sources)	\
 	$(curl_sources)		\
 	Annot.cc		\
@@ -247,6 +266,7 @@ libpoppler_la_SOURCES =		\
 	PreScanOutputDev.cc \
 	PSTokenizer.cc		\
 	Rendition.cc		\
+	SignatureInfo.cc	\
 	StdinCachedFile.cc	\
 	StdinPDFDocBuilder.cc	\
 	Stream.cc 		\
@@ -275,6 +295,7 @@ libpoppler_la_CPPFLAGS =			\
 	$(libjpeg2000_includes)			\
 	$(libpng_includes)			\
 	$(libcurl_includes)			\
+	$(nss_includes)				\
 	$(FREETYPE_CFLAGS)			\
 	$(FONTCONFIG_CFLAGS)			\
 	$(AM_CPPFLAGS)
@@ -289,6 +310,7 @@ libpoppler_la_LIBADD =				\
 	$(libpng_libs)				\
 	$(zlib_libs)				\
 	$(libcurl_libs)				\
+	$(nss_libs)                 \
 	$(libjpeg2000_libs)			\
 	$(FREETYPE_LIBS)			\
 	$(FONTCONFIG_LIBS)			\
