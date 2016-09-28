@@ -10,9 +10,10 @@ include(MacroOptionalFindPackage)
 find_package(PkgConfig)
 include(MacroEnsureVersion)
 include(MacroBoolTo01)
+find_package(Threads)
 
 set(POPPLER_MAJOR_VERSION "0")
-set(POPPLER_MINOR_VERSION "12")
+set(POPPLER_MINOR_VERSION "13")
 set(POPPLER_MICRO_VERSION "0")
 set(POPPLER_VERSION "${POPPLER_MAJOR_VERSION}.${POPPLER_MINOR_VERSION}.${POPPLER_MICRO_VERSION}")
 
@@ -44,11 +45,16 @@ else(MSVC)
     option(WITH_FONTCONFIGURATION_FONTCONFIG "Select fontconfig font configuration backend" ON)
   endif(APPLE)
 endif(MSVC)
+if(WIN32)
+  option(ENABLE_RELOCATABLE "Hardcode the poppler library location (on Windows)." ON)
+else(WIN32)
+  set(ENABLE_RELOCATABLE OFF)
+endif(WIN32)
 
 set(LIB_SUFFIX "" CACHE STRING "Define suffix of directory name (32/64)")
 
 # Enable these unconditionally.
-set(MULTITHREAD ON)
+set(MULTITHREADED ON)
 set(OPI_SUPPORT ON)
 set(TEXTOUT_WORD_LIST ON)
 
@@ -90,6 +96,7 @@ endif(ENABLE_ABIWORD)
 if(ENABLE_LIBOPENJPEG)
   find_package(LIBOPENJPEG)
   set(ENABLE_LIBOPENJPEG ${LIBOPENJPEG_FOUND})
+  set(HAVE_OPENJPEG_H ON)
 endif(ENABLE_LIBOPENJPEG)
 if(ENABLE_LCMS)
   find_package(LCMS)
@@ -107,6 +114,9 @@ include_directories(
   ${FREETYPE_INCLUDE_DIRS}
 )
 set(HAVE_FREETYPE_H ON)
+if(CMAKE_USE_PTHREADS_INIT)
+  set(HAVE_PTHREAD ON)
+endif(CMAKE_USE_PTHREADS_INIT)
 
 if(ENABLE_ZLIB)
   include_directories(${ZLIB_INCLUDE_DIR})
@@ -292,7 +302,7 @@ add_library(poppler STATIC ${poppler_SRCS})
 else(MSVC)
 add_library(poppler SHARED ${poppler_SRCS})
 endif(MSVC)
-set_target_properties(poppler PROPERTIES VERSION 5.0.0 SOVERSION 5)
+set_target_properties(poppler PROPERTIES VERSION 6.0.0 SOVERSION 6)
 target_link_libraries(poppler ${poppler_LIBS})
 install(TARGETS poppler RUNTIME DESTINATION bin LIBRARY DESTINATION lib${LIB_SUFFIX} ARCHIVE DESTINATION lib${LIB_SUFFIX})
 
@@ -371,8 +381,14 @@ if(ENABLE_XPDF_HEADERS)
     goo/gmem.h
     goo/gfile.h
     goo/FixedPoint.h
+    goo/ImgWriter.h
     goo/gstrtod.h
     DESTINATION include/poppler/goo)
+  if(PNG_FOUND)
+    install(FILES
+      goo/PNGWriter.h
+      DESTINATION include/poppler/goo)
+  endif(PNG_FOUND)
   install(FILES
     fofi/FoFiBase.h
     fofi/FoFiEncodings.h
@@ -384,6 +400,9 @@ if(ENABLE_XPDF_HEADERS)
     install(FILES
       poppler/JPEG2000Stream.h
       DESTINATION include/poppler)
+    install(FILES
+      goo/JpegWriter.h
+      DESTINATION include/poppler/goo)
   else(LIBOPENJPEG_FOUND)
     install(FILES
       poppler/JPXStream.h
@@ -425,9 +444,9 @@ endif(ENABLE_XPDF_HEADERS)
 if(ENABLE_UTILS)
   add_subdirectory(utils)
 endif(ENABLE_UTILS)
-if(GLIB_FOUND)
+if(GLIB_FOUND AND CAIRO_FOUND)
   add_subdirectory(glib)
-endif(GLIB_FOUND)
+endif(GLIB_FOUND AND CAIRO_FOUND)
 if(QT3_FOUND)
   add_subdirectory(qt)
 endif(QT3_FOUND)
