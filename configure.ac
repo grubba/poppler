@@ -540,12 +540,15 @@ AC_SUBST(FREETYPE_LIBS)
 
 AC_MSG_CHECKING([which font configuration to use])
 AC_ARG_WITH([font_configuration],
-   [AS_HELP_STRING([--with-font-configuration=fontconfig|win32],
+   [AS_HELP_STRING([--with-font-configuration=fontconfig|win32|mac],
                    [Select font configuration backend])],
    [],
    [if test x$os_win32 = xyes; then
         # default to win32 on native Windows.
         with_font_configuration=win32
+    elif test "x`uname`" = xDarwin; then
+        # default to mac on MacOS X derivatives.
+        with_font_configuration=mac
     else
         # default to fontconig everywhere else.
         with_font_configuration=fontconfig
@@ -561,6 +564,17 @@ case $with_font_configuration in
      # Set the minimum required Internet Explorer version to 5.0
      CPPFLAGS="$CPPFLAGS -D_WIN32_IE=0x0500"
      ;;
+  mac)
+     KPSE_CHECK_FRAMEWORK([ApplicationServices], [ATSFontRef fontRef])
+     if test x$kpse_cv_have_ApplicationServices = xyes; then
+         AC_DEFINE([WITH_FONTCONFIGURATION_MAC],
+                [1],[Use native MacOS X font configuration backend])
+	 LDFLAGS="$LDFLAGS -framework ApplicationServices"
+     else
+         AC_MSG_ERROR(
+                [Mac system font support is not available on this platform.])
+     fi
+     ;;
   fontconfig)
      AC_DEFINE([WITH_FONTCONFIGURATION_FONTCONFIG],
                [1],[Use fontconfig font configuration backend])
@@ -574,6 +588,8 @@ esac
 
 AM_CONDITIONAL(BUILD_WITH_WIN32_FONTCONFIGURATION,
                test x$with_font_configuration = xwin32)
+AM_CONDITIONAL(BUILD_WITH_MAC_FONTCONFIGURATION,
+               test x$with_font_configuration = xmac)
 
 AC_ARG_ENABLE(splash-output,
               AC_HELP_STRING([--disable-splash-output],

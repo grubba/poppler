@@ -35,6 +35,7 @@
 // Copyright (C) 2012 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2012 Peter Breitenlohner <peb@mppmu.mpg.de>
 // Copyright (C) 2013, 2014 Jason Crain <jason@aquaticape.us>
+// Copyright (C) 2016 Henrik Grubbström <grubba@grubba.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -272,6 +273,9 @@ public:
 
 #ifdef WIN32
   void scanWindowsFonts(GooString *winFontDir);
+#endif
+#ifdef WITH_FONTCONFIGURATION_MAC
+  void addMacFont(SysFontInfo *fi) {fonts->append(fi);}
 #endif
 #ifdef WITH_FONTCONFIGURATION_FONTCONFIG
   void addFcFont(SysFontInfo *si) {fonts->append(si);}
@@ -557,6 +561,11 @@ GlobalParams::GlobalParams(const char *customPopplerDataDir)
   UnicodeMap *map;
   int i;
 
+#if WITH_FONTCONFIGURATION_MAC
+  tempFontFiles = NULL;
+  numTempFontFiles = 0;
+#endif
+
 #if MULTITHREADED
   gInitMutex(&mutex);
   gInitMutex(&unicodeMapCacheMutex);
@@ -827,6 +836,13 @@ GlobalParams::~GlobalParams() {
 #ifdef ENABLE_PLUGINS
   delete securityHandlers;
   deleteGooList(plugins, Plugin);
+#endif
+
+#if WITH_FONTCONFIGURATION_MAC
+  while (numTempFontFiles > 0) {
+    --numTempFontFiles;
+    unlink(tempFontFiles[numTempFontFiles]);
+  }
 #endif
 
 #if MULTITHREADED
@@ -1323,6 +1339,12 @@ fin:
 
 #elif WITH_FONTCONFIGURATION_WIN32
 #include "GlobalParamsWin.cc"
+
+GooString *GlobalParams::findBase14FontFile(GooString *base14Name, GfxFont *font) {
+  return findFontFile(base14Name);
+}
+#elif WITH_FONTCONFIGURATION_MAC
+#include "GlobalParamsMac.cc"
 
 GooString *GlobalParams::findBase14FontFile(GooString *base14Name, GfxFont *font) {
   return findFontFile(base14Name);

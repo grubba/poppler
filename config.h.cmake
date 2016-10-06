@@ -210,6 +210,9 @@
 /* Use fontconfig font configuration backend */
 #cmakedefine WITH_FONTCONFIGURATION_FONTCONFIG 1
 
+/* Use MacOS X font configuration backend */
+#cmakedefine WITH_FONTCONFIGURATION_MAC 1
+
 /* Use win32 font configuration backend */
 #cmakedefine WITH_FONTCONFIGURATION_WIN32 1
 

@@ -73,15 +73,20 @@ endif()
 
 if(WIN32)
   set(_default_fontconfiguration "win32")
+elseif(APPLE)
+  set(_default_fontconfiguration "mac")
 else(WIN32)
   set(_default_fontconfiguration "fontconfig")
 endif(WIN32)
-set(FONT_CONFIGURATION "${_default_fontconfiguration}" CACHE STRING "The font configuration backend (win32|fontconfig).")
+set(FONT_CONFIGURATION "${_default_fontconfiguration}" CACHE STRING "The font configuration backend (win32|mac|fontconfig).")
 string(TOLOWER "${FONT_CONFIGURATION}" font_configuration)
 set(WITH_FONTCONFIGURATION_WIN32 OFF)
+set(WITH_FONTCONFIGURATION_MAC OFF)
 set(WITH_FONTCONFIGURATION_FONTCONFIG OFF)
 if(font_configuration STREQUAL "win32")
   set(WITH_FONTCONFIGURATION_WIN32 ON)
+elseif(font_configuration STREQUAL "mac")
+  set(WITH_FONTCONFIGURATION_MAC ON)
 elseif(font_configuration STREQUAL "fontconfig")
   set(WITH_FONTCONFIGURATION_FONTCONFIG ON)
 else(font_configuration STREQUAL "win32")
@@ -101,6 +106,9 @@ set(GLIB_REQUIRED "2.18")
 macro_bool_to_01(ENABLE_SPLASH HAVE_SPLASH)
 find_package(Freetype REQUIRED)
 if(WITH_FONTCONFIGURATION_FONTCONFIG)
+  find_package(Fontconfig REQUIRED)
+elseif(WITH_FONTCONFIGURATION_MAC)
+  # FIXME: Move MacOS X native font detection to a dedicated package?
   find_package(Fontconfig REQUIRED)
 endif(WITH_FONTCONFIGURATION_FONTCONFIG)
 macro_optional_find_package(JPEG)
@@ -152,6 +160,9 @@ if(ENABLE_CPP)
   macro_optional_find_package(Iconv)
   set(ENABLE_CPP ${ICONV_FOUND})
   set(HAVE_ICONV ${ICONV_FOUND})
+  if(ICONV_FOUND)
+    include_directories(${ICONV_INCLUDE_DIR})
+  endif(ICONV_FOUND)
 endif(ENABLE_CPP)
 if(ENABLE_ZLIB)
   find_package(ZLIB)
@@ -425,6 +436,22 @@ endif(ENABLE_SPLASH)
 if(FONTCONFIG_FOUND)
   set(poppler_LIBS ${poppler_LIBS} ${FONTCONFIG_LIBRARIES})
 endif(FONTCONFIG_FOUND)
+if(ICONV_FOUND)
+  set(poppler_LIBS ${poppler_LIBS} ${ICONV_LIBRARIES})
+  if(APPLE)
+    # Work-around for /opt/local/include/iconv.h conflicting
+    # with /usr/include/iconv.h and /usr/lib/libiconv.dylib.
+    # Typical symptom:
+    #   Linking CXX shared library libpoppler-cpp.dylib
+    #   Undefined symbols for architecture x86_64:
+    #     "_libiconv", referenced from:
+    #         poppler::ustring::to_utf8() const in poppler-global.cpp.o
+    #         poppler::ustring::from_utf8(char const*, int) in poppler-global.cpp.o
+    # [...]
+    #   ld: symbol(s) not found for architecture x86_64
+    add_definitions(-DLIBICONV_PLUG)
+  endif(APPLE)
+endif(ICONV_FOUND)
 
 if(JPEG_FOUND)
   set(poppler_SRCS ${poppler_SRCS}

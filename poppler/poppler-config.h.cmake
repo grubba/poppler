@@ -61,6 +61,11 @@
 #cmakedefine TEXTOUT_WORD_LIST 1
 #endif
 
+/* Use MacOS X font configuration backend */
+#ifndef WITH_FONTCONFIGURATION_MAC
+#cmakedefine WITH_FONTCONFIGURATION_MAC 1
+#endif
+
 /* Support for curl is compiled in. */
 #ifndef POPPLER_HAS_CURL_SUPPORT
 #cmakedefine POPPLER_HAS_CURL_SUPPORT 1

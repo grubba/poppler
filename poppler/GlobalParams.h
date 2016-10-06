@@ -318,6 +318,11 @@ private:
   UnicodeMapCache *unicodeMapCache;
   CMapCache *cMapCache;
   
+#if WITH_FONTCONFIGURATION_MAC
+  char **tempFontFiles;
+  int numTempFontFiles;
+#endif
+
 #ifdef ENABLE_PLUGINS
   GooList *plugins;		// list of plugins [Plugin]
   GooList *securityHandlers;	// list of loaded security handlers
