@@ -551,6 +551,7 @@ case $with_font_configuration in
      if test x$kpse_cv_have_ApplicationServices = xyes; then
          AC_DEFINE([WITH_FONTCONFIGURATION_MAC],
                 [1],[Use native MacOS X font configuration backend])
+	 LDFLAGS="$LDFLAGS -framework ApplicationServices"
      else
          AC_MSG_ERROR(
                 [Mac system font support is not available on this platform.])
