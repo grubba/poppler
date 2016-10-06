@@ -13,7 +13,7 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2006 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006, 2010 Albert Astals Cid <aacid@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -46,6 +46,12 @@ public:
   Object *getObj(Object *obj, Guchar *fileKey = NULL,
 		 CryptAlgorithm encAlgorithm = cryptRC4, int keyLength = 0,
 		 int objNum = 0, int objGen = 0);
+  
+  Object *getObj(Object *obj, Guchar *fileKey,
+     CryptAlgorithm encAlgorithm, int keyLength,
+     int objNum, int objGen, std::set<int> *fetchOriginatorNums);
+
+  Object *getObj(Object *obj, std::set<int> *fetchOriginatorNums);
 
   // Get stream.
   Stream *getStream() { return lexer->getStream(); }
@@ -63,7 +69,7 @@ private:
 
   Stream *makeStream(Object *dict, Guchar *fileKey,
 		     CryptAlgorithm encAlgorithm, int keyLength,
-		     int objNum, int objGen);
+		     int objNum, int objGen, std::set<int> *fetchOriginatorNums);
   void shift(int objNum = -1);
 };
 

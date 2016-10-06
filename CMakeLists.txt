@@ -11,22 +11,22 @@ find_package(PkgConfig)
 include(MacroEnsureVersion)
 include(MacroBoolTo01)
 find_package(Threads)
+include(TestBigEndian)
+test_big_endian(WORDS_BIGENDIAN)
 
 set(POPPLER_MAJOR_VERSION "0")
-set(POPPLER_MINOR_VERSION "15")
-set(POPPLER_MICRO_VERSION "0")
+set(POPPLER_MINOR_VERSION "17")
+set(POPPLER_MICRO_VERSION "3")
 set(POPPLER_VERSION "${POPPLER_MAJOR_VERSION}.${POPPLER_MINOR_VERSION}.${POPPLER_MICRO_VERSION}")
 
 # command line switches
 option(ENABLE_XPDF_HEADERS "Install unsupported xpdf headers." OFF)
 option(BUILD_GTK_TESTS "Whether compile the GTK+ test programs." ON)
-option(BUILD_QT3_TESTS "Whether compile the Qt3 test programs." ON)
 option(BUILD_QT4_TESTS "Whether compile the Qt4 test programs." ON)
 option(BUILD_CPP_TESTS "Whether compile the CPP test programs." ON)
 option(ENABLE_SPLASH "Build the Splash graphics backend." ON)
 option(ENABLE_UTILS "Compile poppler command line utils." ON)
 option(ENABLE_CPP "Compile poppler cpp wrapper." ON)
-option(ENABLE_ABIWORD "Build the Abiword backend." ON)
 option(ENABLE_LIBOPENJPEG "Use libopenjpeg for JPX streams." ON)
 option(ENABLE_LCMS "Use liblcms for color management." ON)
 option(ENABLE_LIBCURL "Build libcurl based HTTP support." OFF)
@@ -69,7 +69,6 @@ set(OPI_SUPPORT ON)
 set(TEXTOUT_WORD_LIST ON)
 
 # setting the minimum required versions for some components
-set(QT3_MIN_VERSION "3.3.0")
 set(QT4_MIN_VERSION "4.4.0")
 set(CAIRO_VERSION "1.10.0")
 set(GLIB_REQUIRED "2.18")
@@ -84,10 +83,10 @@ elseif(WITH_FONTCONFIGURATION_MAC)
 endif(WITH_FONTCONFIGURATION_FONTCONFIG)
 macro_optional_find_package(JPEG)
 macro_optional_find_package(PNG)
+macro_optional_find_package(TIFF)
 if(JPEG_FOUND)
   set(ENABLE_LIBJPEG ${JPEG_FOUND})
 endif(JPEG_FOUND)
-macro_optional_find_package(Qt3)
 macro_optional_find_package(Qt4)
 macro_optional_find_package(Cairo ${CAIRO_VERSION})
 if(CAIRO_FOUND)
@@ -100,20 +99,12 @@ if(CAIRO_FOUND)
   if(GLIB_FOUND)
     set(ENABLE_GLIB ON)
     # Check for introspection
-    #macro_optional_find_package(GObjectIntrospection 0.6.7) # disabled, as it does not work without libtool
+    macro_optional_find_package(GObjectIntrospection 0.9.12)
     set(HAVE_INTROSPECTION ${INTROSPECTION_FOUND})
     set(GLIB_REQ "glib-2.0 >= ${GLIB_REQUIRED} gobject-2.0 >= ${GLIB_REQUIRED} cairo >= ${CAIRO_VERSION}")
     set(POPPLER_GLIB_DISABLE_DEPRECATED "${POPPLER_GLIB_DISABLE_DEPRECATED} -DG_DISABLE_DEPRECATED")
     set(POPPLER_GLIB_DISABLE_SINGLE_INCLUDES "${POPPLER_GLIB_DISABLE_SINGLE_INCLUDES} -DG_DISABLE_SINGLE_INCLUDES")
-    macro_optional_find_package(GDK)
     macro_optional_find_package(GTK)
-    if(GDK_FOUND)
-      set(GDK_REQ "gdk-2.0 gdk-pixbuf-2.0")
-      set(POPPLER_WITH_GDK ${GDK_FOUND})
-      set(GDK_FEATURE "#define POPPLER_WITH_GDK 1")
-      set(POPPLER_GLIB_DISABLE_DEPRECATED "${POPPLER_GLIB_DISABLE_DEPRECATED} -DGDK_DISABLE_DEPRECATED -DGDK_PIXBUF_DISABLE_DEPRECATED")
-      set(POPPLER_GLIB_DISABLE_SINGLE_INCLUDES "${POPPLER_GLIB_DISABLE_SINGLE_INCLUDES} -DGTK_DISABLE_SINGLE_INCLUDES")
-    endif(GDK_FOUND)
   endif(GLIB_FOUND)
 else(CAIRO_FOUND)
   set(CAIRO_FEATURE "#undef POPPLER_HAS_CAIRO")
@@ -133,10 +124,6 @@ if(ENABLE_ZLIB)
   endif(ZLIB_FOUND)
   set(ENABLE_ZLIB ${ZLIB_FOUND})
 endif(ENABLE_ZLIB)
-if(ENABLE_ABIWORD)
-  find_package(LibXml2)
-  set(ENABLE_ABIWORD ${LIBXML2_FOUND})
-endif(ENABLE_ABIWORD)
 if(ENABLE_LIBOPENJPEG)
   find_package(LIBOPENJPEG)
   set(ENABLE_LIBOPENJPEG ${LIBOPENJPEG_FOUND})
@@ -187,10 +174,10 @@ if(PNG_FOUND)
   include_directories(${PNG_INCLUDE_DIR})
   set(ENABLE_LIBPNG ON)
 endif(PNG_FOUND)
-if(ENABLE_ABIWORD)
-  include_directories(${LIBXML2_INCLUDE_DIR})
-  add_definitions(${LIBXML2_DEFINITIONS})
-endif(ENABLE_ABIWORD)
+if(TIFF_FOUND)
+  include_directories(${TIFF_INCLUDE_DIR})
+  set(ENABLE_LIBTIFF ON)
+endif(TIFF_FOUND)
 if(LIBOPENJPEG_FOUND)
   include_directories(${LIBOPENJPEG_INCLUDE_DIR})
 endif(LIBOPENJPEG_FOUND)
@@ -229,6 +216,7 @@ set(poppler_SRCS
   goo/gmem.cc
   goo/FixedPoint.cc
   goo/PNGWriter.cc
+  goo/TiffWriter.cc
   goo/JpegWriter.cc
   goo/ImgWriter.cc
   goo/gstrtod.cc
@@ -237,6 +225,7 @@ set(poppler_SRCS
   fofi/FoFiTrueType.cc
   fofi/FoFiType1.cc
   fofi/FoFiType1C.cc
+  fofi/FoFiIdentifier.cc
   poppler/Annot.cc
   poppler/Array.cc
   poppler/BuiltinFont.cc
@@ -258,10 +247,12 @@ set(poppler_SRCS
   poppler/GfxFont.cc
   poppler/GfxState.cc
   poppler/GlobalParams.cc
+  poppler/Hints.cc
   poppler/JArithmeticDecoder.cc
   poppler/JBIG2Stream.cc
   poppler/Lexer.cc
   poppler/Link.cc
+  poppler/Linearization.cc
   poppler/LocalPDFDocBuilder.cc
   poppler/NameToCharCode.cc
   poppler/Object.cc
@@ -290,6 +281,7 @@ set(poppler_SRCS
   poppler/StdinCachedFile.cc
   poppler/StdinPDFDocBuilder.cc
   poppler/Sound.cc
+  poppler/ViewerPreferences.cc
   poppler/XpdfPluginAPI.cc
   poppler/Movie.cc
   poppler/Rendition.cc
@@ -373,12 +365,6 @@ endif(LIBOPENJPEG_FOUND)
 if(USE_CMS)
   set(poppler_LIBS ${poppler_LIBS} ${LCMS_LIBRARIES})
 endif(USE_CMS)
-if(ENABLE_ABIWORD)
-  set(poppler_SRCS ${poppler_SRCS}
-    poppler/ABWOutputDev.cc
-  )
-  set(poppler_LIBS ${poppler_LIBS} ${LIBXML2_LIBRARIES})
-endif(ENABLE_ABIWORD)
 if(WIN32)
   # gdi32 is needed under win32
   set(poppler_LIBS ${poppler_LIBS} gdi32)
@@ -386,6 +372,9 @@ endif(WIN32)
 if(PNG_FOUND)
   set(poppler_LIBS ${poppler_LIBS} ${PNG_LIBRARIES})
 endif(PNG_FOUND)
+if(TIFF_FOUND)
+  set(poppler_LIBS ${poppler_LIBS} ${TIFF_LIBRARIES})
+endif(TIFF_FOUND)
 
 if(MSVC)
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
@@ -393,7 +382,7 @@ add_library(poppler STATIC ${poppler_SRCS})
 else(MSVC)
 add_library(poppler SHARED ${poppler_SRCS})
 endif(MSVC)
-set_target_properties(poppler PROPERTIES VERSION 8.0.0 SOVERSION 8)
+set_target_properties(poppler PROPERTIES VERSION 17.0.0 SOVERSION 17)
 target_link_libraries(poppler ${poppler_LIBS})
 target_link_libraries(poppler LINK_INTERFACE_LIBRARIES "")
 install(TARGETS poppler RUNTIME DESTINATION bin LIBRARY DESTINATION lib${LIB_SUFFIX} ARCHIVE DESTINATION lib${LIB_SUFFIX})
@@ -423,10 +412,12 @@ if(ENABLE_XPDF_HEADERS)
     poppler/GfxState.h
     poppler/GfxState_helpers.h
     poppler/GlobalParams.h
+    poppler/Hints.h
     poppler/JArithmeticDecoder.h
     poppler/JBIG2Stream.h
     poppler/Lexer.h
     poppler/Link.h
+    poppler/Linearization.h
     poppler/LocalPDFDocBuilder.h
     poppler/Movie.h
     poppler/NameToCharCode.h
@@ -454,6 +445,7 @@ if(ENABLE_XPDF_HEADERS)
     poppler/UnicodeCClassTables.h
     poppler/UnicodeCompTables.h
     poppler/UnicodeDecompTables.h
+    poppler/ViewerPreferences.h
     poppler/XRef.h
     poppler/CharTypes.h
     poppler/CompactFontTables.h
@@ -475,7 +467,6 @@ if(ENABLE_XPDF_HEADERS)
     goo/GooTimer.h
     goo/GooMutex.h
     goo/GooString.h
-    goo/GooVector.h
     goo/gtypes.h
     goo/gmem.h
     goo/gfile.h
@@ -489,12 +480,18 @@ if(ENABLE_XPDF_HEADERS)
       goo/PNGWriter.h
       DESTINATION include/poppler/goo)
   endif(PNG_FOUND)
+  if(TIFF_FOUND)
+    install(FILES
+      goo/TiffWriter.h
+      DESTINATION include/poppler/goo)
+  endif(TIFF_FOUND)
   install(FILES
     fofi/FoFiBase.h
     fofi/FoFiEncodings.h
     fofi/FoFiTrueType.h
     fofi/FoFiType1.h
     fofi/FoFiType1C.h
+    fofi/FoFiIdentifier.h
     DESTINATION include/poppler/fofi)
   if(ENABLE_LIBCURL)
     install(FILES
@@ -553,9 +550,6 @@ endif(ENABLE_UTILS)
 if(ENABLE_GLIB)
   add_subdirectory(glib)
 endif(ENABLE_GLIB)
-if(QT3_FOUND)
-  add_subdirectory(qt)
-endif(QT3_FOUND)
 add_subdirectory(test)
 if(QT4_FOUND)
   add_subdirectory(qt4)
@@ -581,9 +575,6 @@ poppler_create_install_pkgconfig(poppler.pc lib${LIB_SUFFIX}/pkgconfig)
 if(ENABLE_SPLASH)
   poppler_create_install_pkgconfig(poppler-splash.pc lib${LIB_SUFFIX}/pkgconfig)
 endif(ENABLE_SPLASH)
-if(QT3_FOUND)
-  poppler_create_install_pkgconfig(poppler-qt.pc lib${LIB_SUFFIX}/pkgconfig)
-endif(QT3_FOUND)
 if(QT4_FOUND)
   poppler_create_install_pkgconfig(poppler-qt4.pc lib${LIB_SUFFIX}/pkgconfig)
 endif(QT4_FOUND)
@@ -602,16 +593,14 @@ message("Building Poppler with support for:")
 show_end_message("font configuration" ${font_configuration})
 show_end_message_yesno("splash output" ENABLE_SPLASH)
 show_end_message_yesno("cairo output" CAIRO_FOUND)
-show_end_message_yesno("abiword output" ENABLE_ABIWORD)
-show_end_message_yesno("qt wrapper" QT3_FOUND)
 show_end_message_yesno("qt4 wrapper" QT4_FOUND)
 show_end_message_yesno("glib wrapper" ENABLE_GLIB)
-show_end_message_yesno("  use GDK" POPPLER_WITH_GDK)
-show_end_message("  introspection" "not supported with this CMake build system")
+show_end_message_yesno("  introspection" INTROSPECTION_FOUND)
 show_end_message_yesno("cpp wrapper" ENABLE_CPP)
 show_end_message("use gtk-doc" "not supported with this CMake build system")
 show_end_message_yesno("use libjpeg" ENABLE_LIBJPEG)
 show_end_message_yesno("use libpng" ENABLE_LIBPNG)
+show_end_message_yesno("use libtiff" ENABLE_LIBTIFF)
 show_end_message_yesno("use zlib" ENABLE_ZLIB)
 show_end_message_yesno("use curl" ENABLE_LIBCURL)
 show_end_message_yesno("use libopenjpeg" LIBOPENJPEG_FOUND)

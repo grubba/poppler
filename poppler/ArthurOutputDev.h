@@ -15,7 +15,9 @@
 //
 // Copyright (C) 2005 Brad Hards <bradh@frogmouth.net>
 // Copyright (C) 2005 Albert Astals Cid <aacid@kde.org>
-// Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2009, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2010 Pino Toscano <pino@kde.org>
+// Copyright (C) 2011 Andreas Hartmetz <ahartmetz@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -50,12 +52,23 @@ struct SplashGlyphBitmap;
 
 class ArthurOutputDev: public OutputDev {
 public:
+  /**
+   * Describes how fonts are distorted (aka hinted) to fit the pixel grid.
+   * More hinting means sharper edges and less adherence to the true letter shapes.
+   */
+  enum FontHinting {
+    NoHinting = 0, ///< Font shapes are left unchanged
+    SlightHinting, ///< Font shapes are distorted vertically only
+    FullHinting ///< Font shapes are distorted horizontally and vertically
+  };
 
   // Constructor.
   ArthurOutputDev(QPainter *painter );
 
   // Destructor.
   virtual ~ArthurOutputDev();
+
+  void setFontHinting(FontHinting hinting) { m_fontHinting = hinting; }
 
   //----- get info about output device
 
@@ -77,9 +90,6 @@ public:
 
   // End a page.
   virtual void endPage();
-
-  //----- link borders
-  virtual void drawLink(Link *link, Catalog *catalog);
 
   //----- save/restore graphics state
   virtual void saveState(GfxState *state);
@@ -146,11 +156,11 @@ public:
   
 private:
   QPainter *m_painter;
+  FontHinting m_fontHinting;
   QFont m_currentFont;
   QPen m_currentPen;
   QBrush m_currentBrush;
   GBool m_needFontUpdate;		// set when the font needs to be updated
-  QImage *m_image;
   SplashFontEngine *m_fontEngine;
   SplashFont *m_font;		// current font
   XRef *xref;			// xref table for current document

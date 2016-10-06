@@ -1,7 +1,7 @@
 /* poppler-document.cc: qt interface to poppler
  * Copyright (C) 2005, 2008, 2009, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2005, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2008, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2008, 2011, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,73 +26,91 @@
 #include "Object.h"
 #include "Stream.h"
 #include "Catalog.h"
+#include "FileSpec.h"
 
 #include "poppler-private.h"
+#include "poppler-embeddedfile-private.h"
 
 namespace Poppler
 {
 
-class EmbeddedFileData
+EmbeddedFileData::EmbeddedFileData(FileSpec *fs)
+	: filespec(fs)
 {
-public:
-	EmbFile *embfile;
-};
+}
+
+EmbeddedFileData::~EmbeddedFileData()
+{
+	delete filespec;
+}
+
 
 EmbeddedFile::EmbeddedFile(EmbFile *embfile)
+	: m_embeddedFile(0)
 {
-	m_embeddedFile = new EmbeddedFileData();
-	m_embeddedFile->embfile = embfile;
+	assert(!"You must not use this private constructor!");
+}
+
+EmbeddedFile::EmbeddedFile(EmbeddedFileData &dd)
+	: m_embeddedFile(&dd)
+{
 }
 
 EmbeddedFile::~EmbeddedFile()
 {
-	delete m_embeddedFile->embfile;
 	delete m_embeddedFile;
 }
 
 QString EmbeddedFile::name() const
 {
-	return QString(m_embeddedFile->embfile->name()->getCString());
+	GooString *goo = m_embeddedFile->filespec->getFileName();
+	return goo ? QString(goo->getCString()) : QString();
 }
 
 QString EmbeddedFile::description() const
 {
-	return UnicodeParsedString(m_embeddedFile->embfile->description());
+	GooString *goo = m_embeddedFile->filespec->getDescription();
+	return goo ? UnicodeParsedString(goo) : QString();
 }
 
 int EmbeddedFile::size() const
 {
-	return m_embeddedFile->embfile->size();
+	return m_embeddedFile->filespec->getEmbeddedFile()->size();
 }
 
 QDateTime EmbeddedFile::modDate() const
 {
-	return convertDate(m_embeddedFile->embfile->modDate()->getCString());
+	GooString *goo = m_embeddedFile->filespec->getEmbeddedFile()->modDate();
+	return goo ? convertDate(goo->getCString()) : QDateTime();
 }
 
 QDateTime EmbeddedFile::createDate() const
 {
-	return convertDate(m_embeddedFile->embfile->createDate()->getCString());
+	GooString *goo = m_embeddedFile->filespec->getEmbeddedFile()->createDate();
+	return goo ? convertDate(goo->getCString()) : QDateTime();
 }
 
 QByteArray EmbeddedFile::checksum() const
 {
-	GooString *goo_checksum = m_embeddedFile->embfile->checksum();
-	return QByteArray::fromRawData(goo_checksum->getCString(), goo_checksum->getLength());
+	GooString *goo = m_embeddedFile->filespec->getEmbeddedFile()->checksum();
+	return goo ? QByteArray::fromRawData(goo->getCString(), goo->getLength()) : QByteArray();
 }
 
 QString EmbeddedFile::mimeType() const
 {
-	return QString(m_embeddedFile->embfile->mimeType()->getCString());
+	GooString *goo = m_embeddedFile->filespec->getEmbeddedFile()->mimeType();
+	return goo ? QString(goo->getCString()) : QString();
 }
 
 QByteArray EmbeddedFile::data()
 {
 	if (!isValid())
 		return QByteArray();
+	Stream *stream = m_embeddedFile->filespec->getEmbeddedFile()->stream();
+	if (!stream)
+		return QByteArray();
 	
 	Object obj;
-	Stream *stream = m_embeddedFile->embfile->streamObject().getStream();
 	stream->reset();
 	int dataLen = 0;
 	QByteArray fileArray;
@@ -107,7 +125,7 @@ QByteArray EmbeddedFile::data()
 
 bool EmbeddedFile::isValid() const
 {
-	return m_embeddedFile->embfile->isOk();
+	return m_embeddedFile->filespec->isOk();
 }
 
 }

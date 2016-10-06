@@ -5,7 +5,7 @@
 // Copyright 2007 Brad Hards <bradh@kde.org>
 // Copyright 2008 Pino Toscano <pino@kde.org>
 // Copyright 2008, 2010 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright 2008, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright 2008, 2010, 2011 Albert Astals Cid <aacid@kde.org>
 // Copyright 2008 Mark Kaplan <mkaplan@finjan.com>
 //
 // Released under the GPL (version 2, or later, at your option)
@@ -37,7 +37,7 @@ OCGs::OCGs(Object *ocgObject, XRef *xref) :
   Object ocgList;
   ocgObject->dictLookup("OCGs", &ocgList);
   if (!ocgList.isArray()) {
-    error(-1, "Expected the optional content group list, but wasn't able to find it, or it isn't an Array");
+    error(errSyntaxError, -1, "Expected the optional content group list, but wasn't able to find it, or it isn't an Array");
     ocgList.free();
     ok = gFalse;
     return;
@@ -65,7 +65,7 @@ OCGs::OCGs(Object *ocgObject, XRef *xref) :
   Object defaultOcgConfig;
   ocgObject->dictLookup("D", &defaultOcgConfig);
   if (!defaultOcgConfig.isDict()) {
-    error(-1, "Expected the default config, but wasn't able to find it, or it isn't a Dictionary");
+    error(errSyntaxError, -1, "Expected the default config, but wasn't able to find it, or it isn't a Dictionary");
     defaultOcgConfig.free();
     ocgList.free();
     ok = gFalse;
@@ -99,7 +99,7 @@ OCGs::OCGs(Object *ocgObject, XRef *xref) :
       OptionalContentGroup *group = findOcgByRef( reference.getRef() );
       reference.free();
       if (!group) {
-	error(-1, "Couldn't find group for reference");
+	error(errSyntaxWarning, -1, "Couldn't find group for reference");
 	break;
       }
       group->setState(OptionalContentGroup::On);
@@ -122,7 +122,7 @@ OCGs::OCGs(Object *ocgObject, XRef *xref) :
       OptionalContentGroup *group = findOcgByRef( reference.getRef() );
       reference.free();
       if (!group) {
-	error(-1, "Couldn't find group for reference to set OFF");
+	error(errSyntaxWarning, -1, "Couldn't find group for reference to set OFF");
 	break;
       }
       group->setState(OptionalContentGroup::Off);
@@ -161,7 +161,7 @@ OptionalContentGroup* OCGs::findOcgByRef( const Ref &ref)
     }
   }
 
-  error(-1, "Could not find a OCG with Ref (%d:%d)", ref.num, ref.gen);
+  error(errSyntaxWarning, -1, "Could not find a OCG with Ref ({0:d}:{1:d})", ref.num, ref.gen);
 
   // not found
   return NULL;
@@ -177,7 +177,7 @@ bool OCGs::optContentIsVisible( Object *dictRef )
   bool result = true;
   dictRef->fetch( m_xref, &dictObj );
   if ( ! dictObj.isDict() ) {
-    error(-1, "Unexpected oc reference target: %i", dictObj.getType() );
+    error(errSyntaxWarning, -1, "Unexpected oc reference target: {0:d}", dictObj.getType() );
     dictObj.free();
     return result;
   }
@@ -213,7 +213,7 @@ bool OCGs::optContentIsVisible( Object *dictRef )
     policy.free();
   } else if ( dictType.isName("OCG") ) {
     OptionalContentGroup* oc = findOcgByRef( dictRef->getRef() );
-    if ( !oc || oc->getState() == OptionalContentGroup::Off ) {
+    if ( oc && oc->getState() == OptionalContentGroup::Off ) {
       result=false;
     }
   }
@@ -290,7 +290,7 @@ OptionalContentGroup::OptionalContentGroup(Dict *ocgDict) : m_name(NULL)
   Object ocgName;
   ocgDict->lookup("Name", &ocgName);
   if (!ocgName.isString()) {
-    error(-1, "Expected the name of the OCG, but wasn't able to find it, or it isn't a String");
+    error(errSyntaxWarning, -1, "Expected the name of the OCG, but wasn't able to find it, or it isn't a String");
   } else {
     m_name = new GooString( ocgName.getString() );
   }

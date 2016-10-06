@@ -12,7 +12,9 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Marco Pesenti Gritti <mpg@redhat.com>
-// Copyright (C) 2007 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2007, 2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2010, 2011 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -26,14 +28,14 @@
 #pragma interface
 #endif
 
+#include <stddef.h>
 #include "SplashTypes.h"
 #include "SplashClip.h"
+#include "SplashPattern.h"
 
-class Splash;
 class SplashBitmap;
 struct SplashGlyphBitmap;
 class SplashState;
-class SplashPattern;
 class SplashScreen;
 class SplashPath;
 class SplashXPath;
@@ -119,6 +121,9 @@ public:
   void setBlendFunc(SplashBlendFunc func);
   void setStrokeAlpha(SplashCoord alpha);
   void setFillAlpha(SplashCoord alpha);
+  void setFillOverprint(GBool fop);
+  void setStrokeOverprint(GBool sop);
+  void setOverprintMode(int opm);
   void setLineWidth(SplashCoord lineWidth);
   void setLineCap(int lineCap);
   void setLineJoin(int lineJoin);
@@ -201,7 +206,7 @@ public:
   // The matrix behaves as for fillImageMask.
   SplashError drawImage(SplashImageSource src, void *srcData,
 			SplashColorMode srcMode, GBool srcAlpha,
-			int w, int h, SplashCoord *mat);
+			int w, int h, SplashCoord *mat, SplashPattern *overprintPattern = NULL);
 
   // Composite a rectangular region from <src> onto this Splash
   // object.
@@ -249,12 +254,18 @@ public:
   void setVectorAntialias(GBool vaa) { vectorAntialias = vaa; }
 #endif
 
+  // Do shaded fills with dynamic patterns
+  SplashError shadedFill(SplashPath *path, GBool hasBBox,
+                         SplashPattern *pattern);
+  // Draw a gouraud triangle shading.
+  GBool gouraudTriangleShadedFill(SplashGouraudColor *shading);
+
 private:
 
   void pipeInit(SplashPipe *pipe, int x, int y,
 		SplashPattern *pattern, SplashColorPtr cSrc,
 		SplashCoord aInput, GBool usesShape,
-		GBool nonIsolatedGroup);
+		GBool nonIsolatedGroup, SplashPattern *overprintPattern = NULL, GBool stroke = gFalse);
   void pipeRun(SplashPipe *pipe);
   void pipeSetXY(SplashPipe *pipe, int x, int y);
   void pipeIncX(SplashPipe *pipe);

@@ -5,6 +5,7 @@
 // A JPX stream decoder using OpenJPEG
 //
 // Copyright 2008, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright 2011 Daniel Glöckner <daniel-gl@gmx.net>
 //
 // Licensed under GPLv2 or later
 //
@@ -31,7 +32,7 @@ public:
   virtual int getPos();
   virtual int getChar();
   virtual int lookChar();
-  virtual GooString *getPSFilter(int psLevel, char *indent);
+  virtual GooString *getPSFilter(int psLevel, const char *indent);
   virtual GBool isBinary(GBool last = gTrue);
   virtual void getImageParams(int *bitsPerComponent, StreamColorSpaceMode *csMode);
 
@@ -44,40 +45,27 @@ private:
 
   inline int doGetChar() {
     int result = doLookChar();
-    ++counter;
+    if (++ccounter == ncomps) {
+      ccounter = 0;
+      ++counter;
+    }
     return result;
   }
 
   inline int doLookChar() {
-    if (inited == gFalse) init();
+    if (unlikely(inited == gFalse)) init();
 
-    if (!image) return EOF;
+    if (unlikely(counter >= npixels)) return EOF;
 
-    int w = image->comps[0].w;
-    int h = image->comps[0].h;
-
-    int y = (counter / image->numcomps) / w;
-    int x = (counter / image->numcomps) % w;
-    if (y >= h) return EOF;
-
-    int component = counter % image->numcomps;
-
-    int adjust = 0;
-    if (image->comps[component].prec > 8) {
-      adjust = image->comps[component].prec - 8;
-    }
-
-    int r = image->comps[component].data[y * w + x];
-    r += (image->comps[component].sgnd ? 1 << (image->comps[0].prec - 1) : 0);
-
-    unsigned char rc = (unsigned char) ((r >> adjust)+((r >> (adjust-1))%2));
-
-    return rc;
+    return ((unsigned char *)image->comps[ccounter].data)[counter];
   }
 
   opj_image_t *image;
   opj_dinfo_t *dinfo;
   int counter;
+  int ccounter;
+  int npixels;
+  int ncomps;
   GBool inited;
 };
 

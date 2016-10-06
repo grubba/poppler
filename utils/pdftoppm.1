@@ -35,6 +35,9 @@ Generates only the odd numbered pages.
 .B \-e
 Generates only the even numbered pages.
 .TP
+.BI \-singlefile
+Writes only the first page and does not add digits.
+.TP
 .BI \-r " number"
 Specifies the X and Y resolution, in DPI.  The default is 150 DPI.
 .TP
@@ -82,6 +85,12 @@ Generates a PNG file instead a PPM file.
 .TP
 .B \-jpeg
 Generates a JPEG file instead a PPM file.
+.TP
+.B \-tiff
+Generates a TIFF file instead a PPM file.
+.TP
+.BI \-tiffcompression " none | packbits | jpeg | lzw | deflate"
+Specifies the TIFF compression type.  This defaults to "none".
 .TP
 .BI \-freetype " yes | no"
 Enable or disable FreeType (a TrueType / Type 1 font rasterizer).
@@ -133,8 +142,10 @@ Other error.
 The pdftoppm software and documentation are copyright 1996-2004 Glyph
 & Cog, LLC.
 .SH "SEE ALSO"
-.BR pdftops (1),
-.BR pdftotext (1),
-.BR pdfinfo (1),
 .BR pdffonts (1),
 .BR pdfimages (1),
+.BR pdfinfo (1),
+.BR pdftocairo (1),
+.BR pdftohtml (1),
+.BR pdftops (1),
+.BR pdftotext (1)

@@ -17,22 +17,27 @@ INCLUDES =					\
 	-I$(top_srcdir)/poppler			\
 	$(UTILS_CFLAGS)				\
 	$(FONTCONFIG_CFLAGS)			\
-	$(ABIWORD_CFLAGS)
+	$(CAIRO_CFLAGS)
 
 LDADD =						\
 	$(top_builddir)/poppler/libpoppler.la	\
 	$(UTILS_LIBS)				\
 	$(FONTCONFIG_LIBS)
 
-if BUILD_ABIWORD_OUTPUT
+if BUILD_CAIRO_OUTPUT
 
-pdftoabw_SOURCES =				\
-	pdftoabw.cc				\
+pdftocairo_SOURCES =				\
+	pdftocairo.cc				\
 	$(common)
 
-pdftoabw_LDADD = $(LDADD) $(ABIWORD_LIBS)
+pdftocairo_LDADD =				\
+	$(top_builddir)/poppler/libpoppler-cairo.la \
+	$(LDADD) $(CAIRO_LIBS)
 
-pdftoabw_binary = pdftoabw
+
+pdftocairo_binary = pdftocairo
+
+pdftocairo_manpage = pdftocairo.1
 
 endif
 
@@ -45,8 +50,10 @@ bin_PROGRAMS =					\
 	pdftops					\
 	pdftotext				\
 	pdftohtml				\
+	pdfextract				\
+	pdfmerge				\
 	$(pdftoppm_binary)			\
-	$(pdftoabw_binary)
+	$(pdftocairo_binary)
 
 dist_man1_MANS =				\
 	pdffonts.1				\
@@ -55,7 +62,8 @@ dist_man1_MANS =				\
 	pdftops.1				\
 	pdftotext.1				\
 	pdftohtml.1				\
-	$(pdftoppm_manpage)
+	$(pdftoppm_manpage)			\
+	$(pdftocairo_manpage)
 
 common = parseargs.cc parseargs.h
 
@@ -93,6 +101,15 @@ pdftohtml_SOURCES =				\
 	HtmlLinks.h				\
 	HtmlOutputDev.cc			\
 	HtmlOutputDev.h				\
+	HtmlUtils.h				\
+	$(common)
+
+pdfextract_SOURCES =				\
+	pdfextract.cc				\
+	$(common)
+
+pdfmerge_SOURCES =				\
+	pdfmerge.cc				\
 	$(common)
 
 # Yay, automake!  It should be able to figure out that it has to dist

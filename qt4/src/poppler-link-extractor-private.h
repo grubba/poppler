@@ -1,5 +1,5 @@
 /* poppler-link-extractor_p.h: qt interface to poppler
- * Copyright (C) 2007-2008, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2007, 2008, 2011, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,7 +40,7 @@ class LinkExtractorOutputDev : public OutputDev
     virtual GBool upsideDown() { return gFalse; }
     virtual GBool useDrawChar() { return gFalse; }
     virtual GBool interpretType3Chars() { return gFalse; }
-    virtual void processLink(::Link *link, Catalog *catalog);
+    virtual void processLink(::AnnotLink *link, Catalog *catalog);
 
     // our stuff
     QList< Link* > links();

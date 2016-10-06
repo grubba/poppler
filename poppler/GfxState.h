@@ -17,8 +17,10 @@
 // Copyright (C) 2006, 2007 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2006 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 Koji Otani <sho@bbr.jp>
-// Copyright (C) 2009, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2009-2011 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
+// Copyright (C) 2011 Andrea Canciani <ranma42@gmail.com>
+// Copyright (C) 2011 Thomas Freitag <Thomas.Freitag@alfa.de>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -31,6 +33,8 @@
 #ifdef USE_GCC_PRAGMAS
 #pragma interface
 #endif
+
+#include "poppler-config.h"
 
 #include "goo/gtypes.h"
 #include "Object.h"
@@ -49,8 +53,10 @@ class Matrix {
 public:
   double m[6];
 
-  GBool invertTo(Matrix *other);
-  void transform(double x, double y, double *tx, double *ty);
+  GBool invertTo(Matrix *other) const;
+  void transform(double x, double y, double *tx, double *ty) const;
+  double determinant() const { return m[0] * m[3] - m[1] * m[2]; }
+  double norm() const;
 };
 
 //------------------------------------------------------------------------
@@ -91,6 +97,14 @@ static inline GfxColorComp dblToCol(double x) {
 
 static inline double colToDbl(GfxColorComp x) {
   return (double)x / (double)gfxColorComp1;
+}
+
+static inline Guchar dblToByte(double x) {
+  return (x * 255.0);
+}
+
+static inline double byteToDbl(Guchar x) {
+  return (double)x / (double)255.0;
 }
 
 static inline GfxColorComp byteToCol(Guchar x) {
@@ -188,12 +202,14 @@ public:
   virtual void getGray(GfxColor *color, GfxGray *gray) = 0;
   virtual void getRGB(GfxColor *color, GfxRGB *rgb) = 0;
   virtual void getCMYK(GfxColor *color, GfxCMYK *cmyk) = 0;
-  virtual void getGrayLine(Guchar * /*in*/, Guchar * /*out*/, int /*length*/) {}
-  virtual void getRGBLine(Guchar * /*in*/, unsigned int * /*out*/, int /*length*/) {}
+  virtual void getGrayLine(Guchar * /*in*/, Guchar * /*out*/, int /*length*/) { error(errInternal, -1, "GfxColorSpace::getGrayLine this should not happen"); }
+  virtual void getRGBLine(Guchar * /*in*/, unsigned int * /*out*/, int /*length*/) { error(errInternal, -1, "GfxColorSpace::getRGBLine (first variant) this should not happen"); }
+  virtual void getRGBLine(Guchar * /*in*/, Guchar * /*out*/, int /*length*/) {  error(errInternal, -1, "GfxColorSpace::getRGBLine (second variant) this should not happen"); }
+  virtual void getRGBXLine(Guchar * /*in*/, Guchar * /*out*/, int /*length*/) {  error(errInternal, -1, "GfxColorSpace::getRGBXLine this should not happen"); }
 
-  // Does this ColorSpace use getRGBLine?
+  // Does this ColorSpace support getRGBLine?
   virtual GBool useGetRGBLine() { return gFalse; }
-  // Does this ColorSpace use getGrayLine?
+  // Does this ColorSpace support getGrayLine?
   virtual GBool useGetGrayLine() { return gFalse; }
 
   // Return the number of color components.
@@ -215,7 +231,7 @@ public:
   static int getNumColorSpaceModes();
 
   // Return the name of the <idx>th color space mode.
-  static char *getColorSpaceModeName(int idx);
+  static const char *getColorSpaceModeName(int idx);
 
 #ifdef USE_CMS
   static int setupColorProfiles();
@@ -246,6 +262,8 @@ public:
   virtual void getCMYK(GfxColor *color, GfxCMYK *cmyk);
   virtual void getGrayLine(Guchar *in, Guchar *out, int length);
   virtual void getRGBLine(Guchar *in, unsigned int *out, int length);
+  virtual void getRGBLine(Guchar *in, Guchar *out, int length);
+  virtual void getRGBXLine(Guchar *in, Guchar *out, int length);
 
   virtual GBool useGetRGBLine() { return gTrue; }
   virtual GBool useGetGrayLine() { return gTrue; }
@@ -313,6 +331,8 @@ public:
   virtual void getCMYK(GfxColor *color, GfxCMYK *cmyk);
   virtual void getGrayLine(Guchar *in, Guchar *out, int length);
   virtual void getRGBLine(Guchar *in, unsigned int *out, int length);
+  virtual void getRGBLine(Guchar *in, Guchar *out, int length);
+  virtual void getRGBXLine(Guchar *in, Guchar *out, int length);
 
   virtual GBool useGetRGBLine() { return gTrue; }
   virtual GBool useGetGrayLine() { return gTrue; }
@@ -382,6 +402,10 @@ public:
   virtual void getGray(GfxColor *color, GfxGray *gray);
   virtual void getRGB(GfxColor *color, GfxRGB *rgb);
   virtual void getCMYK(GfxColor *color, GfxCMYK *cmyk);
+  virtual void getRGBLine(Guchar *in, unsigned int *out, int length);
+  virtual void getRGBLine(Guchar *, Guchar *out, int length);
+  virtual void getRGBXLine(Guchar *in, Guchar *out, int length);
+  virtual GBool useGetRGBLine() { return gTrue; }
 
   virtual int getNComps() { return 4; }
   virtual void getDefaultColor(GfxColor *color);
@@ -455,6 +479,8 @@ public:
   virtual void getRGB(GfxColor *color, GfxRGB *rgb);
   virtual void getCMYK(GfxColor *color, GfxCMYK *cmyk);
   virtual void getRGBLine(Guchar *in, unsigned int *out, int length);
+  virtual void getRGBLine(Guchar *in, Guchar *out, int length);
+  virtual void getRGBXLine(Guchar *in, Guchar *out, int length);
 
   virtual GBool useGetRGBLine();
 
@@ -498,6 +524,8 @@ public:
   virtual void getRGB(GfxColor *color, GfxRGB *rgb);
   virtual void getCMYK(GfxColor *color, GfxCMYK *cmyk);
   virtual void getRGBLine(Guchar *in, unsigned int *out, int length);
+  virtual void getRGBLine(Guchar *in, Guchar *out, int length);
+  virtual void getRGBXLine(Guchar *in, Guchar *out, int length);
 
   virtual GBool useGetRGBLine() { return gTrue; }
 
@@ -746,6 +774,51 @@ protected:
 };
 
 //------------------------------------------------------------------------
+// GfxUnivariateShading
+//------------------------------------------------------------------------
+
+class GfxUnivariateShading: public GfxShading {
+public:
+
+  GfxUnivariateShading(int typeA,
+		       double t0A, double t1A,
+		       Function **funcsA, int nFuncsA,
+		       GBool extend0A, GBool extend1A);
+  GfxUnivariateShading(GfxUnivariateShading *shading);
+  virtual ~GfxUnivariateShading();
+
+  double getDomain0() { return t0; }
+  double getDomain1() { return t1; }
+  GBool getExtend0() { return extend0; }
+  GBool getExtend1() { return extend1; }
+  int getNFuncs() { return nFuncs; }
+  Function *getFunc(int i) { return funcs[i]; }
+  void getColor(double t, GfxColor *color);
+
+  void setupCache(const Matrix *ctm,
+		  double xMin, double yMin,
+		  double xMax, double yMax);
+
+  virtual void getParameterRange(double *lower, double *upper,
+				 double xMin, double yMin,
+				 double xMax, double yMax) = 0;
+
+  virtual double getDistance(double tMin, double tMax) = 0;
+
+private:
+
+  double t0, t1;
+  Function *funcs[gfxColorMaxComps];
+  int nFuncs;
+  GBool extend0, extend1;
+
+  int cacheSize, lastMatch;
+  double *cacheBounds;
+  double *cacheCoeff;
+  double *cacheValues;
+};
+
+//------------------------------------------------------------------------
 // GfxFunctionShading
 //------------------------------------------------------------------------
 
@@ -782,7 +855,7 @@ private:
 // GfxAxialShading
 //------------------------------------------------------------------------
 
-class GfxAxialShading: public GfxShading {
+class GfxAxialShading: public GfxUnivariateShading {
 public:
 
   GfxAxialShading(double x0A, double y0A,
@@ -799,28 +872,23 @@ public:
 
   void getCoords(double *x0A, double *y0A, double *x1A, double *y1A)
     { *x0A = x0; *y0A = y0; *x1A = x1; *y1A = y1; }
-  double getDomain0() { return t0; }
-  double getDomain1() { return t1; }
-  GBool getExtend0() { return extend0; }
-  GBool getExtend1() { return extend1; }
-  int getNFuncs() { return nFuncs; }
-  Function *getFunc(int i) { return funcs[i]; }
-  void getColor(double t, GfxColor *color);
+
+  virtual void getParameterRange(double *lower, double *upper,
+				 double xMin, double yMin,
+				 double xMax, double yMax);
+
+  virtual double getDistance(double tMin, double tMax);
 
 private:
 
   double x0, y0, x1, y1;
-  double t0, t1;
-  Function *funcs[gfxColorMaxComps];
-  int nFuncs;
-  GBool extend0, extend1;
 };
 
 //------------------------------------------------------------------------
 // GfxRadialShading
 //------------------------------------------------------------------------
 
-class GfxRadialShading: public GfxShading {
+class GfxRadialShading: public GfxUnivariateShading {
 public:
 
   GfxRadialShading(double x0A, double y0A, double r0A,
@@ -838,21 +906,16 @@ public:
   void getCoords(double *x0A, double *y0A, double *r0A,
 		 double *x1A, double *y1A, double *r1A)
     { *x0A = x0; *y0A = y0; *r0A = r0; *x1A = x1; *y1A = y1; *r1A = r1; }
-  double getDomain0() { return t0; }
-  double getDomain1() { return t1; }
-  GBool getExtend0() { return extend0; }
-  GBool getExtend1() { return extend1; }
-  int getNFuncs() { return nFuncs; }
-  Function *getFunc(int i) { return funcs[i]; }
-  void getColor(double t, GfxColor *color);
+
+  virtual void getParameterRange(double *lower, double *upper,
+				 double xMin, double yMin,
+				 double xMax, double yMax);
+
+  virtual double getDistance(double tMin, double tMax);
 
 private:
 
   double x0, y0, r0, x1, y1, r1;
-  double t0, t1;
-  Function *funcs[gfxColorMaxComps];
-  int nFuncs;
-  GBool extend0, extend1;
 };
 
 //------------------------------------------------------------------------
@@ -1025,6 +1088,8 @@ public:
   void getGray(Guchar *x, GfxGray *gray);
   void getRGB(Guchar *x, GfxRGB *rgb);
   void getRGBLine(Guchar *in, unsigned int *out, int length);
+  void getRGBLine(Guchar *in, Guchar *out, int length);
+  void getRGBXLine(Guchar *in, Guchar *out, int length);
   void getGrayLine(Guchar *in, Guchar *out, int length);
   void getCMYK(Guchar *x, GfxCMYK *cmyk);
   void getColor(Guchar *x, GfxColor *color);
@@ -1270,6 +1335,7 @@ public:
   double getStrokeOpacity() { return strokeOpacity; }
   GBool getFillOverprint() { return fillOverprint; }
   GBool getStrokeOverprint() { return strokeOverprint; }
+  int getOverprintMode() { return overprintMode; }
   Function **getTransfer() { return transfer; }
   double getLineWidth() { return lineWidth; }
   void getLineDash(double **dash, int *length, double *start)
@@ -1340,6 +1406,7 @@ public:
   void setStrokeOpacity(double opac) { strokeOpacity = opac; }
   void setFillOverprint(GBool op) { fillOverprint = op; }
   void setStrokeOverprint(GBool op) { strokeOverprint = op; }
+  void setOverprintMode(int op) { overprintMode = op; }
   void setTransfer(Function **funcs);
   void setLineWidth(double width) { lineWidth = width; }
   void setLineDash(double *dash, int length, double start);
@@ -1420,6 +1487,7 @@ private:
   double strokeOpacity;		// stroke opacity
   GBool fillOverprint;		// fill overprint
   GBool strokeOverprint;	// stroke overprint
+  int overprintMode;		// overprint mode
   Function *transfer[4];	// transfer function (entries may be: all
 				//   NULL = identity; last three NULL =
 				//   single function; all four non-NULL =

@@ -17,7 +17,7 @@
 // Copyright (C) 2007 Iñigo Martínez <inigomartinez@gmail.com>
 // Copyright (C) 2008 Brad Hards <bradh@kde.org>
 // Copyright (C) 2008, 2010 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2009-2011 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009, 2010 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2010 David Benjamin <davidben@mit.edu>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
@@ -34,12 +34,14 @@
 #pragma interface
 #endif
 
+#include "poppler-config.h"
 #include "goo/gtypes.h"
 #include "goo/GooList.h"
-#include "goo/GooVector.h"
 #include "GfxState.h"
 #include "Object.h"
 #include "PopplerCache.h"
+
+#include <vector>
 
 class GooString;
 class XRef;
@@ -112,7 +114,7 @@ public:
   GBool lookupXObject(char *name, Object *obj);
   GBool lookupXObjectNF(char *name, Object *obj);
   GBool lookupMarkedContentNF(char *name, Object *obj);
-  void lookupColorSpace(char *name, Object *obj);
+  void lookupColorSpace(const char *name, Object *obj);
   GfxPattern *lookupPattern(char *name, Gfx *gfx);
   GfxShading *lookupShading(char *name, Gfx *gfx);
   GBool lookupGState(char *name, Object *obj);
@@ -202,7 +204,7 @@ private:
 
   GfxState *state;		// current graphics state
   int stackHeight;		// the height of the current graphics stack
-  GooVector<int> stateGuards;   // a stack of state limits; to guard against unmatched pops
+  std::vector<int> stateGuards;   // a stack of state limits; to guard against unmatched pops
   GBool fontChanged;		// set if font or text matrix has changed
   GfxClipType clip;		// do a clip?
   int ignoreUndef;		// current BX/EX nesting level

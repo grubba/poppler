@@ -8,12 +8,14 @@ configure_file(poppler-version.h.in ${CMAKE_CURRENT_BINARY_DIR}/poppler-version.
 add_subdirectory(tests)
 
 set(poppler_cpp_SRCS
+  PNMWriter.cc
   poppler-document.cpp
   poppler-embedded-file.cpp
   poppler-font.cpp
   poppler-global.cpp
   poppler-image.cpp
   poppler-page.cpp
+  poppler-page-renderer.cpp
   poppler-page-transition.cpp
   poppler-private.cpp
   poppler-rectangle.cpp
@@ -37,6 +39,7 @@ install(FILES
   poppler-global.h
   poppler-image.h
   poppler-page.h
+  poppler-page-renderer.h
   poppler-page-transition.h
   poppler-rectangle.h
   poppler-toc.h

@@ -12,7 +12,7 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2010 Paweł Wiejacha <pawel.wiejacha@gmail.com>
-// Copyright (C) 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2010, 2011 Albert Astals Cid <aacid@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -78,7 +78,7 @@ SplashXPath::SplashXPath(SplashPath *path, SplashCoord *matrix,
   SplashCoord x0, y0, x1, y1, x2, y2, x3, y3, xsp, ysp;
   SplashCoord adj0, adj1, w;
   int ww;
-  int curSubpath, curSubpathX, i, j;
+  int curSubpath, i, j;
 
   // transform the points
   pts = (SplashXPathPoint *)gmallocn(path->length, sizeof(SplashXPathPoint));
@@ -157,7 +157,6 @@ SplashXPath::SplashXPath(SplashPath *path, SplashCoord *matrix,
   x0 = y0 = xsp = ysp = 0; // make gcc happy
   adj0 = adj1 = 0; // make gcc happy
   curSubpath = 0;
-  curSubpathX = 0;
   i = 0;
   while (i < path->length) {
 
@@ -168,7 +167,6 @@ SplashXPath::SplashXPath(SplashPath *path, SplashCoord *matrix,
       xsp = x0;
       ysp = y0;
       curSubpath = i;
-      curSubpathX = length;
       ++i;
 
     } else {
@@ -291,7 +289,11 @@ void SplashXPath::addCurve(SplashCoord x0, SplashCoord y0,
   SplashCoord dx, dy, mx, my, d1, d2, flatness2;
   int p1, p2, p3;
 
+#if USE_FIXEDPOINT
+  flatness2 = flatness;
+#else
   flatness2 = flatness * flatness;
+#endif
 
   // initial segment
   p1 = 0;
@@ -317,12 +319,17 @@ void SplashXPath::addCurve(SplashCoord x0, SplashCoord y0,
     // line)
     mx = (xl0 + xr3) * 0.5;
     my = (yl0 + yr3) * 0.5;
+#if USE_FIXEDPOINT
+    d1 = splashDist(xx1, yy1, mx, my);
+    d2 = splashDist(xx2, yy2, mx, my);
+#else
     dx = xx1 - mx;
     dy = yy1 - my;
     d1 = dx*dx + dy*dy;
     dx = xx2 - mx;
     dy = yy2 - my;
     d2 = dx*dx + dy*dy;
+#endif    
 
     // if the curve is flat enough, or no more subdivisions are
     // allowed, add the straight line segment
@@ -414,31 +421,27 @@ void SplashXPath::addSegment(SplashCoord x0, SplashCoord y0,
   ++length;
 }
 
-static bool cmpXPathSegs(const SplashXPathSeg &seg0, const SplashXPathSeg &seg1) {
-  SplashCoord x0, y0, x1, y1;
+struct cmpXPathSegsFunctor {
+  bool operator()(const SplashXPathSeg &seg0, const SplashXPathSeg &seg1) {
+    SplashCoord x0, y0, x1, y1;
 
-  if (seg0.flags & splashXPathFlip) {
-    x0 = seg0.x1;
-    y0 = seg0.y1;
-  } else {
-    x0 = seg0.x0;
-    y0 = seg0.y0;
+    if (seg0.flags & splashXPathFlip) {
+      x0 = seg0.x1;
+      y0 = seg0.y1;
+    } else {
+      x0 = seg0.x0;
+      y0 = seg0.y0;
+    }
+    if (seg1.flags & splashXPathFlip) {
+      x1 = seg1.x1;
+      y1 = seg1.y1;
+    } else {
+      x1 = seg1.x0;
+      y1 = seg1.y0;
+    }
+    return (y0 != y1) ? (y0 < y1) : (x0 < x1);
   }
-  if (seg1.flags & splashXPathFlip) {
-    x1 = seg1.x1;
-    y1 = seg1.y1;
-  } else {
-    x1 = seg1.x0;
-    y1 = seg1.y0;
-  }
-  if (y0 != y1) {
-    return (y0 < y1) ? true : false;
-  }
-  if (x0 != x1) {
-    return (x0 < x1) ? true : false;
-  }
-  return false;
-}
+};
 
 void SplashXPath::aaScale() {
   SplashXPathSeg *seg;
@@ -453,5 +456,5 @@ void SplashXPath::aaScale() {
 }
 
 void SplashXPath::sort() {
-  std::sort(segs, segs + length, &cmpXPathSegs);
+  std::sort(segs, segs + length, cmpXPathSegsFunctor());
 }

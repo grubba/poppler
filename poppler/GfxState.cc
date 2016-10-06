@@ -16,12 +16,13 @@
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2006, 2007 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2006, 2010 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2006-2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006-2011 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009 Koji Otani <sho@bbr.jp>
-// Copyright (C) 2009 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009, 2011 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Christian Persch <chpe@gnome.org>
 // Copyright (C) 2010 Paweł Wiejacha <pawel.wiejacha@gmail.com>
 // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
+// Copyright (C) 2011 Andrea Canciani <ranma42@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -34,6 +35,7 @@
 #pragma implementation
 #endif
 
+#include <algorithm>
 #include <stddef.h>
 #include <math.h>
 #include <string.h>
@@ -51,11 +53,11 @@
 
 //------------------------------------------------------------------------
 
-GBool Matrix::invertTo(Matrix *other)
+GBool Matrix::invertTo(Matrix *other) const
 {
   double det;
 
-  det = 1 / (m[0] * m[3] - m[1] * m[2]);
+  det = 1 / determinant();
   other->m[0] = m[3] * det;
   other->m[1] = -m[1] * det;
   other->m[2] = -m[2] * det;
@@ -66,7 +68,7 @@ GBool Matrix::invertTo(Matrix *other)
   return gTrue;
 }
 
-void Matrix::transform(double x, double y, double *tx, double *ty)
+void Matrix::transform(double x, double y, double *tx, double *ty) const
 {
   double temp_x, temp_y;
 
@@ -77,10 +79,25 @@ void Matrix::transform(double x, double y, double *tx, double *ty)
   *ty = temp_y;
 }
 
+// Matrix norm, taken from _cairo_matrix_transformed_circle_major_axis
+double Matrix::norm() const
+{
+  double f, g, h, i, j;
+
+  i = m[0]*m[0] + m[1]*m[1];
+  j = m[2]*m[2] + m[3]*m[3];
+
+  f = 0.5 * (i + j);
+  g = 0.5 * (i - j);
+  h = m[0]*m[2] + m[1]*m[3];
+
+  return sqrt (f + hypot (g, h));
+}
+
 //------------------------------------------------------------------------
 
 struct GfxBlendModeInfo {
-  char *name;
+  const char *name;
   GfxBlendMode mode;
 };
 
@@ -111,7 +128,7 @@ static const GfxBlendModeInfo gfxBlendModeNames[] = {
 // 
 // NB: This must match the GfxColorSpaceMode enum defined in
 // GfxState.h
-static char *gfxColorSpaceModeNames[] = {
+static const char *gfxColorSpaceModeNames[] = {
   "DeviceGray",
   "CalGray",
   "DeviceRGB",
@@ -210,7 +227,7 @@ GfxColorSpace *GfxColorSpace::parse(Object *csObj, Gfx *gfx) {
     } else if (csObj->isName("Pattern")) {
       cs = new GfxPatternColorSpace(NULL);
     } else {
-      error(-1, "Bad color space '%s'", csObj->getName());
+      error(errSyntaxWarning, -1, "Bad color space '{0:s}'", csObj->getName());
     }
   } else if (csObj->isArray()) {
     csObj->arrayGet(0, &obj1);
@@ -237,11 +254,11 @@ GfxColorSpace *GfxColorSpace::parse(Object *csObj, Gfx *gfx) {
     } else if (obj1.isName("Pattern")) {
       cs = GfxPatternColorSpace::parse(csObj->getArray(), gfx);
     } else {
-      error(-1, "Bad color space");
+      error(errSyntaxWarning, -1, "Bad color space");
     }
     obj1.free();
   } else {
-    error(-1, "Bad color space - expected name or array");
+    error(errSyntaxWarning, -1, "Bad color space - expected name or array");
   }
   return cs;
 }
@@ -260,7 +277,7 @@ int GfxColorSpace::getNumColorSpaceModes() {
   return nGfxColorSpaceModes;
 }
 
-char *GfxColorSpace::getColorSpaceModeName(int idx) {
+const char *GfxColorSpace::getColorSpaceModeName(int idx) {
   return gfxColorSpaceModeNames[idx];
 }
 
@@ -305,7 +322,7 @@ cmsHPROFILE loadColorProfile(const char *fileName)
 
 static int CMSError(int ecode, const char *msg)
 {
-    error(-1, "%s", msg);
+    error(errSyntaxWarning, -1, "{0:s}", msg);
     return 1;
 }
 
@@ -347,7 +364,7 @@ int GfxColorSpace::setupColorProfiles()
 	   COLORSPACE_SH(displayPixelType) |
 	     CHANNELS_SH(nChannels) | BYTES_SH(1),
 	  INTENT_RELATIVE_COLORIMETRIC,0)) == 0) {
-      error(-1, "Can't create Lab transform");
+      error(errSyntaxWarning, -1, "Can't create Lab transform");
     } else {
       XYZ2DisplayTransform = new GfxColorTransform(transform);
     }
@@ -511,6 +528,23 @@ void GfxDeviceGrayColorSpace::getRGBLine(Guchar *in, unsigned int *out,
     out[i] = (in[i] << 16) | (in[i] << 8) | (in[i] << 0);
 }
 
+void GfxDeviceGrayColorSpace::getRGBLine(Guchar *in, Guchar *out, int length) {
+  for (int i = 0; i < length; i++) {
+    *out++ = in[i];
+    *out++ = in[i];
+    *out++ = in[i];
+  }
+}
+
+void GfxDeviceGrayColorSpace::getRGBXLine(Guchar *in, Guchar *out, int length) {
+  for (int i = 0; i < length; i++) {
+    *out++ = in[i];
+    *out++ = in[i];
+    *out++ = in[i];
+    *out++ = 255;
+  }
+}
+
 void GfxDeviceGrayColorSpace::getCMYK(GfxColor *color, GfxCMYK *cmyk) {
   cmyk->c = cmyk->m = cmyk->y = 0;
   cmyk->k = clip01(gfxColorComp1 - color->c[0]);
@@ -561,7 +595,7 @@ GfxColorSpace *GfxCalGrayColorSpace::parse(Array *arr) {
 
   arr->get(1, &obj1);
   if (!obj1.isDict()) {
-    error(-1, "Bad CalGray color space");
+    error(errSyntaxWarning, -1, "Bad CalGray color space");
     obj1.free();
     return NULL;
   }
@@ -569,26 +603,32 @@ GfxColorSpace *GfxCalGrayColorSpace::parse(Array *arr) {
   if (obj1.dictLookup("WhitePoint", &obj2)->isArray() &&
       obj2.arrayGetLength() == 3) {
     obj2.arrayGet(0, &obj3);
-    cs->whiteX = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->whiteX = obj3.getNum();
     obj3.free();
     obj2.arrayGet(1, &obj3);
-    cs->whiteY = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->whiteY = obj3.getNum();
     obj3.free();
     obj2.arrayGet(2, &obj3);
-    cs->whiteZ = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->whiteZ = obj3.getNum();
     obj3.free();
   }
   obj2.free();
   if (obj1.dictLookup("BlackPoint", &obj2)->isArray() &&
       obj2.arrayGetLength() == 3) {
     obj2.arrayGet(0, &obj3);
-    cs->blackX = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->blackX = obj3.getNum();
     obj3.free();
     obj2.arrayGet(1, &obj3);
-    cs->blackY = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->blackY = obj3.getNum();
     obj3.free();
     obj2.arrayGet(2, &obj3);
-    cs->blackZ = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->blackZ = obj3.getNum();
     obj3.free();
   }
   obj2.free();
@@ -768,6 +808,22 @@ void GfxDeviceRGBColorSpace::getRGBLine(Guchar *in, unsigned int *out,
     out[i] = (p[0] << 16) | (p[1] << 8) | (p[2] << 0);
 }
 
+void GfxDeviceRGBColorSpace::getRGBLine(Guchar *in, Guchar *out, int length) {
+  for (int i = 0; i < length; i++) {
+    *out++ = *in++;
+    *out++ = *in++;
+    *out++ = *in++;
+  }
+}
+
+void GfxDeviceRGBColorSpace::getRGBXLine(Guchar *in, Guchar *out, int length) {
+  for (int i = 0; i < length; i++) {
+    *out++ = *in++;
+    *out++ = *in++;
+    *out++ = *in++;
+    *out++ = 255;
+  }
+}
 void GfxDeviceRGBColorSpace::getCMYK(GfxColor *color, GfxCMYK *cmyk) {
   GfxColorComp c, m, y, k;
 
@@ -836,7 +892,7 @@ GfxColorSpace *GfxCalRGBColorSpace::parse(Array *arr) {
 
   arr->get(1, &obj1);
   if (!obj1.isDict()) {
-    error(-1, "Bad CalRGB color space");
+    error(errSyntaxWarning, -1, "Bad CalRGB color space");
     obj1.free();
     return NULL;
   }
@@ -844,39 +900,48 @@ GfxColorSpace *GfxCalRGBColorSpace::parse(Array *arr) {
   if (obj1.dictLookup("WhitePoint", &obj2)->isArray() &&
       obj2.arrayGetLength() == 3) {
     obj2.arrayGet(0, &obj3);
-    cs->whiteX = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->whiteX = obj3.getNum();
     obj3.free();
     obj2.arrayGet(1, &obj3);
-    cs->whiteY = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->whiteY = obj3.getNum();
     obj3.free();
     obj2.arrayGet(2, &obj3);
-    cs->whiteZ = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->whiteZ = obj3.getNum();
     obj3.free();
   }
   obj2.free();
   if (obj1.dictLookup("BlackPoint", &obj2)->isArray() &&
       obj2.arrayGetLength() == 3) {
     obj2.arrayGet(0, &obj3);
-    cs->blackX = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->blackX = obj3.getNum();
     obj3.free();
     obj2.arrayGet(1, &obj3);
-    cs->blackY = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->blackY = obj3.getNum();
     obj3.free();
     obj2.arrayGet(2, &obj3);
-    cs->blackZ = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->blackZ = obj3.getNum();
     obj3.free();
   }
   obj2.free();
   if (obj1.dictLookup("Gamma", &obj2)->isArray() &&
       obj2.arrayGetLength() == 3) {
     obj2.arrayGet(0, &obj3);
-    cs->gammaR = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->gammaR = obj3.getNum();
     obj3.free();
     obj2.arrayGet(1, &obj3);
-    cs->gammaG = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->gammaG = obj3.getNum();
     obj3.free();
     obj2.arrayGet(2, &obj3);
-    cs->gammaB = obj3.getNum();
+    if (likely(obj3.isNum()))
+      cs->gammaB = obj3.getNum();
     obj3.free();
   }
   obj2.free();
@@ -884,7 +949,8 @@ GfxColorSpace *GfxCalRGBColorSpace::parse(Array *arr) {
       obj2.arrayGetLength() == 9) {
     for (i = 0; i < 9; ++i) {
       obj2.arrayGet(i, &obj3);
-      cs->mat[i] = obj3.getNum();
+      if (likely(obj3.isNum()))
+        cs->mat[i] = obj3.getNum();
       obj3.free();
     }
   }
@@ -1053,6 +1119,55 @@ void GfxDeviceCMYKColorSpace::getRGB(GfxColor *color, GfxRGB *rgb) {
   rgb->b = clip01(dblToCol(b));
 }
 
+static inline void GfxDeviceCMYKColorSpacegetRGBLineHelper(Guchar *&in, double &r, double &g, double &b)
+{
+  double c, m, y, k, c1, m1, y1, k1;
+  
+  c = byteToDbl(*in++);
+  m = byteToDbl(*in++);
+  y = byteToDbl(*in++);
+  k = byteToDbl(*in++);
+  c1 = 1 - c;
+  m1 = 1 - m;
+  y1 = 1 - y;
+  k1 = 1 - k;
+  cmykToRGBMatrixMultiplication(c, m, y, k, c1, m1, y1, k1, r, g, b);
+}
+
+void GfxDeviceCMYKColorSpace::getRGBLine(Guchar *in, unsigned int *out, int length)
+{
+  double r, g, b;
+  for (int i = 0; i < length; i++) {
+    GfxDeviceCMYKColorSpacegetRGBLineHelper(in, r, g, b);
+    *out++ = (dblToByte(clip01(r)) << 16) | (dblToByte(clip01(g)) << 8) | dblToByte(clip01(b));
+  }
+}
+
+void GfxDeviceCMYKColorSpace::getRGBLine(Guchar *in, Guchar *out, int length)
+{
+  double r, g, b;
+  
+  for (int i = 0; i < length; i++) {
+    GfxDeviceCMYKColorSpacegetRGBLineHelper(in, r, g, b);
+    *out++ = dblToByte(clip01(r));
+    *out++ = dblToByte(clip01(g));
+    *out++ = dblToByte(clip01(b));
+  }
+}
+
+void GfxDeviceCMYKColorSpace::getRGBXLine(Guchar *in, Guchar *out, int length)
+{
+  double r, g, b;
+  
+  for (int i = 0; i < length; i++) {
+    GfxDeviceCMYKColorSpacegetRGBLineHelper(in, r, g, b);
+    *out++ = dblToByte(clip01(r));
+    *out++ = dblToByte(clip01(g));
+    *out++ = dblToByte(clip01(b));
+    *out++ = 255;
+  }
+}
+
 void GfxDeviceCMYKColorSpace::getCMYK(GfxColor *color, GfxCMYK *cmyk) {
   cmyk->c = clip01(color->c[0]);
   cmyk->m = clip01(color->c[1]);
@@ -1107,7 +1222,7 @@ GfxColorSpace *GfxLabColorSpace::parse(Array *arr) {
 
   arr->get(1, &obj1);
   if (!obj1.isDict()) {
-    error(-1, "Bad Lab color space");
+    error(errSyntaxWarning, -1, "Bad Lab color space");
     obj1.free();
     return NULL;
   }
@@ -1424,13 +1539,13 @@ GfxColorSpace *GfxICCBasedColorSpace::parse(Array *arr, Gfx *gfx) {
 #endif
   arr->get(1, &obj1);
   if (!obj1.isStream()) {
-    error(-1, "Bad ICCBased color space (stream)");
+    error(errSyntaxWarning, -1, "Bad ICCBased color space (stream)");
     obj1.free();
     return NULL;
   }
   dict = obj1.streamGetDict();
   if (!dict->lookup("N", &obj2)->isInt()) {
-    error(-1, "Bad ICCBased color space (N)");
+    error(errSyntaxWarning, -1, "Bad ICCBased color space (N)");
     obj2.free();
     obj1.free();
     return NULL;
@@ -1438,7 +1553,7 @@ GfxColorSpace *GfxICCBasedColorSpace::parse(Array *arr, Gfx *gfx) {
   nCompsA = obj2.getInt();
   obj2.free();
   if (nCompsA > gfxColorMaxComps) {
-    error(-1, "ICCBased color space with too many (%d > %d) components",
+    error(errSyntaxWarning, -1, "ICCBased color space with too many ({0:d} > {1:d}) components",
 	  nCompsA, gfxColorMaxComps);
     nCompsA = gfxColorMaxComps;
   }
@@ -1455,7 +1570,7 @@ GfxColorSpace *GfxICCBasedColorSpace::parse(Array *arr, Gfx *gfx) {
       altA = new GfxDeviceCMYKColorSpace();
       break;
     default:
-      error(-1, "Bad ICCBased color space - invalid N");
+      error(errSyntaxWarning, -1, "Bad ICCBased color space - invalid N");
       obj2.free();
       obj1.free();
       return NULL;
@@ -1491,7 +1606,7 @@ GfxColorSpace *GfxICCBasedColorSpace::parse(Array *arr, Gfx *gfx) {
   cmsHPROFILE hp = cmsOpenProfileFromMem(profBuf,length);
   gfree(profBuf);
   if (hp == 0) {
-    error(-1, "read ICCBased color space profile error");
+    error(errSyntaxWarning, -1, "read ICCBased color space profile error");
   } else {
     cmsHPROFILE dhp = displayProfile;
     if (dhp == NULL) dhp = RGBProfile;
@@ -1505,7 +1620,7 @@ GfxColorSpace *GfxICCBasedColorSpace::parse(Array *arr, Gfx *gfx) {
 	   COLORSPACE_SH(dcst) |
 	     CHANNELS_SH(dNChannels) | BYTES_SH(1),
 	  INTENT_RELATIVE_COLORIMETRIC,0)) == 0) {
-      error(-1, "Can't create transform");
+      error(errSyntaxWarning, -1, "Can't create transform");
       cs->transform = NULL;
     } else {
       cs->transform = new GfxColorTransform(transform);
@@ -1515,7 +1630,7 @@ GfxColorSpace *GfxICCBasedColorSpace::parse(Array *arr, Gfx *gfx) {
       if ((transform = cmsCreateTransform(hp,
 	    CHANNELS_SH(nCompsA) | BYTES_SH(1),dhp,
 	    TYPE_RGB_8,INTENT_RELATIVE_COLORIMETRIC,0)) == 0) {
-	error(-1, "Can't create transform");
+	error(errSyntaxWarning, -1, "Can't create transform");
 	cs->lineTransform = NULL;
       } else {
 	cs->lineTransform = new GfxColorTransform(transform);
@@ -1583,7 +1698,7 @@ void GfxICCBasedColorSpace::getRGBLine(Guchar *in, unsigned int *out,
 				       int length) {
 #ifdef USE_CMS
   if (lineTransform != 0) {
-    Guchar* tmp = (Guchar *)gmallocn(nComps * length, sizeof(Guchar));
+    Guchar* tmp = (Guchar *)gmallocn(3 * length, sizeof(Guchar));
     lineTransform->doTransform(in, tmp, length);
     for (int i = 0; i < length; ++i) {
         Guchar *current = tmp + (i * 3);
@@ -1595,6 +1710,47 @@ void GfxICCBasedColorSpace::getRGBLine(Guchar *in, unsigned int *out,
   }
 #else
   alt->getRGBLine(in, out, length);
+#endif
+}
+
+void GfxICCBasedColorSpace::getRGBLine(Guchar *in, Guchar *out, int length) {
+#ifdef USE_CMS
+  if (lineTransform != 0) {
+    Guchar* tmp = (Guchar *)gmallocn(3 * length, sizeof(Guchar));
+    lineTransform->doTransform(in, tmp, length);
+    Guchar *current = tmp;
+    for (int i = 0; i < length; ++i) {
+        *out++ = *current++;
+        *out++ = *current++;
+        *out++ = *current++;
+    }
+    gfree(tmp);
+  } else {
+    alt->getRGBLine(in, out, length);
+  }
+#else
+  alt->getRGBLine(in, out, length);
+#endif
+}
+
+void GfxICCBasedColorSpace::getRGBXLine(Guchar *in, Guchar *out, int length) {
+#ifdef USE_CMS
+  if (lineTransform != 0) {
+    Guchar* tmp = (Guchar *)gmallocn(3 * length, sizeof(Guchar));
+    lineTransform->doTransform(in, tmp, length);
+    Guchar *current = tmp;
+    for (int i = 0; i < length; ++i) {
+        *out++ = *current++;
+        *out++ = *current++;
+        *out++ = *current++;
+        *out++ = 255;
+    }
+    gfree(tmp);
+  } else {
+    alt->getRGBXLine(in, out, length);
+  }
+#else
+  alt->getRGBXLine(in, out, length);
 #endif
 }
 
@@ -1711,17 +1867,17 @@ GfxColorSpace *GfxIndexedColorSpace::parse(Array *arr, Gfx *gfx) {
   int n, i, j;
 
   if (arr->getLength() != 4) {
-    error(-1, "Bad Indexed color space");
+    error(errSyntaxWarning, -1, "Bad Indexed color space");
     goto err1;
   }
   arr->get(1, &obj1);
   if (!(baseA = GfxColorSpace::parse(&obj1, gfx))) {
-    error(-1, "Bad Indexed color space (base color space)");
+    error(errSyntaxWarning, -1, "Bad Indexed color space (base color space)");
     goto err2;
   }
   obj1.free();
   if (!arr->get(2, &obj1)->isInt()) {
-    error(-1, "Bad Indexed color space (hival)");
+    error(errSyntaxWarning, -1, "Bad Indexed color space (hival)");
     delete baseA;
     goto err2;
   }
@@ -1734,7 +1890,7 @@ GfxColorSpace *GfxIndexedColorSpace::parse(Array *arr, Gfx *gfx) {
     int previousValue = indexHighA;
     if (indexHighA < 0) indexHighA = 0;
     else indexHighA = 255;
-    error(-1, "Bad Indexed color space (invalid indexHigh value, was %d using %d to try to recover)", previousValue, indexHighA);
+    error(errSyntaxWarning, -1, "Bad Indexed color space (invalid indexHigh value, was {0:d} using {1:d} to try to recover)", previousValue, indexHighA);
   }
   obj1.free();
   cs = new GfxIndexedColorSpace(baseA, indexHighA);
@@ -1745,14 +1901,14 @@ GfxColorSpace *GfxIndexedColorSpace::parse(Array *arr, Gfx *gfx) {
     for (i = 0; i <= indexHighA; ++i) {
       const int readChars = obj1.streamGetChars(n, &cs->lookup[i*n]);
       for (j = readChars; j < n; ++j) {
-        error(-1, "Bad Indexed color space (lookup table stream too short) padding with zeroes");
+        error(errSyntaxWarning, -1, "Bad Indexed color space (lookup table stream too short) padding with zeroes");
         cs->lookup[i*n + j] = 0;
       }
     }
     obj1.streamClose();
   } else if (obj1.isString()) {
     if (obj1.getString()->getLength() < (indexHighA + 1) * n) {
-      error(-1, "Bad Indexed color space (lookup table string too short)");
+      error(errSyntaxWarning, -1, "Bad Indexed color space (lookup table string too short)");
       goto err3;
     }
     s = obj1.getString()->getCString();
@@ -1762,7 +1918,7 @@ GfxColorSpace *GfxIndexedColorSpace::parse(Array *arr, Gfx *gfx) {
       }
     }
   } else {
-    error(-1, "Bad Indexed color space (lookup table)");
+    error(errSyntaxWarning, -1, "Bad Indexed color space (lookup table)");
     goto err3;
   }
   obj1.free();
@@ -1818,6 +1974,38 @@ void GfxIndexedColorSpace::getRGBLine(Guchar *in, unsigned int *out, int length)
   gfree (line);
 }
 
+void GfxIndexedColorSpace::getRGBLine(Guchar *in, Guchar *out, int length)
+{
+  Guchar *line;
+  int i, j, n;
+
+  n = base->getNComps();
+  line = (Guchar *) gmallocn (length, n);
+  for (i = 0; i < length; i++)
+    for (j = 0; j < n; j++)
+      line[i * n + j] = lookup[in[i] * n + j];
+
+  base->getRGBLine(line, out, length);
+
+  gfree (line);
+}
+
+void GfxIndexedColorSpace::getRGBXLine(Guchar *in, Guchar *out, int length)
+{
+  Guchar *line;
+  int i, j, n;
+
+  n = base->getNComps();
+  line = (Guchar *) gmallocn (length, n);
+  for (i = 0; i < length; i++)
+    for (j = 0; j < n; j++)
+      line[i * n + j] = lookup[in[i] * n + j];
+
+  base->getRGBXLine(line, out, length);
+
+  gfree (line);
+}
+
 void GfxIndexedColorSpace::getCMYK(GfxColor *color, GfxCMYK *cmyk) {
   GfxColor color2;
 
@@ -1867,18 +2055,18 @@ GfxColorSpace *GfxSeparationColorSpace::parse(Array *arr, Gfx *gfx) {
   Object obj1;
 
   if (arr->getLength() != 4) {
-    error(-1, "Bad Separation color space");
+    error(errSyntaxWarning, -1, "Bad Separation color space");
     goto err1;
   }
   if (!arr->get(1, &obj1)->isName()) {
-    error(-1, "Bad Separation color space (name)");
+    error(errSyntaxWarning, -1, "Bad Separation color space (name)");
     goto err2;
   }
   nameA = new GooString(obj1.getName());
   obj1.free();
   arr->get(2, &obj1);
   if (!(altA = GfxColorSpace::parse(&obj1, gfx))) {
-    error(-1, "Bad Separation color space (alternate color space)");
+    error(errSyntaxWarning, -1, "Bad Separation color space (alternate color space)");
     goto err3;
   }
   obj1.free();
@@ -1992,22 +2180,22 @@ GfxColorSpace *GfxDeviceNColorSpace::parse(Array *arr, Gfx *gfx) {
   int i;
 
   if (arr->getLength() != 4 && arr->getLength() != 5) {
-    error(-1, "Bad DeviceN color space");
+    error(errSyntaxWarning, -1, "Bad DeviceN color space");
     goto err1;
   }
   if (!arr->get(1, &obj1)->isArray()) {
-    error(-1, "Bad DeviceN color space (names)");
+    error(errSyntaxWarning, -1, "Bad DeviceN color space (names)");
     goto err2;
   }
   nCompsA = obj1.arrayGetLength();
   if (nCompsA > gfxColorMaxComps) {
-    error(-1, "DeviceN color space with too many (%d > %d) components",
+    error(errSyntaxWarning, -1, "DeviceN color space with too many ({0:d} > {1:d}) components",
 	  nCompsA, gfxColorMaxComps);
     nCompsA = gfxColorMaxComps;
   }
   for (i = 0; i < nCompsA; ++i) {
     if (!obj1.arrayGet(i, &obj2)->isName()) {
-      error(-1, "Bad DeviceN color space (names)");
+      error(errSyntaxWarning, -1, "Bad DeviceN color space (names)");
       obj2.free();
       goto err2;
     }
@@ -2017,7 +2205,7 @@ GfxColorSpace *GfxDeviceNColorSpace::parse(Array *arr, Gfx *gfx) {
   obj1.free();
   arr->get(2, &obj1);
   if (!(altA = GfxColorSpace::parse(&obj1, gfx))) {
-    error(-1, "Bad DeviceN color space (alternate color space)");
+    error(errSyntaxWarning, -1, "Bad DeviceN color space (alternate color space)");
     goto err3;
   }
   obj1.free();
@@ -2126,14 +2314,14 @@ GfxColorSpace *GfxPatternColorSpace::parse(Array *arr, Gfx *gfx) {
   Object obj1;
 
   if (arr->getLength() != 1 && arr->getLength() != 2) {
-    error(-1, "Bad Pattern color space");
+    error(errSyntaxWarning, -1, "Bad Pattern color space");
     return NULL;
   }
   underA = NULL;
   if (arr->getLength() == 2) {
     arr->get(1, &obj1);
     if (!(underA = GfxColorSpace::parse(&obj1, gfx))) {
-      error(-1, "Bad Pattern color space (underlying color space)");
+      error(errSyntaxWarning, -1, "Bad Pattern color space (underlying color space)");
       obj1.free();
       return NULL;
     }
@@ -2215,14 +2403,14 @@ GfxTilingPattern *GfxTilingPattern::parse(Object *patObj) {
     paintTypeA = obj1.getInt();
   } else {
     paintTypeA = 1;
-    error(-1, "Invalid or missing PaintType in pattern");
+    error(errSyntaxWarning, -1, "Invalid or missing PaintType in pattern");
   }
   obj1.free();
   if (dict->lookup("TilingType", &obj1)->isInt()) {
     tilingTypeA = obj1.getInt();
   } else {
     tilingTypeA = 1;
-    error(-1, "Invalid or missing TilingType in pattern");
+    error(errSyntaxWarning, -1, "Invalid or missing TilingType in pattern");
   }
   obj1.free();
   bboxA[0] = bboxA[1] = 0;
@@ -2236,27 +2424,27 @@ GfxTilingPattern *GfxTilingPattern::parse(Object *patObj) {
       obj2.free();
     }
   } else {
-    error(-1, "Invalid or missing BBox in pattern");
+    error(errSyntaxWarning, -1, "Invalid or missing BBox in pattern");
   }
   obj1.free();
   if (dict->lookup("XStep", &obj1)->isNum()) {
     xStepA = obj1.getNum();
   } else {
     xStepA = 1;
-    error(-1, "Invalid or missing XStep in pattern");
+    error(errSyntaxWarning, -1, "Invalid or missing XStep in pattern");
   }
   obj1.free();
   if (dict->lookup("YStep", &obj1)->isNum()) {
     yStepA = obj1.getNum();
   } else {
     yStepA = 1;
-    error(-1, "Invalid or missing YStep in pattern");
+    error(errSyntaxWarning, -1, "Invalid or missing YStep in pattern");
   }
   obj1.free();
   if (!dict->lookup("Resources", &resDictA)->isDict()) {
     resDictA.free();
     resDictA.initNull();
-    error(-1, "Invalid or missing Resources in pattern");
+    error(errSyntaxWarning, -1, "Invalid or missing Resources in pattern");
   }
   matrixA[0] = 1; matrixA[1] = 0;
   matrixA[2] = 0; matrixA[3] = 1;
@@ -2415,7 +2603,7 @@ GfxShading *GfxShading::parse(Object *obj, Gfx *gfx) {
   }
 
   if (!dict->lookup("ShadingType", &obj1)->isInt()) {
-    error(-1, "Invalid ShadingType in shading dictionary");
+    error(errSyntaxWarning, -1, "Invalid ShadingType in shading dictionary");
     obj1.free();
     return NULL;
   }
@@ -2436,7 +2624,7 @@ GfxShading *GfxShading::parse(Object *obj, Gfx *gfx) {
     if (obj->isStream()) {
       shading = GfxGouraudTriangleShading::parse(4, dict, obj->getStream(), gfx);
     } else {
-      error(-1, "Invalid Type 4 shading object");
+      error(errSyntaxWarning, -1, "Invalid Type 4 shading object");
       goto err1;
     }
     break;
@@ -2444,7 +2632,7 @@ GfxShading *GfxShading::parse(Object *obj, Gfx *gfx) {
     if (obj->isStream()) {
       shading = GfxGouraudTriangleShading::parse(5, dict, obj->getStream(), gfx);
     } else {
-      error(-1, "Invalid Type 5 shading object");
+      error(errSyntaxWarning, -1, "Invalid Type 5 shading object");
       goto err1;
     }
     break;
@@ -2452,7 +2640,7 @@ GfxShading *GfxShading::parse(Object *obj, Gfx *gfx) {
     if (obj->isStream()) {
       shading = GfxPatchMeshShading::parse(6, dict, obj->getStream(), gfx);
     } else {
-      error(-1, "Invalid Type 6 shading object");
+      error(errSyntaxWarning, -1, "Invalid Type 6 shading object");
       goto err1;
     }
     break;
@@ -2460,12 +2648,12 @@ GfxShading *GfxShading::parse(Object *obj, Gfx *gfx) {
     if (obj->isStream()) {
       shading = GfxPatchMeshShading::parse(7, dict, obj->getStream(), gfx);
     } else {
-      error(-1, "Invalid Type 7 shading object");
+      error(errSyntaxWarning, -1, "Invalid Type 7 shading object");
       goto err1;
     }
     break;
   default:
-    error(-1, "Unimplemented shading type %d", typeA);
+    error(errSyntaxWarning, -1, "Unimplemented shading type {0:d}", typeA);
     goto err1;
   }
 
@@ -2481,7 +2669,7 @@ GBool GfxShading::init(Dict *dict, Gfx *gfx) {
 
   dict->lookup("ColorSpace", &obj1);
   if (!(colorSpace = GfxColorSpace::parse(&obj1, gfx))) {
-    error(-1, "Bad color space in shading dictionary");
+    error(errSyntaxWarning, -1, "Bad color space in shading dictionary");
     obj1.free();
     return gFalse;
   }
@@ -2499,7 +2687,7 @@ GBool GfxShading::init(Dict *dict, Gfx *gfx) {
 	obj2.free();
       }
     } else {
-      error(-1, "Bad Background in shading dictionary");
+      error(errSyntaxWarning, -1, "Bad Background in shading dictionary");
     }
   }
   obj1.free();
@@ -2508,17 +2696,27 @@ GBool GfxShading::init(Dict *dict, Gfx *gfx) {
   hasBBox = gFalse;
   if (dict->lookup("BBox", &obj1)->isArray()) {
     if (obj1.arrayGetLength() == 4) {
-      hasBBox = gTrue;
-      xMin = obj1.arrayGet(0, &obj2)->getNum();
+      Object obj3, obj4, obj5;
+      obj1.arrayGet(0, &obj2);
+      obj1.arrayGet(1, &obj3);
+      obj1.arrayGet(2, &obj4);
+      obj1.arrayGet(3, &obj5);
+      if (obj2.isNum() && obj3.isNum() && obj4.isNum() && obj5.isNum())
+      {
+        hasBBox = gTrue;
+        xMin = obj2.getNum();
+        yMin = obj3.getNum();
+        xMax = obj4.getNum();
+        yMax = obj5.getNum();
+      } else {
+        error(errSyntaxWarning, -1, "Bad BBox in shading dictionary (Values not numbers)");
+      }
       obj2.free();
-      yMin = obj1.arrayGet(1, &obj2)->getNum();
-      obj2.free();
-      xMax = obj1.arrayGet(2, &obj2)->getNum();
-      obj2.free();
-      yMax = obj1.arrayGet(3, &obj2)->getNum();
-      obj2.free();
+      obj3.free();
+      obj4.free();
+      obj5.free();
     } else {
-      error(-1, "Bad BBox in shading dictionary");
+      error(errSyntaxWarning, -1, "Bad BBox in shading dictionary");
     }
   }
   obj1.free();
@@ -2625,7 +2823,7 @@ GfxFunctionShading *GfxFunctionShading::parse(Dict *dict, Gfx *gfx) {
   if (obj1.isArray()) {
     nFuncsA = obj1.arrayGetLength();
     if (nFuncsA > gfxColorMaxComps) {
-      error(-1, "Invalid Function array in shading dictionary");
+      error(errSyntaxWarning, -1, "Invalid Function array in shading dictionary");
       goto err1;
     }
     for (i = 0; i < nFuncsA; ++i) {
@@ -2682,22 +2880,17 @@ void GfxFunctionShading::getColor(double x, double y, GfxColor *color) {
 }
 
 //------------------------------------------------------------------------
-// GfxAxialShading
+// GfxUnivariateShading
 //------------------------------------------------------------------------
 
-GfxAxialShading::GfxAxialShading(double x0A, double y0A,
-				 double x1A, double y1A,
-				 double t0A, double t1A,
-				 Function **funcsA, int nFuncsA,
-				 GBool extend0A, GBool extend1A):
-  GfxShading(2)
+GfxUnivariateShading::GfxUnivariateShading(int typeA,
+					   double t0A, double t1A,
+					   Function **funcsA, int nFuncsA,
+					   GBool extend0A, GBool extend1A):
+  GfxShading(typeA)
 {
   int i;
 
-  x0 = x0A;
-  y0 = y0A;
-  x1 = x1A;
-  y1 = y1A;
   t0 = t0A;
   t1 = t1A;
   nFuncs = nFuncsA;
@@ -2706,17 +2899,19 @@ GfxAxialShading::GfxAxialShading(double x0A, double y0A,
   }
   extend0 = extend0A;
   extend1 = extend1A;
+
+  cacheSize = 0;
+  lastMatch = 0;
+  cacheBounds = NULL;
+  cacheCoeff = NULL;
+  cacheValues = NULL;
 }
 
-GfxAxialShading::GfxAxialShading(GfxAxialShading *shading):
+GfxUnivariateShading::GfxUnivariateShading(GfxUnivariateShading *shading):
   GfxShading(shading)
 {
   int i;
 
-  x0 = shading->x0;
-  y0 = shading->y0;
-  x1 = shading->x1;
-  y1 = shading->y1;
   t0 = shading->t0;
   t1 = shading->t1;
   nFuncs = shading->nFuncs;
@@ -2725,14 +2920,174 @@ GfxAxialShading::GfxAxialShading(GfxAxialShading *shading):
   }
   extend0 = shading->extend0;
   extend1 = shading->extend1;
+
+  cacheSize = 0;
+  lastMatch = 0;
+  cacheBounds = NULL;
+  cacheCoeff = NULL;
+  cacheValues = NULL;
 }
 
-GfxAxialShading::~GfxAxialShading() {
+GfxUnivariateShading::~GfxUnivariateShading() {
   int i;
 
   for (i = 0; i < nFuncs; ++i) {
     delete funcs[i];
   }
+
+  gfree (cacheBounds);
+}
+
+void GfxUnivariateShading::getColor(double t, GfxColor *color) {
+  double out[gfxColorMaxComps];
+  int i, nComps;
+
+  // NB: there can be one function with n outputs or n functions with
+  // one output each (where n = number of color components)
+  nComps = nFuncs * funcs[0]->getOutputSize();
+
+  if (cacheSize > 0) {
+    double x, ix, *l, *u, *upper;
+
+    if (cacheBounds[lastMatch - 1] >= t) {
+      upper = std::lower_bound (cacheBounds, cacheBounds + lastMatch - 1, t);
+      lastMatch = upper - cacheBounds;
+      lastMatch = std::min<int>(std::max<int>(1, lastMatch), cacheSize - 1);
+    } else if (cacheBounds[lastMatch] < t) {
+      upper = std::lower_bound (cacheBounds + lastMatch + 1, cacheBounds + cacheSize, t);
+      lastMatch = upper - cacheBounds;
+      lastMatch = std::min<int>(std::max<int>(1, lastMatch), cacheSize - 1);
+    }
+
+    x = (t - cacheBounds[lastMatch-1]) * cacheCoeff[lastMatch];
+    ix = 1.0 - x;
+    u = cacheValues + lastMatch * nComps;
+    l = u - nComps;
+
+    for (i = 0; i < nComps; ++i) {
+      out[i] = ix * l[i] + x * u[i];
+    }
+  } else {
+    for (i = 0; i < nComps; ++i) {
+      out[i] = 0;
+    }
+    for (i = 0; i < nFuncs; ++i) {
+      funcs[i]->transform(&t, &out[i]);
+    }
+  }
+
+  for (i = 0; i < nComps; ++i) {
+    color->c[i] = dblToCol(out[i]);
+  }
+}
+
+void GfxUnivariateShading::setupCache(const Matrix *ctm,
+				      double xMin, double yMin,
+				      double xMax, double yMax) {
+  double sMin, sMax, tMin, tMax, upperBound;
+  int i, j, nComps, maxSize;
+
+  gfree (cacheBounds);
+  cacheBounds = NULL;
+  cacheSize = 0;
+
+  // NB: there can be one function with n outputs or n functions with
+  // one output each (where n = number of color components)
+  nComps = nFuncs * funcs[0]->getOutputSize();
+
+  getParameterRange(&sMin, &sMax, xMin, yMin, xMax, yMax);
+  upperBound = ctm->norm() * getDistance(sMin, sMax);
+  maxSize = ceil(upperBound);
+  maxSize = std::max<int>(maxSize, 2);
+
+  {
+    double x[4], y[4];
+
+    ctm->transform(xMin, yMin, &x[0], &y[0]);
+    ctm->transform(xMax, yMin, &x[1], &y[1]);
+    ctm->transform(xMin, yMax, &x[2], &y[2]);
+    ctm->transform(xMax, yMax, &x[3], &y[3]);
+
+    xMin = xMax = x[0];
+    yMin = yMax = y[0];
+    for (i = 1; i < 4; i++) {
+      xMin = std::min<double>(xMin, x[i]);
+      yMin = std::min<double>(yMin, y[i]);
+      xMax = std::max<double>(xMax, x[i]);
+      yMax = std::max<double>(yMax, y[i]);
+    }
+  }
+
+  if (maxSize > (xMax-xMin) * (yMax-yMin)) {
+    return;
+  }
+
+  if (t0 < t1) {
+    tMin = t0 + sMin * (t1 - t0);
+    tMax = t0 + sMax * (t1 - t0);
+  } else {
+    tMin = t0 + sMax * (t1 - t0);
+    tMax = t0 + sMin * (t1 - t0);
+  }
+
+  cacheBounds = (double *)gmallocn(maxSize, sizeof(double) * (nComps + 2));
+  cacheCoeff = cacheBounds + maxSize;
+  cacheValues = cacheCoeff + maxSize;
+
+  if (cacheSize != 0) {
+    for (j = 0; j < cacheSize; ++j) {
+      cacheCoeff[j] = 1 / (cacheBounds[j+1] - cacheBounds[j]);
+    }
+  } else if (tMax != tMin) {
+    double step = (tMax - tMin) / (maxSize - 1);
+    double coeff = (maxSize - 1) / (tMax - tMin);
+
+    cacheSize = maxSize;
+
+    for (j = 0; j < cacheSize; ++j) {
+      cacheBounds[j] = tMin + j * step;
+      cacheCoeff[j] = coeff;
+
+      for (i = 0; i < nComps; ++i) {
+	cacheValues[j*nComps + i] = 0;
+      }
+      for (i = 0; i < nFuncs; ++i) {
+	funcs[i]->transform(&cacheBounds[j], &cacheValues[j*nComps + i]);
+      }
+    }
+  }
+
+  lastMatch = 1;
+}
+
+
+//------------------------------------------------------------------------
+// GfxAxialShading
+//------------------------------------------------------------------------
+
+GfxAxialShading::GfxAxialShading(double x0A, double y0A,
+				 double x1A, double y1A,
+				 double t0A, double t1A,
+				 Function **funcsA, int nFuncsA,
+				 GBool extend0A, GBool extend1A):
+  GfxUnivariateShading(2, t0A, t1A, funcsA, nFuncsA, extend0A, extend1A)
+{
+  x0 = x0A;
+  y0 = y0A;
+  x1 = x1A;
+  y1 = y1A;
+}
+
+GfxAxialShading::GfxAxialShading(GfxAxialShading *shading):
+  GfxUnivariateShading(shading)
+{
+  x0 = shading->x0;
+  y0 = shading->y0;
+  x1 = shading->x1;
+  y1 = shading->y1;
+}
+
+GfxAxialShading::~GfxAxialShading() {
 }
 
 GfxAxialShading *GfxAxialShading::parse(Dict *dict, Gfx *gfx) {
@@ -2748,16 +3103,23 @@ GfxAxialShading *GfxAxialShading::parse(Dict *dict, Gfx *gfx) {
   x0A = y0A = x1A = y1A = 0;
   if (dict->lookup("Coords", &obj1)->isArray() &&
       obj1.arrayGetLength() == 4) {
-    x0A = obj1.arrayGet(0, &obj2)->getNum();
+    Object obj3, obj4, obj5;
+    obj1.arrayGet(0, &obj2);
+    obj1.arrayGet(1, &obj3);
+    obj1.arrayGet(2, &obj4);
+    obj1.arrayGet(3, &obj5);
+    if (obj2.isNum() && obj3.isNum() && obj4.isNum() && obj5.isNum()) {
+      x0A = obj2.getNum();
+      y0A = obj3.getNum();
+      x1A = obj4.getNum();
+      y1A = obj5.getNum();
+    }
     obj2.free();
-    y0A = obj1.arrayGet(1, &obj2)->getNum();
-    obj2.free();
-    x1A = obj1.arrayGet(2, &obj2)->getNum();
-    obj2.free();
-    y1A = obj1.arrayGet(3, &obj2)->getNum();
-    obj2.free();
+    obj3.free();
+    obj4.free();
+    obj5.free();
   } else {
-    error(-1, "Missing or invalid Coords in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid Coords in shading dictionary");
     goto err1;
   }
   obj1.free();
@@ -2766,10 +3128,15 @@ GfxAxialShading *GfxAxialShading::parse(Dict *dict, Gfx *gfx) {
   t1A = 1;
   if (dict->lookup("Domain", &obj1)->isArray() &&
       obj1.arrayGetLength() == 2) {
-    t0A = obj1.arrayGet(0, &obj2)->getNum();
+    Object obj3;
+    obj1.arrayGet(0, &obj2);
+    obj1.arrayGet(1, &obj3);
+    if (obj2.isNum() && obj3.isNum()) {
+      t0A = obj2.getNum();
+      t1A = obj3.getNum();
+    }
     obj2.free();
-    t1A = obj1.arrayGet(1, &obj2)->getNum();
-    obj2.free();
+    obj3.free();
   }
   obj1.free();
 
@@ -2777,7 +3144,7 @@ GfxAxialShading *GfxAxialShading::parse(Dict *dict, Gfx *gfx) {
   if (obj1.isArray()) {
     nFuncsA = obj1.arrayGetLength();
     if (nFuncsA > gfxColorMaxComps) {
-      error(-1, "Invalid Function array in shading dictionary");
+      error(errSyntaxWarning, -1, "Invalid Function array in shading dictionary");
       goto err1;
     }
     for (i = 0; i < nFuncsA; ++i) {
@@ -2824,79 +3191,101 @@ GfxShading *GfxAxialShading::copy() {
   return new GfxAxialShading(this);
 }
 
-void GfxAxialShading::getColor(double t, GfxColor *color) {
-  double out[gfxColorMaxComps];
-  int i;
+double GfxAxialShading::getDistance(double sMin, double sMax) {
+  double xMin, yMin, xMax, yMax;
 
-  // NB: there can be one function with n outputs or n functions with
-  // one output each (where n = number of color components)
-  for (i = 0; i < gfxColorMaxComps; ++i) {
-    out[i] = 0;
-  }
-  for (i = 0; i < nFuncs; ++i) {
-    funcs[i]->transform(&t, &out[i]);
-  }
-  for (i = 0; i < gfxColorMaxComps; ++i) {
-    color->c[i] = dblToCol(out[i]);
-  }
+  xMin = x0 + sMin * (x1 - x0);
+  yMin = y0 + sMin * (y1 - y0);
+  xMax = x0 + sMax * (x1 - x0);
+  yMax = y0 + sMax * (y1 - y0);
+
+  return hypot(xMax-xMin, yMax-yMin);
 }
+
+void GfxAxialShading::getParameterRange(double *lower, double *upper,
+					double xMin, double yMin,
+					double xMax, double yMax) {
+  double pdx, pdy, invsqnorm, tdx, tdy, t, range[2];
+
+  // Linear gradients are orthogonal to the line passing through their
+  // extremes. Because of convexity, the parameter range can be
+  // computed as the convex hull (one the real line) of the parameter
+  // values of the 4 corners of the box.
+  //
+  // The parameter value t for a point (x,y) can be computed as:
+  //
+  //   t = (p2 - p1) . (x,y) / |p2 - p1|^2
+  //
+  // t0  is the t value for the top left corner
+  // tdx is the difference between left and right corners
+  // tdy is the difference between top and bottom corners
+
+  pdx = x1 - x0;
+  pdy = y1 - y0;
+  invsqnorm = 1.0 / (pdx * pdx + pdy * pdy);
+  pdx *= invsqnorm;
+  pdy *= invsqnorm;
+
+  t = (xMin - x0) * pdx + (yMin - y0) * pdy;
+  tdx = (xMax - xMin) * pdx;
+  tdy = (yMax - yMin) * pdy;
+
+  // Because of the linearity of the t value, tdx can simply be added
+  // the t0 to move along the top edge. After this, *lower and *upper
+  // represent the parameter range for the top edge, so extending it
+  // to include the whole box simply requires adding tdy to the
+  // correct extreme.
+
+  range[0] = range[1] = t;
+  if (tdx < 0)
+    range[0] += tdx;
+  else
+    range[1] += tdx;
+
+  if (tdy < 0)
+    range[0] += tdy;
+  else
+    range[1] += tdy;
+
+  *lower = std::max<double>(0., std::min<double>(1., range[0]));
+  *upper = std::max<double>(0., std::min<double>(1., range[1]));
+}					
 
 //------------------------------------------------------------------------
 // GfxRadialShading
 //------------------------------------------------------------------------
+
+#ifndef RADIAL_EPSILON
+#define RADIAL_EPSILON	(1. / 1024 / 1024)
+#endif
 
 GfxRadialShading::GfxRadialShading(double x0A, double y0A, double r0A,
 				   double x1A, double y1A, double r1A,
 				   double t0A, double t1A,
 				   Function **funcsA, int nFuncsA,
 				   GBool extend0A, GBool extend1A):
-  GfxShading(3)
+  GfxUnivariateShading(3, t0A, t1A, funcsA, nFuncsA, extend0A, extend1A)
 {
-  int i;
-
   x0 = x0A;
   y0 = y0A;
   r0 = r0A;
   x1 = x1A;
   y1 = y1A;
   r1 = r1A;
-  t0 = t0A;
-  t1 = t1A;
-  nFuncs = nFuncsA;
-  for (i = 0; i < nFuncs; ++i) {
-    funcs[i] = funcsA[i];
-  }
-  extend0 = extend0A;
-  extend1 = extend1A;
 }
 
 GfxRadialShading::GfxRadialShading(GfxRadialShading *shading):
-  GfxShading(shading)
+  GfxUnivariateShading(shading)
 {
-  int i;
-
   x0 = shading->x0;
   y0 = shading->y0;
   r0 = shading->r0;
   x1 = shading->x1;
   y1 = shading->y1;
   r1 = shading->r1;
-  t0 = shading->t0;
-  t1 = shading->t1;
-  nFuncs = shading->nFuncs;
-  for (i = 0; i < nFuncs; ++i) {
-    funcs[i] = shading->funcs[i]->copy();
-  }
-  extend0 = shading->extend0;
-  extend1 = shading->extend1;
 }
 
 GfxRadialShading::~GfxRadialShading() {
-  int i;
-
-  for (i = 0; i < nFuncs; ++i) {
-    delete funcs[i];
-  }
 }
 
 GfxRadialShading *GfxRadialShading::parse(Dict *dict, Gfx *gfx) {
@@ -2925,7 +3314,7 @@ GfxRadialShading *GfxRadialShading::parse(Dict *dict, Gfx *gfx) {
     r1A = obj1.arrayGet(5, &obj2)->getNum();
     obj2.free();
   } else {
-    error(-1, "Missing or invalid Coords in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid Coords in shading dictionary");
     goto err1;
   }
   obj1.free();
@@ -2945,7 +3334,7 @@ GfxRadialShading *GfxRadialShading::parse(Dict *dict, Gfx *gfx) {
   if (obj1.isArray()) {
     nFuncsA = obj1.arrayGetLength();
     if (nFuncsA > gfxColorMaxComps) {
-      error(-1, "Invalid Function array in shading dictionary");
+      error(errSyntaxWarning, -1, "Invalid Function array in shading dictionary");
       goto err1;
     }
     for (i = 0; i < nFuncsA; ++i) {
@@ -2992,21 +3381,313 @@ GfxShading *GfxRadialShading::copy() {
   return new GfxRadialShading(this);
 }
 
-void GfxRadialShading::getColor(double t, GfxColor *color) {
-  double out[gfxColorMaxComps];
-  int i;
+double GfxRadialShading::getDistance(double sMin, double sMax) {
+  double xMin, yMin, rMin, xMax, yMax, rMax;
 
-  // NB: there can be one function with n outputs or n functions with
-  // one output each (where n = number of color components)
-  for (i = 0; i < gfxColorMaxComps; ++i) {
-    out[i] = 0;
+  xMin = x0 + sMin * (x1 - x0);
+  yMin = y0 + sMin * (y1 - y0);
+  rMin = r0 + sMin * (r1 - r0);
+
+  xMax = x0 + sMax * (x1 - x0);
+  yMax = y0 + sMax * (y1 - y0);
+  rMax = r0 + sMax * (r1 - r0);
+
+  return hypot(xMax-xMin, yMax-yMin) + fabs(rMax-rMin);
+}
+
+// extend range, adapted from cairo, radialExtendRange
+static GBool
+radialExtendRange (double range[2], double value, GBool valid)
+{
+  if (!valid)
+    range[0] = range[1] = value;
+  else if (value < range[0])
+    range[0] = value;
+  else if (value > range[1])
+    range[1] = value;
+
+  return gTrue;
+}
+
+inline void radialEdge(double num, double den, double delta, double lower, double upper,
+					   double dr, double mindr, GBool &valid, double *range)
+{ 
+  if (fabs (den) >= RADIAL_EPSILON) {					
+    double t_edge, v;							    									
+    t_edge = (num) / (den);						
+    v = t_edge * (delta);						
+    if (t_edge * dr >= mindr && (lower) <= v && v <= (upper))		
+      valid = radialExtendRange (range, t_edge, valid);			
   }
-  for (i = 0; i < nFuncs; ++i) {
-    funcs[i]->transform(&t, &out[i]);
+}
+
+inline void radialCorner1(double x, double y, double &b, double dx, double dy, double cr, 
+					   double dr, double mindr, GBool &valid, double *range)
+{
+    b = (x) * dx + (y) * dy + cr * dr;				
+    if (fabs (b) >= RADIAL_EPSILON) {				
+      double t_corner;						
+      double x2 = (x) * (x);					
+      double y2 = (y) * (y);					
+      double cr2 = (cr) * (cr);					
+      double c = x2 + y2 - cr2;					
+								
+      t_corner = 0.5 * c / b;					
+      if (t_corner * dr >= mindr)				
+	valid = radialExtendRange (range, t_corner, valid);	
+    }
+}
+
+inline void radialCorner2(double x, double y, double a, double &b, double &c, double &d, double dx, double dy, double cr,
+					   double inva, double dr, double mindr, GBool &valid, double *range)
+{
+    b = (x) * dx + (y) * dy + cr * dr;				
+    c = (x) * (x) + (y) * (y) - cr * cr;			
+    d = b * b - a * c;						
+    if (d >= 0) {						
+      double t_corner;						
+								
+      d = sqrt (d);						
+      t_corner = (b + d) * inva;				
+      if (t_corner * dr >= mindr)				
+	valid = radialExtendRange (range, t_corner, valid);	
+      t_corner = (b - d) * inva;				
+      if (t_corner * dr >= mindr)				
+	valid = radialExtendRange (range, t_corner, valid);	
+    }
+}
+void GfxRadialShading::getParameterRange(double *lower, double *upper,
+					 double xMin, double yMin,
+					 double xMax, double yMax) {
+  double cx, cy, cr, dx, dy, dr;
+  double a, x_focus, y_focus;
+  double mindr, minx, miny, maxx, maxy;
+  double range[2];
+  GBool valid;
+
+  // A radial pattern is considered degenerate if it can be
+  // represented as a solid or clear pattern.  This corresponds to one
+  // of the two cases:
+  //
+  // 1) The radii are both very small:
+  //      |dr| < FLT_EPSILON && min (r0, r1) < FLT_EPSILON
+  //
+  // 2) The two circles have about the same radius and are very
+  //    close to each other (approximately a cylinder gradient that
+  //    doesn't move with the parameter):
+  //      |dr| < FLT_EPSILON && max (|dx|, |dy|) < 2 * FLT_EPSILON
+
+  if (xMin >= xMax || yMin >=yMax || 
+      (fabs (r0 - r1) < RADIAL_EPSILON &&
+       (std::min<double>(r0, r1) < RADIAL_EPSILON ||
+	std::max<double>(fabs (x0 - x1), fabs (y0 - y1)) < 2 * RADIAL_EPSILON))) {
+    *lower = *upper = 0;
+    return;
   }
-  for (i = 0; i < gfxColorMaxComps; ++i) {
-    color->c[i] = dblToCol(out[i]);
+
+  range[0] = range[1] = 0;
+  valid = gFalse;
+
+  x_focus = y_focus = 0; // silence gcc
+
+  cx = x0;
+  cy = y0;
+  cr = r0;
+  dx = x1 - cx;
+  dy = y1 - cy;
+  dr = r1 - cr;
+
+  // translate by -(cx, cy) to simplify computations
+  xMin -= cx;
+  yMin -= cy;
+  xMax -= cx;
+  yMax -= cy;
+
+  // enlarge boundaries slightly to avoid rounding problems in the
+  // parameter range computation
+  xMin -= RADIAL_EPSILON;
+  yMin -= RADIAL_EPSILON;
+  xMax += RADIAL_EPSILON;
+  yMax += RADIAL_EPSILON;
+
+  // enlarge boundaries even more to avoid rounding problems when
+  // testing if a point belongs to the box
+  minx = xMin - RADIAL_EPSILON;
+  miny = yMin - RADIAL_EPSILON;
+  maxx = xMax + RADIAL_EPSILON;
+  maxy = yMax + RADIAL_EPSILON;
+
+  // we dont' allow negative radiuses, so we will be checking that
+  // t*dr >= mindr to consider t valid
+  mindr = -(cr + RADIAL_EPSILON);
+
+  // After the previous transformations, the start circle is centered
+  // in the origin and has radius cr. A 1-unit change in the t
+  // parameter corresponds to dx,dy,dr changes in the x,y,r of the
+  // circle (center coordinates, radius).
+  //
+  // To compute the minimum range needed to correctly draw the
+  // pattern, we start with an empty range and extend it to include
+  // the circles touching the bounding box or within it.
+    
+  // Focus, the point where the circle has radius == 0.
+  //
+  // r = cr + t * dr = 0
+  // t = -cr / dr
+  //
+  // If the radius is constant (dr == 0) there is no focus (the
+  // gradient represents a cylinder instead of a cone).
+  if (fabs (dr) >= RADIAL_EPSILON) {
+    double t_focus;
+
+    t_focus = -cr / dr;
+    x_focus = t_focus * dx;
+    y_focus = t_focus * dy;
+    if (minx <= x_focus && x_focus <= maxx &&
+	miny <= y_focus && y_focus <= maxy)
+    {
+      valid = radialExtendRange (range, t_focus, valid);
+    }
   }
+
+  // Circles externally tangent to box edges.
+  //
+  // All circles have center in (dx, dy) * t
+  //
+  // If the circle is tangent to the line defined by the edge of the
+  // box, then at least one of the following holds true:
+  //
+  //   (dx*t) + (cr + dr*t) == x0 (left   edge)
+  //   (dx*t) - (cr + dr*t) == x1 (right  edge)
+  //   (dy*t) + (cr + dr*t) == y0 (top    edge)
+  //   (dy*t) - (cr + dr*t) == y1 (bottom edge)
+  //
+  // The solution is only valid if the tangent point is actually on
+  // the edge, i.e. if its y coordinate is in [y0,y1] for left/right
+  // edges and if its x coordinate is in [x0,x1] for top/bottom edges.
+  //
+  // For the first equation:
+  //
+  //   (dx + dr) * t = x0 - cr
+  //   t = (x0 - cr) / (dx + dr)
+  //   y = dy * t
+  //
+  // in the code this becomes:
+  //
+  //   t_edge = (num) / (den)
+  //   v = (delta) * t_edge
+  //
+  // If the denominator in t is 0, the pattern is tangent to a line
+  // parallel to the edge under examination. The corner-case where the
+  // boundary line is the same as the edge is handled by the focus
+  // point case and/or by the a==0 case.
+  
+  // circles tangent (externally) to left/right/top/bottom edge
+  radialEdge(xMin - cr, dx + dr, dy, miny, maxy, dr, mindr, valid, range);
+  radialEdge(xMax + cr, dx - dr, dy, miny, maxy, dr, mindr, valid, range);
+  radialEdge(yMin - cr, dy + dr, dx, minx, maxx, dr, mindr, valid, range);
+  radialEdge(yMax + cr, dy - dr, dx, minx, maxx, dr, mindr, valid, range);
+
+  // Circles passing through a corner.
+  //
+  // A circle passing through the point (x,y) satisfies:
+  //
+  // (x-t*dx)^2 + (y-t*dy)^2 == (cr + t*dr)^2
+  //
+  // If we set:
+  //   a = dx^2 + dy^2 - dr^2
+  //   b = x*dx + y*dy + cr*dr
+  //   c = x^2 + y^2 - cr^2
+  // we have:
+  //   a*t^2 - 2*b*t + c == 0
+    
+  a = dx * dx + dy * dy - dr * dr;
+  if (fabs (a) < RADIAL_EPSILON * RADIAL_EPSILON) {
+    double b;
+
+    // Ensure that gradients with both a and dr small are
+    // considered degenerate.
+    // The floating point version of the degeneracy test implemented
+    // in _radial_pattern_is_degenerate() is:
+    //
+    //  1) The circles are practically the same size:
+    //     |dr| < RADIAL_EPSILON
+    //  AND
+    //  2a) The circles are both very small:
+    //      min (r0, r1) < RADIAL_EPSILON
+    //   OR
+    //  2b) The circles are very close to each other:
+    //      max (|dx|, |dy|) < 2 * RADIAL_EPSILON
+    //
+    // Assuming that the gradient is not degenerate, we want to
+    // show that |a| < RADIAL_EPSILON^2 implies |dr| >= RADIAL_EPSILON.
+    //
+    // If the gradient is not degenerate yet it has |dr| <
+    // RADIAL_EPSILON, (2b) is false, thus:
+    //
+    //   max (|dx|, |dy|) >= 2*RADIAL_EPSILON
+    // which implies:
+    //   4*RADIAL_EPSILON^2 <= max (|dx|, |dy|)^2 <= dx^2 + dy^2
+    //
+    // From the definition of a, we get:
+    //   a = dx^2 + dy^2 - dr^2 < RADIAL_EPSILON^2
+    //   dx^2 + dy^2 - RADIAL_EPSILON^2 < dr^2
+    //   3*RADIAL_EPSILON^2 < dr^2
+    //
+    // which is inconsistent with the hypotheses, thus |dr| <
+    // RADIAL_EPSILON is false or the gradient is degenerate.
+	
+    assert (fabs (dr) >= RADIAL_EPSILON);
+
+    // If a == 0, all the circles are tangent to a line in the
+    // focus point. If this line is within the box extents, we
+    // should add the circle with infinite radius, but this would
+    // make the range unbounded. We will be limiting the range to
+    // [0,1] anyway, so we simply add the biggest legitimate
+    // circle (it happens for 0 or for 1).
+    if (dr < 0) {
+      valid = radialExtendRange (range, 0, valid);
+    } else {
+      valid = radialExtendRange (range, 1, valid);
+    }
+
+    // Nondegenerate, nonlimit circles passing through the corners.
+    //
+    // a == 0 && a*t^2 - 2*b*t + c == 0
+    //
+    // t = c / (2*b)
+    //
+    // The b == 0 case has just been handled, so we only have to
+    // compute this if b != 0.
+
+	// circles touching each corner
+	radialCorner1(xMin, yMin, b, dx, dy, cr, dr, mindr, valid, range);
+	radialCorner1(xMin, yMax, b, dx, dy, cr, dr, mindr, valid, range);
+	radialCorner1(xMax, yMin, b, dx, dy, cr, dr, mindr, valid, range);
+	radialCorner1(xMax, yMax, b, dx, dy, cr, dr, mindr, valid, range);
+  } else {
+    double inva, b, c, d;
+
+    inva = 1 / a;
+
+    // Nondegenerate, nonlimit circles passing through the corners.
+    //
+    // a != 0 && a*t^2 - 2*b*t + c == 0
+    //
+    // t = (b +- sqrt (b*b - a*c)) / a
+    //
+    // If the argument of sqrt() is negative, then no circle
+    // passes through the corner.
+
+    // circles touching each corner
+	radialCorner2(xMin, yMin, a, b, c, d, dx, dy, cr, inva, dr, mindr, valid, range);
+	radialCorner2(xMin, yMax, a, b, c, d, dx, dy, cr, inva, dr, mindr, valid, range);
+	radialCorner2(xMax, yMin, a, b, c, d, dx, dy, cr, inva, dr, mindr, valid, range);
+	radialCorner2(xMax, yMax, a, b, c, d, dx, dy, cr, inva, dr, mindr, valid, range);
+  }
+
+  *lower = std::max<double>(0., std::min<double>(1., range[0]));
+  *upper = std::max<double>(0., std::min<double>(1., range[1]));
 }
 
 //------------------------------------------------------------------------
@@ -3151,14 +3832,14 @@ GfxGouraudTriangleShading *GfxGouraudTriangleShading::parse(int typeA,
   if (dict->lookup("BitsPerCoordinate", &obj1)->isInt()) {
     coordBits = obj1.getInt();
   } else {
-    error(-1, "Missing or invalid BitsPerCoordinate in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid BitsPerCoordinate in shading dictionary");
     goto err2;
   }
   obj1.free();
   if (dict->lookup("BitsPerComponent", &obj1)->isInt()) {
     compBits = obj1.getInt();
   } else {
-    error(-1, "Missing or invalid BitsPerComponent in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid BitsPerComponent in shading dictionary");
     goto err2;
   }
   obj1.free();
@@ -3167,7 +3848,7 @@ GfxGouraudTriangleShading *GfxGouraudTriangleShading::parse(int typeA,
     if (dict->lookup("BitsPerFlag", &obj1)->isInt()) {
       flagBits = obj1.getInt();
     } else {
-      error(-1, "Missing or invalid BitsPerFlag in shading dictionary");
+      error(errSyntaxWarning, -1, "Missing or invalid BitsPerFlag in shading dictionary");
       goto err2;
     }
     obj1.free();
@@ -3175,7 +3856,7 @@ GfxGouraudTriangleShading *GfxGouraudTriangleShading::parse(int typeA,
     if (dict->lookup("VerticesPerRow", &obj1)->isInt()) {
       vertsPerRow = obj1.getInt();
     } else {
-      error(-1, "Missing or invalid VerticesPerRow in shading dictionary");
+      error(errSyntaxWarning, -1, "Missing or invalid VerticesPerRow in shading dictionary");
       goto err2;
     }
     obj1.free();
@@ -3201,7 +3882,7 @@ GfxGouraudTriangleShading *GfxGouraudTriangleShading::parse(int typeA,
     }
     nComps = i;
   } else {
-    error(-1, "Missing or invalid Decode array in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid Decode array in shading dictionary");
     goto err2;
   }
   obj1.free();
@@ -3210,7 +3891,7 @@ GfxGouraudTriangleShading *GfxGouraudTriangleShading::parse(int typeA,
     if (obj1.isArray()) {
       nFuncsA = obj1.arrayGetLength();
       if (nFuncsA > gfxColorMaxComps) {
-	error(-1, "Invalid Function array in shading dictionary");
+	error(errSyntaxWarning, -1, "Invalid Function array in shading dictionary");
 	goto err1;
       }
       for (i = 0; i < nFuncsA; ++i) {
@@ -3488,7 +4169,7 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
   double x[16], y[16];
   Guint xi, yi;
   double c[4][gfxColorMaxComps];
-  Guint ci[4];
+  Guint ci;
   GfxShadingBitBuf *bitBuf;
   Object obj1, obj2;
   int i, j;
@@ -3496,21 +4177,21 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
   if (dict->lookup("BitsPerCoordinate", &obj1)->isInt()) {
     coordBits = obj1.getInt();
   } else {
-    error(-1, "Missing or invalid BitsPerCoordinate in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid BitsPerCoordinate in shading dictionary");
     goto err2;
   }
   obj1.free();
   if (dict->lookup("BitsPerComponent", &obj1)->isInt()) {
     compBits = obj1.getInt();
   } else {
-    error(-1, "Missing or invalid BitsPerComponent in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid BitsPerComponent in shading dictionary");
     goto err2;
   }
   obj1.free();
   if (dict->lookup("BitsPerFlag", &obj1)->isInt()) {
     flagBits = obj1.getInt();
   } else {
-    error(-1, "Missing or invalid BitsPerFlag in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid BitsPerFlag in shading dictionary");
     goto err2;
   }
   obj1.free();
@@ -3535,7 +4216,7 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
     }
     nComps = i;
   } else {
-    error(-1, "Missing or invalid Decode array in shading dictionary");
+    error(errSyntaxWarning, -1, "Missing or invalid Decode array in shading dictionary");
     goto err2;
   }
   obj1.free();
@@ -3544,7 +4225,7 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
     if (obj1.isArray()) {
       nFuncsA = obj1.arrayGetLength();
       if (nFuncsA > gfxColorMaxComps) {
-	error(-1, "Invalid Function array in shading dictionary");
+	error(errSyntaxWarning, -1, "Invalid Function array in shading dictionary");
 	goto err1;
       }
       for (i = 0; i < nFuncsA; ++i) {
@@ -3606,10 +4287,10 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(int typeA, Dict *dict,
     }
     for (i = 0; i < nColors; ++i) {
       for (j = 0; j < nComps; ++j) {
-	if (!bitBuf->getBits(compBits, &ci[j])) {
+	if (!bitBuf->getBits(compBits, &ci)) {
 	  break;
 	}
-	c[i][j] = cMin[j] + cMul[j] * (double)ci[j];
+	c[i][j] = cMin[j] + cMul[j] * (double)ci;
 	if( nFuncsA == 0 ) {
 	  // ... and colorspace values can also be stored into doubles.
 	  // They will be casted later.
@@ -4342,6 +5023,95 @@ void GfxImageColorMap::getRGBLine(Guchar *in, unsigned int *out, int length) {
 
 }
 
+void GfxImageColorMap::getRGBLine(Guchar *in, Guchar *out, int length) {
+  int i, j;
+  Guchar *inp, *tmp_line;
+
+  if (!useRGBLine()) {
+    GfxRGB rgb;
+
+    inp = in;
+    for (i = 0; i < length; i++) {
+      getRGB (inp, &rgb);
+      *out++ = colToByte(rgb.r);
+      *out++ = colToByte(rgb.g);
+      *out++ = colToByte(rgb.b);
+      inp += nComps;
+    }
+    return;
+  }
+
+  switch (colorSpace->getMode()) {
+  case csIndexed:
+  case csSeparation:
+    tmp_line = (Guchar *) gmallocn (length, nComps2);
+    for (i = 0; i < length; i++) {
+      for (j = 0; j < nComps2; j++) {
+	tmp_line[i * nComps2 + j] = byte_lookup[in[i] * nComps2 + j];
+      }
+    }
+    colorSpace2->getRGBLine(tmp_line, out, length);
+    gfree (tmp_line);
+    break;
+
+  default:
+    inp = in;
+    for (j = 0; j < length; j++)
+      for (i = 0; i < nComps; i++) {
+	*inp = byte_lookup[*inp * nComps + i];
+	inp++;
+      }
+    colorSpace->getRGBLine(in, out, length);
+    break;
+  }
+
+}
+
+void GfxImageColorMap::getRGBXLine(Guchar *in, Guchar *out, int length) {
+  int i, j;
+  Guchar *inp, *tmp_line;
+
+  if (!useRGBLine()) {
+    GfxRGB rgb;
+
+    inp = in;
+    for (i = 0; i < length; i++) {
+      getRGB (inp, &rgb);
+      *out++ = colToByte(rgb.r);
+      *out++ = colToByte(rgb.g);
+      *out++ = colToByte(rgb.b);
+      *out++ = 255;
+      inp += nComps;
+    }
+    return;
+  }
+
+  switch (colorSpace->getMode()) {
+  case csIndexed:
+  case csSeparation:
+    tmp_line = (Guchar *) gmallocn (length, nComps2);
+    for (i = 0; i < length; i++) {
+      for (j = 0; j < nComps2; j++) {
+	tmp_line[i * nComps2 + j] = byte_lookup[in[i] * nComps2 + j];
+      }
+    }
+    colorSpace2->getRGBXLine(tmp_line, out, length);
+    gfree (tmp_line);
+    break;
+
+  default:
+    inp = in;
+    for (j = 0; j < length; j++)
+      for (i = 0; i < nComps; i++) {
+	*inp = byte_lookup[*inp * nComps + i];
+	inp++;
+      }
+    colorSpace->getRGBXLine(in, out, length);
+    break;
+  }
+
+}
+
 void GfxImageColorMap::getCMYK(Guchar *x, GfxCMYK *cmyk) {
   GfxColor color;
   int i;
@@ -4405,7 +5175,7 @@ GfxSubpath::GfxSubpath(GfxSubpath *subpath) {
 
 void GfxSubpath::lineTo(double x1, double y1) {
   if (n >= size) {
-    size += 16;
+    size *= 2;
     x = (double *)greallocn(x, size, sizeof(double));
     y = (double *)greallocn(y, size, sizeof(double));
     curve = (GBool *)greallocn(curve, size, sizeof(GBool));
@@ -4419,7 +5189,7 @@ void GfxSubpath::lineTo(double x1, double y1) {
 void GfxSubpath::curveTo(double x1, double y1, double x2, double y2,
 			 double x3, double y3) {
   if (n+3 > size) {
-    size += 16;
+    size *= 2;
     x = (double *)greallocn(x, size, sizeof(double));
     y = (double *)greallocn(y, size, sizeof(double));
     curve = (GBool *)greallocn(curve, size, sizeof(GBool));
@@ -4491,7 +5261,7 @@ void GfxPath::moveTo(double x, double y) {
 void GfxPath::lineTo(double x, double y) {
   if (justMoved) {
     if (n >= size) {
-      size += 16;
+      size *= 2;
       subpaths = (GfxSubpath **)
 	           greallocn(subpaths, size, sizeof(GfxSubpath *));
     }
@@ -4506,7 +5276,7 @@ void GfxPath::curveTo(double x1, double y1, double x2, double y2,
 	     double x3, double y3) {
   if (justMoved) {
     if (n >= size) {
-      size += 16;
+      size *= 2;
       subpaths = (GfxSubpath **) 
  	         greallocn(subpaths, size, sizeof(GfxSubpath *));
     }
@@ -4522,7 +5292,7 @@ void GfxPath::close() {
   // moveto/closepath/clip, which defines an empty clipping region
   if (justMoved) {
     if (n >= size) {
-      size += 16;
+      size *= 2;
       subpaths = (GfxSubpath **)
 	greallocn(subpaths, size, sizeof(GfxSubpath *));
     }
@@ -4661,6 +5431,7 @@ GfxState::GfxState(double hDPIA, double vDPIA, PDFRectangle *pageBox,
   strokeOpacity = 1;
   fillOverprint = gFalse;
   strokeOverprint = gFalse;
+  overprintMode = 0;
   transfer[0] = transfer[1] = transfer[2] = transfer[3] = NULL;
 
   lineWidth = 1;

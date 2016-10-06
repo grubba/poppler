@@ -1,5 +1,7 @@
-/*
- * Copyright (C) 2005, Albert Astals Cid
+/* poppler-embeddedfile-private.h: Qt4 interface to poppler
+ * Copyright (C) 2005, 2008, 2009, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2005, Brad Hards <bradh@frogmouth.net>
+ * Copyright (C) 2008, 2011, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,13 +18,23 @@
  * Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-class Object;
+#ifndef POPPLER_EMBEDDEDFILE_PRIVATE_H
+#define POPPLER_EMBEDDEDFILE_PRIVATE_H
 
-namespace Poppler {
+class FileSpec;
 
-class PageTransitionParams {
-  public:
-    Object *dictObj;
+namespace Poppler
+{
+
+class EmbeddedFileData
+{
+public:
+	EmbeddedFileData(FileSpec *fs);
+	~EmbeddedFileData();
+
+	FileSpec *filespec;
 };
 
 }
+
+#endif

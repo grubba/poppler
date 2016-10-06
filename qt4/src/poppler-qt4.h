@@ -1,11 +1,13 @@
 /* poppler-qt.h: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, 2007, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2005-2010, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2005-2011, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2005, Stefan Kebekus <stefan.kebekus@math.uni-koeln.de>
- * Copyright (C) 2006-2009, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2006-2011, Pino Toscano <pino@kde.org>
  * Copyright (C) 2009 Shawn Rutledge <shawn.t.rutledge@gmail.com>
  * Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+ * Copyright (C) 2010 Matthias Fauconneau <matthias.fauconneau@gmail.com>
+ * Copyright (C) 2011 Andreas Hartmetz <ahartmetz@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -56,6 +58,30 @@ namespace Poppler {
 
     class PDFConverter;
     class PSConverter;
+
+    /**
+	Debug/error function.
+
+	This function type is used for debugging & error output;
+	the first parameter is the actual message, the second is the unaltered
+	closure argument which was passed to the setDebugErrorFunction call.
+
+	\since 0.16
+    */
+    typedef void (*PopplerDebugFunc)(const QString & /*message*/, const QVariant & /*closure*/);
+
+    /**
+	Set a new debug/error output function.
+
+	If not set, by default error and debug messages will be sent to the
+	Qt \p qDebug() function.
+
+	\param debugFunction the new debug function
+	\param closure user data which will be passes as-is to the debug function
+
+	\since 0.16
+    */
+    POPPLER_QT4_EXPORT void setDebugErrorFunction(PopplerDebugFunc debugFunction, const QVariant &closure);
 
     /**
         Describes the physical location of text on a document page
@@ -279,6 +305,8 @@ delete it;
        Container class for an embedded file with a PDF document
     */
     class POPPLER_QT4_EXPORT EmbeddedFile {
+	friend class DocumentData;
+	friend class Page;
     public:
 	/// \cond PRIVATE
 	EmbeddedFile(EmbFile *embfile);
@@ -351,6 +379,7 @@ delete it;
 
     private:
 	Q_DISABLE_COPY(EmbeddedFile)
+	EmbeddedFile(EmbeddedFileData &dd);
 
 	EmbeddedFileData *m_embeddedFile;
     };
@@ -398,6 +427,22 @@ delete it;
 	    RawOrderLayout          ///< The text is returned without any type of processing
 	};
 
+        /**
+           Additional flags for the renderToPainter method
+           \since 0.16
+        */
+        enum PainterFlag {
+            /**
+               Do not save/restore the caller-owned painter.
+
+               renderToPainter() by default preserves, using save() + restore(),
+               the state of the painter specified; if this is not needed, this
+               flag can avoid this job
+             */
+            DontSaveAndRestore = 0x00000001
+        };
+        Q_DECLARE_FLAGS( PainterFlags, PainterFlag )
+
 	/** 
 	   Render the page to a QImage using the current
 	   \link Document::renderBackend() Document renderer\endlink.
@@ -437,6 +482,51 @@ delete it;
 	   \since 0.6
         */
 	QImage renderToImage(double xres=72.0, double yres=72.0, int x=-1, int y=-1, int w=-1, int h=-1, Rotation rotate = Rotate0) const;
+
+        /**
+           Render the page to the specified QPainter using the current
+           \link Document::renderBackend() Document renderer\endlink.
+
+           If \p x = \p y = \p w = \p h = -1, the method will automatically
+           compute the size of the page area from the horizontal and vertical
+           resolutions specified in \p xres and \p yres. Otherwise, the
+           method renders only a part of the page, specified by the
+           parameters (\p x, \p y, \p w, \p h) in pixel coordinates.
+
+           \param painter the painter to paint on
+
+           \param x specifies the left x-coordinate of the box, in
+           pixels.
+
+           \param y specifies the top y-coordinate of the box, in
+           pixels.
+
+           \param w specifies the width of the box, in pixels.
+
+           \param h specifies the height of the box, in pixels.
+
+           \param xres horizontal resolution of the graphics device,
+           in dots per inch
+
+           \param yres vertical resolution of the graphics device, in
+           dots per inch
+
+           \param rotate how to rotate the page
+
+           \param flags additional painter flags
+
+           \warning The parameter (\p x, \p y, \p w, \p h) are not
+           well-tested. Unusual or meaningless parameters may lead to
+           rather unexpected results.
+
+           \returns whether the painting succeeded
+
+           \note This method is only supported for Arthur
+
+           \since 0.16
+        */
+        bool renderToPainter(QPainter* painter, double xres=72.0, double yres=72.0, int x=-1, int y=-1, int w=-1, int h=-1,
+                             Rotation rotate = Rotate0, PainterFlags flags = 0) const;
 
 	/**
 	   Get the page thumbnail if it exists.
@@ -588,6 +678,7 @@ delete it;
 
 	/**
 	 Returns the form fields on the page
+	 The caller gets the ownership of the returned objects.
 
 	 \since 0.6
 	*/
@@ -714,7 +805,8 @@ delete it;
 	enum RenderHint {
 	    Antialiasing = 0x00000001,      ///< Antialiasing for graphics
 	    TextAntialiasing = 0x00000002,  ///< Antialiasing for text
-	    TextHinting = 0x00000004        ///< Hinting for text \since 0.12.1
+	    TextHinting = 0x00000004,       ///< Hinting for text \since 0.12.1
+	    TextSlightHinting = 0x00000008  ///< Lighter hinting for text when combined with TextHinting \since 0.18
 	};
 	Q_DECLARE_FLAGS( RenderHints, RenderHint )
 
@@ -1626,6 +1718,7 @@ height = dummy.height();
 
 }
 
+Q_DECLARE_OPERATORS_FOR_FLAGS(Poppler::Page::PainterFlags)
 Q_DECLARE_OPERATORS_FOR_FLAGS(Poppler::Document::RenderHints)
 Q_DECLARE_OPERATORS_FOR_FLAGS(Poppler::PDFConverter::PDFOptions)
 Q_DECLARE_OPERATORS_FOR_FLAGS(Poppler::PSConverter::PSOptions)

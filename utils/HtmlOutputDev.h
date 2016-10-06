@@ -15,9 +15,12 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2006, 2007, 2009 Albert Astals Cid <aacid@kde.org>
-// Copyright (C) 2008-2009 Warren Toomey <wkt@tuhs.org>
-// Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2008, 2009 Warren Toomey <wkt@tuhs.org>
+// Copyright (C) 2009, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
+// Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+// Copyright (C) 2011 Joshua Richardson <jric@chegg.com>
+// Copyright (C) 2011 Stephen Reichling <sreichling@chegg.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -51,8 +54,7 @@
 
 #define xoutRound(x) ((int)(x + 0.5))
 
-#define DOCTYPE "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\">"
-#define DOCTYPE_FRAMES "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Frameset//EN\"\n\"http://www.w3.org/TR/html4/frameset.dtd\">"
+#define DOCTYPE "<!DOCTYPE html>"
 
 class GfxState;
 class GooString;
@@ -82,6 +84,7 @@ public:
 	       double dx, double dy,
 	       Unicode u); 
   HtmlLink* getLink() { return link; }
+  const HtmlFont &getFont() const { return *fonts->Get(fontpos); }
   void endString(); // postprocessing
 
 private:
@@ -99,6 +102,7 @@ private:
   int len;			// length of text and xRight
   int size;			// size of text and xRight arrays
   UnicodeTextDirection dir;	// direction (left to right/right to left)
+  HtmlFontAccu *fonts;
   
   friend class HtmlPage;
 
@@ -170,6 +174,7 @@ private:
   void setDocName(char* fname);
   void dumpAsXML(FILE* f,int page);
   void dumpComplex(FILE* f, int page);
+  int dumpComplexHeaders(FILE * const file, FILE *& pageFile, int page);
 
   // marks the position of the fonts that belong to current page (for noframes)
   int fontsPageMarker; 
@@ -191,7 +196,7 @@ private:
 //------------------------------------------------------------------------
 class HtmlMetaVar {
 public:
-    HtmlMetaVar(char *_name, char *_content);
+    HtmlMetaVar(const char *_name, const char *_content);
     ~HtmlMetaVar();    
     
     GooString* toString();	
@@ -256,6 +261,7 @@ public:
                                GBool (* abortCheckCbk)(void *data) = NULL,
                                void * abortCheckCbkData = NULL)
   {
+   docPage = page;
    catalog = catalogA;
    return gTrue;
   }
@@ -297,9 +303,9 @@ public:
 private:
   // convert encoding into a HTML standard, or encoding->getCString if not
   // recognized
-  static char* mapEncodingToHtml(GooString* encoding);
-  void doProcessLink(Link *link);
-  GooString* getLinkDest(Link *link,Catalog *catalog);
+  static const char* mapEncodingToHtml(GooString* encoding);
+  void doProcessLink(AnnotLink *link);
+  GooString* getLinkDest(AnnotLink *link,Catalog *catalog);
   void dumpMetaVars(FILE *);
   void doFrame(int firstPage);
   GBool newOutlineLevel(FILE *output, Object *node, Catalog* catalog, int level = 1);
@@ -323,6 +329,7 @@ private:
   GooString *docTitle;
   GooList *glMetaVars;
   Catalog *catalog;
+  Page *docPage;
   friend class HtmlPage;
 };
 

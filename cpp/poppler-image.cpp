@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2010-2011, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,12 +28,18 @@
 #if defined(ENABLE_LIBJPEG)
 #include "JpegWriter.h"
 #endif
+#if defined(ENABLE_LIBTIFF)
+#include "TiffWriter.h"
+#endif
+#include "PNMWriter.h"
 
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <memory>
 #include <vector>
+
+using poppler::PNMWriter;
 
 namespace {
 
@@ -61,6 +67,19 @@ int calc_bytes_per_row(int width, poppler::image::format_enum format)
         return width * 4;
     }
     return 0;
+}
+
+PNMWriter::OutFormat pnm_format(poppler::image::format_enum format)
+{
+    switch (format) {
+    case poppler::image::format_invalid: // unused, anyway
+    case poppler::image::format_mono:
+        return PNMWriter::PBM;
+    case poppler::image::format_rgb24:
+    case poppler::image::format_argb32:
+        return PNMWriter::PPM;
+    }
+    return PNMWriter::PPM;
 }
 
 }
@@ -138,6 +157,8 @@ image_private *image_private::create_data(char *data, int width, int height, ima
  value class. This also means any non-const operation will make sure that the
  data used by current instance is not shared with other instances (ie
  \em detaching), copying the shared data.
+
+ \since 0.16
  */
 
 /**
@@ -242,6 +263,14 @@ int image::height() const
 }
 
 /**
+ \returns the number of bytes in each row of the image
+ */
+int image::bytes_per_row() const
+{
+    return d ? d->bytes_per_row : 0;
+}
+
+/**
  Access to the image bits.
 
  This function will detach and copy the shared data.
@@ -300,6 +329,8 @@ image image::copy(const rect &r) const
  Image formats commonly supported are:
  \li PNG: \c png
  \li JPEG: \c jpeg, \c jpg
+ \li TIFF: \c tiff
+ \li PNM: \c pnm (with Poppler >= 0.18)
 
  If an image format is not supported (check the result of
  supported_image_formats()), the saving fails.
@@ -329,6 +360,14 @@ bool image::save(const std::string &file_name, const std::string &out_format, in
         w.reset(new JpegWriter());
     }
 #endif
+#if defined(ENABLE_LIBTIFF)
+    else if (fmt == "tiff") {
+        w.reset(new TiffWriter());
+    }
+#endif
+    else if (fmt == "pnm") {
+        w.reset(new PNMWriter(pnm_format(d->format)));
+    }
     if (!w.get()) {
         return false;
     }
@@ -396,6 +435,10 @@ std::vector<std::string> image::supported_image_formats()
     formats.push_back("jpeg");
     formats.push_back("jpg");
 #endif
+#if defined(ENABLE_LIBTIFF)
+    formats.push_back("tiff");
+#endif
+    formats.push_back("pnm");
     return formats;
 }
 

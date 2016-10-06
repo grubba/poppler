@@ -90,7 +90,7 @@ char **FoFiType1::getEncoding() {
   return encoding;
 }
 
-void FoFiType1::writeEncoded(char **newEncoding,
+void FoFiType1::writeEncoded(const char **newEncoding,
 			     FoFiOutputFunc outputFunc, void *outputStream) {
   char buf[512];
   char *line, *line2, *p;
@@ -213,7 +213,7 @@ void FoFiType1::parse() {
     // get encoding
     } else if (!encoding &&
 	       !strncmp(line, "/Encoding StandardEncoding def", 30)) {
-      encoding = fofiType1StandardEncoding;
+      encoding = (char **)fofiType1StandardEncoding;
     } else if (!encoding &&
 	       !strncmp(line, "/Encoding 256 array", 19)) {
       encoding = (char **)gmallocn(256, sizeof(char *));
@@ -224,7 +224,7 @@ void FoFiType1::parse() {
 	   j < 300 && line && (line1 = getNextLine(line));
 	   ++j, line = line1) {
 	if ((n = line1 - line) > 255) {
-	  error(-1, "FoFiType1::parse a line has more than 255 characters, we don't support this");
+	  error(errSyntaxWarning, -1, "FoFiType1::parse a line has more than 255 characters, we don't support this");
 	  n = 255;
 	}
 	strncpy(buf, line, n);
@@ -267,7 +267,7 @@ void FoFiType1::parse() {
 		    line1 = &line[p - buf];
 		  }
 		} else {
-		  error(-1, "FoFiType1::parse no put after dup");
+		  error(errSyntaxWarning, -1, "FoFiType1::parse no put after dup");
 		}
 	      }
 	    }

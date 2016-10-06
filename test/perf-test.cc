@@ -742,7 +742,7 @@ void OutputDebugString(const char *txt)
 #define _vsnprintf vsnprintf
 #endif
 
-void my_error(int pos, char *msg, va_list args) {
+void my_error(int pos, const char *msg, va_list args) {
 #if 0
     char        buf[4096], *p = buf;
 
@@ -796,7 +796,7 @@ void my_error(int pos, char *msg, va_list args) {
 #endif
 }
 
-void LogInfo(char *fmt, ...)
+void LogInfo(const char *fmt, ...)
 {
     va_list args;
     char        buf[4096], *p = buf;
@@ -854,7 +854,7 @@ static void RenderPdfAsText(const char *fileName)
 
     pdfDoc = new PDFDoc(fileNameStr, NULL, NULL, NULL);
     if (!pdfDoc->isOk()) {
-        error(-1, "RenderPdfFile(): failed to open PDF file %s\n", fileName);
+        error(errIO, -1, "RenderPdfFile(): failed to open PDF file {0:s}\n", fileName);
         goto Exit;
     }
 
@@ -1225,7 +1225,7 @@ static void RenderCmdLineArg(char *cmdLineArg)
             RenderFileList(cmdLineArg);
 #endif
     } else {
-        error(-1, "unexpected argument '%s'", cmdLineArg);
+        error(errCommandLine, -1, "unexpected argument '{0:s}'", cmdLineArg);
     }
 }
 

@@ -9,6 +9,9 @@
 /* Use libopenjpeg instead of builtin jpeg2000 decoder. */
 #cmakedefine ENABLE_LIBOPENJPEG 1
 
+/* Build against libtiff. */
+#cmakedefine ENABLE_LIBTIFF 1
+
 /* Build against libpng. */
 #cmakedefine ENABLE_LIBPNG 1
 
@@ -123,6 +126,9 @@
 /* Define to 1 if you have the <zlib.h> header file. */
 #cmakedefine HAVE_ZLIB_H 1
 
+/* Define to 1 if you have a big endian machine */
+#cmakedefine WORDS_BIGENDIAN 1
+
 /* Define as const if the declaration of iconv() needs const. */
 #define ICONV_CONST ${ICONV_CONST}
 
@@ -158,9 +164,6 @@
 
 /* Support for curl based doc builder is compiled in. */
 #cmakedefine POPPLER_HAS_CURL_SUPPORT 1
-
-/* Have GDK */
-#cmakedefine POPPLER_WITH_GDK 1
 
 /* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1

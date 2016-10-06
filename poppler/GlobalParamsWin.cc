@@ -60,9 +60,9 @@ description for all fonts available in Windows. That's how MuPDF works.
 #define DEFAULT_SUBSTITUTE_FONT "Helvetica"
 
 static struct {
-    char *name;
-    char *t1FileName;
-    char *ttFileName;
+    const char *name;
+    const char *t1FileName;
+    const char *ttFileName;
 } displayFontTab[] = {
     {"Courier",               "n022003l.pfb", "cour.ttf"},
     {"Courier-Bold",          "n022004l.pfb", "courbd.ttf"},
@@ -257,7 +257,7 @@ void GlobalParams::setupBaseFonts(char * dir)
             delete fontPath;
         }
 
-        error(-1, "No display font for '%s'", fontName);
+        error(errSyntaxError, -1, "No display font for '{0:s}'", fontName);
     }
 }
 
@@ -281,7 +281,7 @@ DisplayFontParam *GlobalParams::getDisplayFont(GfxFont *font) {
     dfp = (DisplayFontParam *)displayFonts->lookup(fontName);
     if (!dfp) {
         substFontName = findSubstituteName(fontName->getCString());
-        error(-1, "Couldn't find a font for '%s', subst is '%s'", fontName->getCString(), substFontName);
+        error(errSyntaxError, -1, "Couldn't find a font for '{0:t}', subst is '{0:s}'", fontName, substFontName);
         dfp = (DisplayFontParam *)displayFonts->lookup(substFontName);
         assert(dfp);
     }

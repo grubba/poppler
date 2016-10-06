@@ -19,7 +19,8 @@
 // Copyright (C) 2007-2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009 Till Kamppeter <till.kamppeter@gmail.com>
 // Copyright (C) 2009 Sanjoy Mahajan <sanjoy@mit.edu>
-// Copyright (C) 2009 William Bader <williambader@hotmail.com>
+// Copyright (C) 2009, 2011 William Bader <williambader@hotmail.com>
+// Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -84,6 +85,8 @@ static GBool doForm = gFalse;
 #if OPI_SUPPORT
 static GBool doOPI = gFalse;
 #endif
+static int splashResolution = 0;
+static GBool psBinary = gFalse;
 static GBool noEmbedT1Fonts = gFalse;
 static GBool noEmbedTTFonts = gFalse;
 static GBool noEmbedCIDPSFonts = gFalse;
@@ -131,6 +134,10 @@ static const ArgDesc argDesc[] = {
   {"-opi",        argFlag,     &doOPI,          0,
    "generate OPI comments"},
 #endif
+  {"-r",          argInt,      &splashResolution, 0,
+   "resolution for rasterization, in DPI (default is 300)"},
+  {"-binary",     argFlag,     &psBinary,       0,
+   "write binary data in Level 1 PostScript"},
   {"-noembt1",    argFlag,     &noEmbedT1Fonts, 0,
    "don't embed Type 1 fonts"},
   {"-noembtt",    argFlag,     &noEmbedTTFonts, 0,
@@ -201,7 +208,10 @@ int main(int argc, char *argv[]) {
     if (!printVersion) {
       printUsage("pdftops", "<PDF-file> [<PS-file>]", argDesc);
     }
-    exit(1);
+    if (printVersion || printHelp)
+      exit(0);
+    else
+      exit(1);
   }
   if ((level1 ? 1 : 0) +
       (level1Sep ? 1 : 0) +
@@ -262,6 +272,9 @@ int main(int argc, char *argv[]) {
   if (level1 || level1Sep || level2 || level2Sep || level3 || level3Sep) {
     globalParams->setPSLevel(level);
   }
+  if (splashResolution > 0) {
+    globalParams->setSplashResolution(splashResolution);
+  }
   if (noEmbedT1Fonts) {
     globalParams->setPSEmbedType1(!noEmbedT1Fonts);
   }
@@ -285,6 +298,9 @@ int main(int argc, char *argv[]) {
     globalParams->setPSOPI(doOPI);
   }
 #endif
+  if (psBinary) {
+    globalParams->setPSBinary(psBinary);
+  }
   if (quiet) {
     globalParams->setErrQuiet(quiet);
   }
@@ -321,7 +337,7 @@ int main(int argc, char *argv[]) {
 #ifdef ENFORCE_PERMISSIONS
   // check for print permission
   if (!doc->okToPrint()) {
-    error(-1, "Printing this document is not allowed.");
+    error(errNotAllowed, -1, "Printing this document is not allowed.");
     exitCode = 3;
     goto err1;
   }
@@ -331,7 +347,7 @@ int main(int argc, char *argv[]) {
   if (argc == 3) {
     psFileName = new GooString(argv[2]);
   } else if (fileName->cmp("fd://0") == 0) {
-    error(-1, "You have to provide an output filename when reading form stdin.");
+    error(errCommandLine, -1, "You have to provide an output filename when reading form stdin.");
     goto err1;
   } else {
     p = fileName->getCString() + fileName->getLength() - 4;
@@ -354,12 +370,12 @@ int main(int argc, char *argv[]) {
 
   // check for multi-page EPS or form
   if ((doEPS || doForm) && firstPage != lastPage) {
-    error(-1, "EPS and form files can only contain one page.");
+    error(errCommandLine, -1, "EPS and form files can only contain one page.");
     goto err2;
   }
 
   // write PostScript file
-  psOut = new PSOutputDev(psFileName->getCString(), doc->getXRef(),
+  psOut = new PSOutputDev(psFileName->getCString(), doc, doc->getXRef(),
 			  doc->getCatalog(), NULL, firstPage, lastPage, mode,
 			  paperWidth,
 			  paperHeight,

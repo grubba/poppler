@@ -15,6 +15,7 @@
 //
 // Copyright (C) 2006 Takashi Iwai <tiwai@suse.de>
 // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
+// Copyright (C) 2011 Albert Astals Cid <aacid@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -28,6 +29,7 @@
 #pragma interface
 #endif
 
+#include "stddef.h"
 #include "goo/gtypes.h"
 #include "FoFiBase.h"
 
@@ -112,7 +114,7 @@ public:
   // otherwise it will be left as binary data.  If <psName> is
   // non-NULL, it will be used as the PostScript font name.  (Only
   // useful for OpenType CFF fonts.)
-  void convertToType1(char *psName, char **newEncoding, GBool ascii,
+  void convertToType1(char *psName, const char **newEncoding, GBool ascii,
 		      FoFiOutputFunc outputFunc, void *outputStream);
 
   // Convert to a Type 2 CIDFont, suitable for embedding in a
@@ -167,14 +169,15 @@ private:
 		      void *outputStream);
   void cvtSfnts(FoFiOutputFunc outputFunc,
 		void *outputStream, GooString *name,
-		GBool needVerticalMetrics);
+		GBool needVerticalMetrics,
+                int *maxUsedGlyph);
   void dumpString(Guchar *s, int length,
 		  FoFiOutputFunc outputFunc,
 		  void *outputStream);
   Guint computeTableChecksum(Guchar *data, int length);
   void parse();
   void readPostTable();
-  int seekTable(char *tag);
+  int seekTable(const char *tag);
   Guint charToTag(const char *tagName);
   Guint doMapToVertGID(Guint orgGID);
   Guint scanLookupList(Guint listIndex, Guint orgGID);

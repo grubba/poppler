@@ -10,6 +10,9 @@
 //
 // Modified under the Poppler project - http://poppler.freedesktop.org
 //
+// All changes made under the Poppler project to this file are licensed
+// under GPL version 2 or later
+//
 // Copyright (C) 2005 Martin Kretzschmar <martink@gnome.org>
 // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005, 2007-2010 Albert Astals Cid <aacid@kde.org>
@@ -20,11 +23,13 @@
 // Copyright (C) 2007 Krzysztof Kowalczyk <kkowalczyk@gmail.com>
 // Copyright (C) 2007, 2009 Jonathan Kew <jonathan_kew@sil.org>
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
-// Copyright (C) 2009 William Bader <williambader@hotmail.com>
+// Copyright (C) 2009, 2011 William Bader <williambader@hotmail.com>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2010 Patrick Spendrin <ps_ml@gmx.de>
 // Copyright (C) 2010 Jakub Wilk <ubanus@users.sf.net>
+// Copyright (C) 2011 Pino Toscano <pino@kde.org>
+// Copyright (C) 2011 Koji Otani <sho@bbr.jp>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -66,6 +71,10 @@
 #endif
 #include "GlobalParams.h"
 #include "GfxFont.h"
+
+#if WITH_FONTCONFIGURATION_FONTCONFIG
+#include <fontconfig/fontconfig.h>
+#endif
 
 #ifdef _WIN32
 #  define strcasecmp stricmp
@@ -508,33 +517,32 @@ Plugin *Plugin::load(char *type, char *name) {
 #ifdef _WIN32
   path->append(".dll");
   if (!(libA = LoadLibrary(path->getCString()))) {
-    error(-1, "Failed to load plugin '%s'",
-	  path->getCString());
+    error(errIO, -1, "Failed to load plugin '{0:t}'", path);
     goto err1;
   }
   if (!(vt = (XpdfPluginVecTable *)
 	         GetProcAddress(libA, "xpdfPluginVecTable"))) {
-    error(-1, "Failed to find xpdfPluginVecTable in plugin '%s'",
-	  path->getCString());
+    error(errIO, -1, "Failed to find xpdfPluginVecTable in plugin '{0:t}'",
+	  path);
     goto err2;
   }
 #else
   //~ need to deal with other extensions here
   path->append(".so");
   if (!(dlA = dlopen(path->getCString(), RTLD_NOW))) {
-    error(-1, "Failed to load plugin '%s': %s",
-	  path->getCString(), dlerror());
+    error(errIO, -1, "Failed to load plugin '{0:t}': {1:s}",
+	  path, dlerror());
     goto err1;
   }
   if (!(vt = (XpdfPluginVecTable *)dlsym(dlA, "xpdfPluginVecTable"))) {
-    error(-1, "Failed to find xpdfPluginVecTable in plugin '%s'",
-	  path->getCString());
+    error(errIO, -1, "Failed to find xpdfPluginVecTable in plugin '{0:t}'",
+	  path);
     goto err2;
   }
 #endif
 
   if (vt->version != xpdfPluginVecTable.version) {
-    error(-1, "Plugin '%s' is wrong version", path->getCString());
+    error(errIO, -1, "Plugin '{0:t}' is wrong version", path);
     goto err2;
   }
   memcpy(vt, &xpdfPluginVecTable, sizeof(xpdfPluginVecTable));
@@ -542,21 +550,20 @@ Plugin *Plugin::load(char *type, char *name) {
 #ifdef _WIN32
   if (!(xpdfInitPlugin = (XpdfBool (*)(void))
 	                     GetProcAddress(libA, "xpdfInitPlugin"))) {
-    error(-1, "Failed to find xpdfInitPlugin in plugin '%s'",
-	  path->getCString());
+    error(errIO, -1, "Failed to find xpdfInitPlugin in plugin '{0:t}'",
+	  path);
     goto err2;
   }
 #else
   if (!(xpdfInitPlugin = (XpdfBool (*)(void))dlsym(dlA, "xpdfInitPlugin"))) {
-    error(-1, "Failed to find xpdfInitPlugin in plugin '%s'",
-	  path->getCString());
+    error(errIO, -1, "Failed to find xpdfInitPlugin in plugin '{0:t}'",
+	  path);
     goto err2;
   }
 #endif
 
   if (!(*xpdfInitPlugin)()) {
-    error(-1, "Initialization of plugin '%s' failed",
-	  path->getCString());
+    error(errIO, -1, "Initialization of plugin '{0:t}' failed", path);
     goto err2;
   }
 
@@ -670,6 +677,7 @@ GlobalParams::GlobalParams(const char *customPopplerDataDir)
   psPreload = gFalse;
   psOPI = gFalse;
   psASCIIHex = gFalse;
+  psBinary = gFalse;
   textEncoding = new GooString("UTF-8");
 #if defined(_WIN32)
   textEOL = eolDOS;
@@ -696,6 +704,7 @@ GlobalParams::GlobalParams(const char *customPopplerDataDir)
   printCommands = gFalse;
   profileCommands = gFalse;
   errQuiet = gFalse;
+  splashResolution = 0.0;
 
   cidToUnicodeCache = new CharCodeToUnicodeCache(cidToUnicodeCacheSize);
   unicodeToUnicodeCache =
@@ -795,8 +804,8 @@ void GlobalParams::parseNameToUnicode(GooString *name) {
   char *tokptr;
 
   if (!(f = fopen(name->getCString(), "r"))) {
-    error(-1, "Couldn't open 'nameToUnicode' file '%s'",
-	  name->getCString());
+    error(errIO, -1, "Couldn't open 'nameToUnicode' file '{0:t}'",
+	  name);
     return;
   }
   line = 1;
@@ -807,8 +816,8 @@ void GlobalParams::parseNameToUnicode(GooString *name) {
       sscanf(tok1, "%x", &u);
       nameToUnicode->add(tok2, u);
     } else {
-      error(-1, "Bad line in 'nameToUnicode' file (%s:%d)",
-	    name->getCString(), line);
+      error(errConfig, -1, "Bad line in 'nameToUnicode' file ({0:t}:{1:d})",
+	    name, line);
     }
     ++line;
   }
@@ -845,7 +854,7 @@ void GlobalParams::addCMapDir(GooString *collection, GooString *dir) {
   list->append(dir->copy());
 }
 
-GBool GlobalParams::parseYesNo2(char *token, GBool *flag) {
+GBool GlobalParams::parseYesNo2(const char *token, GBool *flag) {
   if (!strcmp(token, "yes")) {
     *flag = gTrue;
   } else if (!strcmp(token, "no")) {
@@ -914,7 +923,7 @@ GlobalParams::~GlobalParams() {
 
 //------------------------------------------------------------------------
 
-void GlobalParams::setBaseDir(char *dir) {
+void GlobalParams::setBaseDir(const char *dir) {
   delete baseDir;
   baseDir = new GooString(dir);
 }
@@ -937,7 +946,7 @@ GooString *GlobalParams::getBaseDir() {
   return s;
 }
 
-Unicode GlobalParams::mapNameToUnicode(char *charName) {
+Unicode GlobalParams::mapNameToUnicode(const char *charName) {
   // no need to lock - nameToUnicode is constant
   return nameToUnicode->lookup(charName);
 }
@@ -1033,6 +1042,42 @@ static GBool findModifier(const char *name, const char *modifier, const char **s
   }
 }
 
+static const char *getFontLang(GfxFont *font)
+{
+  const char *lang;
+
+  // find the language we want the font to support
+  if (font->isCIDFont())
+  {
+    GooString *collection = ((GfxCIDFont *)font)->getCollection();
+    if (collection)
+    {
+      if (strcmp(collection->getCString(), "Adobe-GB1") == 0)
+        lang = "zh-cn"; // Simplified Chinese
+      else if (strcmp(collection->getCString(), "Adobe-CNS1") == 0)
+        lang = "zh-tw"; // Traditional Chinese
+      else if (strcmp(collection->getCString(), "Adobe-Japan1") == 0)
+        lang = "ja"; // Japanese
+      else if (strcmp(collection->getCString(), "Adobe-Japan2") == 0)
+        lang = "ja"; // Japanese
+      else if (strcmp(collection->getCString(), "Adobe-Korea1") == 0)
+        lang = "ko"; // Korean
+      else if (strcmp(collection->getCString(), "Adobe-UCS") == 0)
+        lang = "xx";
+      else if (strcmp(collection->getCString(), "Adobe-Identity") == 0)
+        lang = "xx";
+      else
+      {
+        error(errUnimplemented, -1, "Unknown CID font collection, please report to poppler bugzilla.");
+        lang = "xx";
+      }
+    }
+    else lang = "xx";
+  }
+  else lang = "xx";
+  return lang;
+}
+
 static FcPattern *buildFcPattern(GfxFont *font)
 {
   int weight = -1,
@@ -1040,7 +1085,7 @@ static FcPattern *buildFcPattern(GfxFont *font)
       width = -1,
       spacing = -1;
   bool deleteFamily = false;
-  char *family, *name, *lang, *modifiers;
+  char *family, *name, *modifiers;
   const char *start;
   FcPattern *p;
 
@@ -1069,6 +1114,8 @@ static FcPattern *buildFcPattern(GfxFont *font)
     weight = FC_WEIGHT_BOLD;
   if (findModifier(modifiers, "Light", &start))
     weight = FC_WEIGHT_LIGHT;
+  if (findModifier(modifiers, "Medium", &start))
+    weight = FC_WEIGHT_MEDIUM;
   if (findModifier(modifiers, "Condensed", &start))
     width = FC_WIDTH_CONDENSED;
   
@@ -1132,35 +1179,7 @@ static FcPattern *buildFcPattern(GfxFont *font)
     default: break; 
   }
   
-  // find the language we want the font to support
-  if (font->isCIDFont())
-  {
-    GooString *collection = ((GfxCIDFont *)font)->getCollection();
-    if (collection)
-    {
-      if (strcmp(collection->getCString(), "Adobe-GB1") == 0)
-        lang = "zh-cn"; // Simplified Chinese
-      else if (strcmp(collection->getCString(), "Adobe-CNS1") == 0)
-        lang = "zh-tw"; // Traditional Chinese
-      else if (strcmp(collection->getCString(), "Adobe-Japan1") == 0)
-        lang = "ja"; // Japanese
-      else if (strcmp(collection->getCString(), "Adobe-Japan2") == 0)
-        lang = "ja"; // Japanese
-      else if (strcmp(collection->getCString(), "Adobe-Korea1") == 0)
-        lang = "ko"; // Korean
-      else if (strcmp(collection->getCString(), "Adobe-UCS") == 0)
-        lang = "xx";
-      else if (strcmp(collection->getCString(), "Adobe-Identity") == 0)
-        lang = "xx";
-      else
-      {
-        error(-1, "Unknown CID font collection, please report to poppler bugzilla.");
-        lang = "xx";
-      }
-    }
-    else lang = "xx";
-  }
-  else lang = "xx";
+  const char *lang = getFontLang(font);
   
   p = FcPatternBuild(NULL,
                     FC_FAMILY, FcTypeString, family,
@@ -1197,6 +1216,7 @@ DisplayFontParam *GlobalParams::getDisplayFont(GfxFont *font) {
     FcResult res;
     FcFontSet *set;
     int i;
+    FcLangSet *lb = NULL;
     p = buildFcPattern(font);
 
     if (!p)
@@ -1206,29 +1226,59 @@ DisplayFontParam *GlobalParams::getDisplayFont(GfxFont *font) {
     set = FcFontSort(NULL, p, FcFalse, NULL, &res);
     if (!set)
       goto fin;
-    for (i = 0; i < set->nfont; ++i)
+
+    // find the language we want the font to support
+    const char *lang = getFontLang(font);
+    if (strcmp(lang,"xx") != 0) {
+      lb = FcLangSetCreate();
+      FcLangSetAdd(lb,(FcChar8 *)lang);
+    }
+
+    /*
+      scan twice.
+      first: fonts support the language
+      second: all fonts (fall back)
+    */
+    while (dfp == NULL)
     {
-      res = FcPatternGetString(set->fonts[i], FC_FILE, 0, &s);
-      if (res != FcResultMatch || !s)
-        continue;
-      ext = strrchr((char*)s,'.');
-      if (!ext)
-        continue;
-      if (!strncasecmp(ext,".ttf",4) || !strncasecmp(ext, ".ttc", 4))
+      for (i = 0; i < set->nfont; ++i)
       {
-        dfp = new DisplayFontParam(fontName->copy(), displayFontTT);  
-        dfp->tt.fileName = new GooString((char*)s);
-        FcPatternGetInteger(set->fonts[i], FC_INDEX, 0, &(dfp->tt.faceIndex));
+        res = FcPatternGetString(set->fonts[i], FC_FILE, 0, &s);
+        if (res != FcResultMatch || !s)
+          continue;
+        if (lb != NULL) {
+          FcLangSet *l;
+          res = FcPatternGetLangSet(set->fonts[i], FC_LANG, 0, &l);
+          if (res != FcResultMatch || !FcLangSetContains(l,lb)) {
+            continue;
+          }
+        }
+        ext = strrchr((char*)s,'.');
+        if (!ext)
+          continue;
+        if (!strncasecmp(ext,".ttf",4) || !strncasecmp(ext, ".ttc", 4))
+        {
+          dfp = new DisplayFontParam(fontName->copy(), displayFontTT);  
+          dfp->tt.fileName = new GooString((char*)s);
+          FcPatternGetInteger(set->fonts[i], FC_INDEX, 0, &(dfp->tt.faceIndex));
+        }
+        else if (!strncasecmp(ext,".pfa",4) || !strncasecmp(ext,".pfb",4)) 
+        {
+          dfp = new DisplayFontParam(fontName->copy(), displayFontT1);  
+          dfp->t1.fileName = new GooString((char*)s);
+        }
+        else
+          continue;
+        font->dfp = dfp;
+        break;
       }
-      else if (!strncasecmp(ext,".pfa",4) || !strncasecmp(ext,".pfb",4)) 
-      {
-        dfp = new DisplayFontParam(fontName->copy(), displayFontT1);  
-        dfp->t1.fileName = new GooString((char*)s);
+      if (lb != NULL) {
+        FcLangSetDestroy(lb);
+        lb = NULL;
+      } else {
+        /* scan all fonts of the list */
+        break;
       }
-      else
-        continue;
-      font->dfp = dfp;
-      break;
     }
     FcFontSetDestroy(set);
   }
@@ -1392,6 +1442,15 @@ GBool GlobalParams::getPSASCIIHex() {
   return ah;
 }
 
+GBool GlobalParams::getPSBinary() {
+  GBool binary;
+
+  lockGlobalParams;
+  binary = psBinary;
+  unlockGlobalParams;
+  return binary;
+}
+
 GooString *GlobalParams::getTextEncodingName() {
   GooString *s;
 
@@ -1428,9 +1487,9 @@ GBool GlobalParams::getTextKeepTinyChars() {
   return tiny;
 }
 
-GooString *GlobalParams::findFontFile(GooString *fontName, char **exts) {
+GooString *GlobalParams::findFontFile(GooString *fontName, const char **exts) {
   GooString *dir, *fileName;
-  char **ext;
+  const char **ext;
   FILE *f;
   int i;
 
@@ -1583,6 +1642,14 @@ GBool GlobalParams::getErrQuiet() {
   // no locking -- this function may get called from inside a locked
   // section
   return errQuiet;
+}
+
+double GlobalParams::getSplashResolution() {
+  double r;
+  lockGlobalParams;
+  r = splashResolution;
+  unlockGlobalParams;
+  return r;
 }
 
 CharCodeToUnicode *GlobalParams::getCIDToUnicode(GooString *collection) {
@@ -1749,6 +1816,12 @@ void GlobalParams::setPSASCIIHex(GBool hex) {
   unlockGlobalParams;
 }
 
+void GlobalParams::setPSBinary(GBool binary) {
+  lockGlobalParams;
+  psBinary = binary;
+  unlockGlobalParams;
+}
+
 void GlobalParams::setTextEncoding(char *encodingName) {
   lockGlobalParams;
   delete textEncoding;
@@ -1888,6 +1961,12 @@ void GlobalParams::setProfileCommands(GBool profileCommandsA) {
 void GlobalParams::setErrQuiet(GBool errQuietA) {
   lockGlobalParams;
   errQuiet = errQuietA;
+  unlockGlobalParams;
+}
+
+void GlobalParams::setSplashResolution(double SplashResolutionA) {
+  lockGlobalParams;
+  splashResolution = SplashResolutionA;
   unlockGlobalParams;
 }
 

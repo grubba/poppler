@@ -15,7 +15,7 @@
 //
 // Copyright (C) 2006, 2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2008 Hugo Mercier <hmercier31@gmail.com>
-// Copyright (C) 2010 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2010, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -37,6 +37,8 @@ class Array;
 class Dict;
 class Sound;
 class MediaRendition;
+class AnnotLink;
+class Annots;
 
 //------------------------------------------------------------------------
 // LinkAction
@@ -454,41 +456,6 @@ private:
 };
 
 //------------------------------------------------------------------------
-// Link
-//------------------------------------------------------------------------
-
-class Link {
-public:
-
-  // Construct a link, given its dictionary.
-  Link(Dict *dict, GooString *baseURI);
-
-  // Destructor.
-  ~Link();
-
-  // Was the link created successfully?
-  GBool isOk() { return ok; }
-
-  // Check if point is inside the link rectangle.
-  GBool inRect(double x, double y)
-    { return x1 <= x && x <= x2 && y1 <= y && y <= y2; }
-
-  // Get action.
-  LinkAction *getAction() { return action; }
-
-  // Get the link rectangle.
-  void getRect(double *xa1, double *ya1, double *xa2, double *ya2)
-    { *xa1 = x1; *ya1 = y1; *xa2 = x2; *ya2 = y2; }
-
-private:
-
-  double x1, y1;		// lower left corner
-  double x2, y2;		// upper right corner
-  LinkAction *action;		// action
-  GBool ok;			// is link valid?
-};
-
-//------------------------------------------------------------------------
 // Links
 //------------------------------------------------------------------------
 
@@ -496,14 +463,14 @@ class Links {
 public:
 
   // Extract links from array of annotations.
-  Links(Object *annots, GooString *baseURI);
+  Links(Annots *annots);
 
   // Destructor.
   ~Links();
 
   // Iterate through list of links.
   int getNumLinks() const { return numLinks; }
-  Link *getLink(int i) const { return links[i]; }
+  AnnotLink *getLink(int i) const { return links[i]; }
 
   // If point <x>,<y> is in a link, return the associated action;
   // else return NULL.
@@ -514,7 +481,7 @@ public:
 
 private:
 
-  Link **links;
+  AnnotLink **links;
   int numLinks;
 };
 

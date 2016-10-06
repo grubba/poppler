@@ -5,6 +5,7 @@
 // A JPX stream decoder using OpenJPEG
 //
 // Copyright 2008-2010 Albert Astals Cid <aacid@kde.org>
+// Copyright 2011 Daniel Glöckner <daniel-gl@gmx.net>
 //
 // Licensed under GPLv2 or later
 //
@@ -17,6 +18,8 @@ JPXStream::JPXStream(Stream *strA) : FilterStream(strA)
   inited = gFalse;
   image = NULL;
   dinfo = NULL;
+  npixels = 0;
+  ncomps = 0;
 }
 
 JPXStream::~JPXStream() {
@@ -26,12 +29,14 @@ JPXStream::~JPXStream() {
 
 void JPXStream::reset() {
   counter = 0;
+  ccounter = 0;
 }
 
 void JPXStream::close() {
   if (image != NULL) {
     opj_image_destroy(image);
     image = NULL;
+    npixels = 0;
   }
   if (dinfo != NULL) {
     opj_destroy_decompress(dinfo);
@@ -40,7 +45,7 @@ void JPXStream::close() {
 }
 
 int JPXStream::getPos() {
-  return counter;
+  return counter * ncomps + ccounter;
 }
 
 int JPXStream::getChars(int nChars, Guchar *buffer) {
@@ -73,16 +78,46 @@ void JPXStream::init()
   init2(buf, length, CODEC_JP2);
   free(buf);
 
+  if (image) {
+    npixels = image->comps[0].w * image->comps[0].h;
+    ncomps = image->numcomps;
+    for (int component = 0; component < ncomps; component++) {
+      if (image->comps[component].data == NULL) {
+        close();
+        break;
+      }
+      unsigned char *cdata = (unsigned char *)image->comps[component].data;
+      int adjust = 0;
+      if (image->comps[component].prec > 8)
+	adjust = image->comps[component].prec - 8;
+      int sgndcorr = 0;
+      if (image->comps[component].sgnd)
+	sgndcorr = 1 << (image->comps[0].prec - 1);
+      for (int i = 0; i < npixels; i++) {
+	int r = image->comps[component].data[i];
+	r += sgndcorr;
+	if (adjust) {
+	  r = (r >> adjust)+((r >> (adjust-1))%2);
+	  if (unlikely(r > 255))
+	    r = 255;
+        }
+	*(cdata++) = r;
+      }
+    }
+  } else
+    npixels = 0;
+
   counter = 0;
+  ccounter = 0;
   inited = gTrue;
 }
 
 static void libopenjpeg_error_callback(const char *msg, void * /*client_data*/) {
-  error(-1, "%s", msg);
+  error(errSyntaxError, -1, "{0:s}", msg);
 }
 
 static void libopenjpeg_warning_callback(const char *msg, void * /*client_data*/) {
-  error(-1, "%s", msg);
+  error(errSyntaxWarning, -1, "{0:s}", msg);
 }
 
 void JPXStream::init2(unsigned char *buf, int bufLen, OPJ_CODEC_FORMAT format)
@@ -124,13 +159,13 @@ void JPXStream::init2(unsigned char *buf, int bufLen, OPJ_CODEC_FORMAT format)
 
 error:
   if (format == CODEC_JP2) {
-    error(-1, "Did no succeed opening JPX Stream as JP2, trying as J2K.");
+    error(errSyntaxWarning, -1, "Did no succeed opening JPX Stream as JP2, trying as J2K.");
     init2(buf, bufLen, CODEC_J2K);
   } else if (format == CODEC_J2K) {
-    error(-1, "Did no succeed opening JPX Stream as J2K, trying as JPT.");
+    error(errSyntaxWarning, -1, "Did no succeed opening JPX Stream as J2K, trying as JPT.");
     init2(buf, bufLen, CODEC_JPT);
   } else {
-    error(-1, "Did no succeed opening JPX Stream.");
+    error(errSyntaxError, -1, "Did no succeed opening JPX Stream.");
   }
 }
 
@@ -138,7 +173,7 @@ int JPXStream::lookChar() {
   return doLookChar();
 }
 
-GooString *JPXStream::getPSFilter(int psLevel, char *indent) {
+GooString *JPXStream::getPSFilter(int psLevel, const char *indent) {
   return NULL;
 }
 

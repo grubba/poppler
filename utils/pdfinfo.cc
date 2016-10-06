@@ -50,10 +50,10 @@
 #include "Error.h"
 #include "DateInfo.h"
 
-static void printInfoString(Dict *infoDict, char *key, char *text,
+static void printInfoString(Dict *infoDict, const char *key, const char *text,
 			    UnicodeMap *uMap);
-static void printInfoDate(Dict *infoDict, char *key, char *text);
-static void printBox(char *text, PDFRectangle *box);
+static void printInfoDate(Dict *infoDict, const char *key, const char *text);
+static void printBox(const char *text, PDFRectangle *box);
 
 static int firstPage = 1;
 static int lastPage = 0;
@@ -123,6 +123,8 @@ int main(int argc, char *argv[]) {
     if (!printVersion) {
       printUsage("pdfinfo", "<PDF-file>", argDesc);
     }
+    if (printVersion || printHelp)
+      exitCode = 0;
     goto err0;
   }
 
@@ -132,6 +134,7 @@ int main(int argc, char *argv[]) {
   if (printEnc) {
     printEncodings();
     delete globalParams;
+    exitCode = 0;
     goto err0;
   }
 
@@ -143,7 +146,7 @@ int main(int argc, char *argv[]) {
 
   // get mapping to output encoding
   if (!(uMap = globalParams->getTextEncoding())) {
-    error(-1, "Couldn't get text encoding");
+    error(errCommandLine, -1, "Couldn't get text encoding");
     delete fileName;
     goto err1;
   }
@@ -257,7 +260,11 @@ int main(int argc, char *argv[]) {
   if (printBoxes) {
     if (multiPage) {
       for (pg = firstPage; pg <= lastPage; ++pg) {
-	page = doc->getCatalog()->getPage(pg);
+	page = doc->getPage(pg);
+	if (!page) {
+          error(errSyntaxError, -1, "Failed to print boxes for page {0:d}", pg);
+	  continue;
+	}
 	sprintf(buf, "Page %4d MediaBox: ", pg);
 	printBox(buf, page->getMediaBox());
 	sprintf(buf, "Page %4d CropBox:  ", pg);
@@ -270,12 +277,16 @@ int main(int argc, char *argv[]) {
 	printBox(buf, page->getArtBox());
       }
     } else {
-      page = doc->getCatalog()->getPage(firstPage);
-      printBox("MediaBox:       ", page->getMediaBox());
-      printBox("CropBox:        ", page->getCropBox());
-      printBox("BleedBox:       ", page->getBleedBox());
-      printBox("TrimBox:        ", page->getTrimBox());
-      printBox("ArtBox:         ", page->getArtBox());
+      page = doc->getPage(firstPage);
+      if (!page) {
+        error(errSyntaxError, -1, "Failed to print boxes for page {0:d}", firstPage);
+      } else {
+        printBox("MediaBox:       ", page->getMediaBox());
+        printBox("CropBox:        ", page->getCropBox());
+        printBox("BleedBox:       ", page->getBleedBox());
+        printBox("TrimBox:        ", page->getTrimBox());
+        printBox("ArtBox:         ", page->getArtBox());
+      }
     }
   }
 
@@ -331,7 +342,7 @@ int main(int argc, char *argv[]) {
   return exitCode;
 }
 
-static void printInfoString(Dict *infoDict, char *key, char *text,
+static void printInfoString(Dict *infoDict, const char *key, const char *text,
 			    UnicodeMap *uMap) {
   Object obj;
   GooString *s1;
@@ -368,7 +379,7 @@ static void printInfoString(Dict *infoDict, char *key, char *text,
   obj.free();
 }
 
-static void printInfoDate(Dict *infoDict, char *key, char *text) {
+static void printInfoDate(Dict *infoDict, const char *key, const char *text) {
   Object obj;
   char *s;
   int year, mon, day, hour, min, sec, tz_hour, tz_minute;
@@ -405,7 +416,7 @@ static void printInfoDate(Dict *infoDict, char *key, char *text) {
   obj.free();
 }
 
-static void printBox(char *text, PDFRectangle *box) {
+static void printBox(const char *text, PDFRectangle *box) {
   printf("%s%8.2f %8.2f %8.2f %8.2f\n",
 	 text, box->x1, box->y1, box->x2, box->y2);
 }

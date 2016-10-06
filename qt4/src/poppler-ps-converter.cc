@@ -1,6 +1,7 @@
 /* poppler-ps-converter.cc: qt interface to poppler
  * Copyright (C) 2007, 2009, 2010, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2008, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,7 +25,7 @@
 
 #include "PSOutputDev.h"
 
-static void outputToQIODevice(void *stream, char *data, int len)
+static void outputToQIODevice(void *stream, const char *data, int len)
 {
 	static_cast<QIODevice*>(stream)->write(data, len);
 }
@@ -205,6 +206,7 @@ bool PSConverter::convert()
 	
 	PSOutputDev *psOut = new PSOutputDev(outputToQIODevice, dev,
 	                                     pstitlechar,
+	                                     d->document->doc,
 	                                     d->document->doc->getXRef(),
 	                                     d->document->doc->getCatalog(),
 	                                     1,

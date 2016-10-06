@@ -10,20 +10,24 @@
 //
 // Modified under the Poppler project - http://poppler.freedesktop.org
 //
+// All changes made under the Poppler project to this file are licensed
+// under GPL version 2 or later
+//
 // Copyright (C) 2005-2007 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
-// Copyright (C) 2006-2008 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2006-2008, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2006, 2007 Ed Catmur <ed@catmur.co.uk>
 // Copyright (C) 2006 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2007, 2008 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008 Koji Otani <sho@bbr.jp>
-// Copyright (C) 2008, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2008, 2010, 2011 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2008, 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2009 Ross Moore <ross@maths.mq.edu.au>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
 // Copyright (C) 2010 Brian Ewins <brian.ewins@gmail.com>
 // Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+// Copyright (C) 2011 Sam Liao <phyomh@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -57,6 +61,7 @@
 #include "Link.h"
 #include "TextOutputDev.h"
 #include "Page.h"
+#include "Annot.h"
 #include "PDFDocEncoding.h"
 
 #ifdef MACOS
@@ -183,12 +188,12 @@ public:
 class TextLink {
 public:
 
-  TextLink(int xMinA, int yMinA, int xMaxA, int yMaxA, Link *linkA)
+  TextLink(int xMinA, int yMinA, int xMaxA, int yMaxA, AnnotLink *linkA)
     { xMin = xMinA; yMin = yMinA; xMax = xMaxA; yMax = yMaxA; link = linkA; }
   ~TextLink() {}
 
   int xMin, yMin, xMax, yMax;
-  Link *link;
+  AnnotLink *link;
 };
 
 //------------------------------------------------------------------------
@@ -219,6 +224,10 @@ TextFontInfo::~TextFontInfo() {
 
 GBool TextFontInfo::matches(GfxState *state) {
   return state->getFont() == gfxFont;
+}
+
+GBool TextFontInfo::matches(TextFontInfo *fontInfo) {
+  return gfxFont == fontInfo->gfxFont;
 }
 
 //------------------------------------------------------------------------
@@ -2336,7 +2345,7 @@ void TextPage::addUnderline(double x0, double y0, double x1, double y1) {
   underlines->append(new TextUnderline(x0, y0, x1, y1));
 }
 
-void TextPage::addLink(int xMin, int yMin, int xMax, int yMax, Link *link) {
+void TextPage::addLink(int xMin, int yMin, int xMax, int yMax, AnnotLink *link) {
   links->append(new TextLink(xMin, yMin, xMax, yMax, link));
 }
 
@@ -3591,7 +3600,6 @@ GooString *TextPage::getText(double xMin, double yMin,
 			   double xMax, double yMax) {
   GooString *s;
   UnicodeMap *uMap;
-  GBool isUnicode;
   TextBlock *blk;
   TextLine *line;
   TextLineFrag *frags;
@@ -3630,7 +3638,6 @@ GooString *TextPage::getText(double xMin, double yMin,
     return s;
   }
 
-  isUnicode = uMap->isUnicode();
   spaceLen = uMap->mapUnicode(0x20, space, sizeof(space));
   eolLen = 0; // make gcc happy
   switch (globalParams->getTextEOL()) {
@@ -3916,7 +3923,6 @@ GooString *TextSelectionDumper::getText (void)
   GooString *s;
   TextLineFrag *frag;
   int i, j;
-  GBool multiLine;
   UnicodeMap *uMap;
   char space[8], eol[16];
   int spaceLen, eolLen;
@@ -3937,7 +3943,6 @@ GooString *TextSelectionDumper::getText (void)
   eolLen = uMap->mapUnicode(0x0a, eol, sizeof(eol));
 
   if (nFrags > 0) {
-    multiLine = gFalse;
     for (i = 0; i < nFrags; ++i) {
       frag = &frags[i];
 
@@ -4249,24 +4254,24 @@ void TextLine::visitSelection(TextSelectionVisitor *visitor,
   current = NULL;
   for (p = words; p != NULL; p = p->next) {
     if (blk->page->primaryLR) {
-      if ((selection->x1 < p->xMax && selection->y1 < p->yMax) ||
-	  (selection->x2 < p->xMax && selection->y2 < p->yMax))
+      if ((selection->x1 < p->xMax) ||
+	  (selection->x2 < p->xMax))
         if (begin == NULL) 
 	  begin = p;
 
-      if (((selection->x1 > p->xMin && selection->y1 > p->yMin) ||
-	   (selection->x2 > p->xMin && selection->y2 > p->yMin)) && (begin != NULL)) {
+      if (((selection->x1 > p->xMin) ||
+	   (selection->x2 > p->xMin)) && (begin != NULL)) {
         end = p->next;
         current = p;
       }
     } else {
-      if ((selection->x1 > p->xMin && selection->y1 < p->yMax) ||
-	  (selection->x2 > p->xMin && selection->y2 < p->yMax))
+      if ((selection->x1 > p->xMin) ||
+	  (selection->x2 > p->xMin))
         if (begin == NULL) 
 	  begin = p;
 
-      if (((selection->x1 < p->xMax && selection->y1 > p->yMin) ||
-	   (selection->x2 < p->xMax && selection->y2 > p->yMin)) && (begin != NULL)) {
+      if (((selection->x1 < p->xMax) ||
+	   (selection->x2 < p->xMax)) && (begin != NULL)) {
         end = p->next;
         current = p;
       }
@@ -5142,7 +5147,7 @@ void ActualText::endMC(GfxState *state) {
 // TextOutputDev
 //------------------------------------------------------------------------
 
-static void TextOutputDev_outputToFile(void *stream, char *text, int len) {
+static void TextOutputDev_outputToFile(void *stream, const char *text, int len) {
   fwrite(text, 1, len, (FILE *)stream);
 }
 
@@ -5166,7 +5171,7 @@ TextOutputDev::TextOutputDev(char *fileName, GBool physLayoutA,
     } else if ((outputStream = fopen(fileName, append ? "ab" : "wb"))) {
       needClose = gTrue;
     } else {
-      error(-1, "Couldn't open text file '%s'", fileName);
+      error(errIO, -1, "Couldn't open text file '{0:s}'", fileName);
       ok = gFalse;
       actualText = NULL;
       return;
@@ -5346,7 +5351,7 @@ void TextOutputDev::eoFill(GfxState *state) {
   fill(state);
 }
 
-void TextOutputDev::processLink(Link *link, Catalog * /*catalog*/) {
+void TextOutputDev::processLink(AnnotLink *link, Catalog * /*catalog*/) {
   double x1, y1, x2, y2;
   int xMin, yMin, xMax, yMax, x, y;
 

@@ -17,10 +17,12 @@
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2006-2008 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2007 Brad Hards <bradh@kde.org>
-// Copyright (C) 2009, 2010 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009-2011 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Till Kamppeter <till.kamppeter@gmail.com>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
-// Copyright (C) 2009 William Bader <williambader@hotmail.com>
+// Copyright (C) 2009, 2011 William Bader <williambader@hotmail.com>
+// Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+// Copyright (C) 2011 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -50,6 +52,7 @@ struct PSFont8Info;
 struct PSFont16Enc;
 class PSOutCustomColor;
 class Function;
+class PDFDoc;
 
 //------------------------------------------------------------------------
 // PSOutputDev
@@ -69,13 +72,13 @@ enum PSFileType {
   psGeneric			// write to a generic stream
 };
 
-typedef void (*PSOutputFunc)(void *stream, char *data, int len);
+typedef void (*PSOutputFunc)(void *stream, const char *data, int len);
 
 class PSOutputDev: public OutputDev {
 public:
 
   // Open a PostScript output file, and write the prolog.
-  PSOutputDev(const char *fileName, XRef *xrefA, Catalog *catalog,
+  PSOutputDev(const char *fileName, PDFDoc *doc, XRef *xrefA, Catalog *catalog,
 	      char *psTitle,
 	      int firstPage, int lastPage, PSOutMode modeA,
 	      int paperWidthA = -1, int paperHeightA = -1,
@@ -88,6 +91,7 @@ public:
   // Open a PSOutputDev that will write to a generic stream.
   PSOutputDev(PSOutputFunc outputFuncA, void *outputStreamA,
 	      char *psTitle,
+	      PDFDoc *doc,
 	      XRef *xrefA, Catalog *catalog,
 	      int firstPage, int lastPage, PSOutMode modeA,
 	      int paperWidthA = -1, int paperHeightA = -1,
@@ -120,8 +124,8 @@ public:
   // Does this device use functionShadedFill(), axialShadedFill(), and
   // radialShadedFill()?  If this returns false, these shaded fills
   // will be reduced to a series of other drawing operations.
-  virtual GBool useShadedFills()
-    { return level >= psLevel2; }
+  virtual GBool useShadedFills(int type)
+    { return type < 4 && level >= psLevel2; }
 
   // Does this device use drawForm()?  If this returns false,
   // form-type XObjects will be interpreted (i.e., unrolled).
@@ -144,9 +148,6 @@ public:
 
   // Write the Xpdf procset.
   void writeXpdfProcset();
-
-  // Write the document-level setup.
-  void writeDocSetup(Catalog *catalog, int firstPage, int lastPage, GBool duplexA);
 
   // Write the trailer for the current page.
   void writePageTrailer();
@@ -209,8 +210,8 @@ public:
   virtual void stroke(GfxState *state);
   virtual void fill(GfxState *state);
   virtual void eoFill(GfxState *state);
-  virtual GBool tilingPatternFill(GfxState *state, Object *str,
-				  int paintType, Dict *resDict,
+  virtual GBool tilingPatternFill(GfxState *state, Catalog *cat, Object *str,
+				  double *pmat, int paintType, int tilingType, Dict *resDict,
 				  double *mat, double *bbox,
 				  int x0, int y0, int x1, int y1,
 				  double xStep, double yStep);
@@ -287,7 +288,7 @@ public:
 private:
 
   void init(PSOutputFunc outputFuncA, void *outputStreamA,
-	    PSFileType fileTypeA, char *pstitle, XRef *xrefA, Catalog *catalog,
+	    PSFileType fileTypeA, char *pstitle, PDFDoc *doc, XRef *xrefA, Catalog *catalog,
 	    int firstPage, int lastPage, PSOutMode modeA,
 	    int imgLLXA, int imgLLYA, int imgURXA, int imgURYA,
 	    GBool manualCtrlA, int paperWidthA, int paperHeightA,
@@ -317,10 +318,14 @@ private:
   void maskToClippingPath(Stream *maskStr, int maskWidth, int maskHeight, GBool maskInvert);
   void doImageL1(Object *ref, GfxImageColorMap *colorMap,
 		 GBool invert, GBool inlineImg,
-		 Stream *str, int width, int height, int len);
-  void doImageL1Sep(GfxImageColorMap *colorMap,
+		 Stream *str, int width, int height, int len,
+		 int *maskColors, Stream *maskStr,
+		 int maskWidth, int maskHeight, GBool maskInvert);
+  void doImageL1Sep(Object *ref, GfxImageColorMap *colorMap,
 		    GBool invert, GBool inlineImg,
-		    Stream *str, int width, int height, int len);
+		    Stream *str, int width, int height, int len,
+		    int *maskColors, Stream *maskStr,
+		    int maskWidth, int maskHeight, GBool maskInvert);
   void doImageL2(Object *ref, GfxImageColorMap *colorMap,
 		 GBool invert, GBool inlineImg,
 		 Stream *str, int width, int height, int len,
@@ -334,6 +339,17 @@ private:
   void dumpColorSpaceL2(GfxColorSpace *colorSpace,
 			GBool genXform, GBool updateColors,
 			GBool map01);
+  GBool tilingPatternFillL1(GfxState *state, Catalog *cat, Object *str,
+			    double *pmat, int paintType, int tilingType, Dict *resDict,
+			    double *mat, double *bbox,
+			    int x0, int y0, int x1, int y1,
+			    double xStep, double yStep);
+  GBool tilingPatternFillL2(GfxState *state, Catalog *cat, Object *str,
+			    double *pmat, int paintType, int tilingType, Dict *resDict,
+			    double *mat, double *bbox,
+			    int x0, int y0, int x1, int y1,
+			    double xStep, double yStep);
+
 #if OPI_SUPPORT
   void opiBegin20(GfxState *state, Dict *dict);
   void opiBegin13(GfxState *state, Dict *dict);
@@ -341,11 +357,16 @@ private:
 		    double *x1, double *y1);
 #endif
   void cvtFunction(Function *func);
+
+  // Write the document-level setup.
+  void writeDocSetup(PDFDoc *doc, Catalog *catalog, int firstPage, int lastPage, GBool duplexA);
+
   void writePSChar(char c);
-  void writePS(char *s);
+  void writePS(const char *s);
+  void writePSBuf(const char *s, int len);
   void writePSFmt(const char *fmt, ...);
   void writePSString(GooString *s);
-  void writePSName(char *s);
+  void writePSName(const char *s);
   GooString *filterPSLabel(GooString *label, GBool *needParens=0);
   void writePSTextLine(GooString *s);
 

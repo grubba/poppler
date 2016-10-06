@@ -140,6 +140,10 @@ poppler_action_free (PopplerAction *action)
 			g_list_free (action->ocg_state.state_list);
 		}
 		break;
+	case POPPLER_ACTION_JAVASCRIPT:
+		if (action->javascript.script)
+			g_free (action->javascript.script);
+		break;
 	default:
 		break;
 	}
@@ -213,6 +217,10 @@ poppler_action_copy (PopplerAction *action)
 			new_action->ocg_state.state_list = g_list_reverse (new_list);
 		}
 
+		break;
+	case POPPLER_ACTION_JAVASCRIPT:
+		if (action->javascript.script)
+			new_action->javascript.script = g_strdup (action->javascript.script);
 		break;
 	default:
 		break;
@@ -425,13 +433,13 @@ find_annot_movie_for_action (PopplerDocument *document,
 
     xref->fetch (ref->num, ref->gen, &annotObj);
   } else if (link->hasAnnotTitle ()) {
-    Catalog *catalog = document->doc->getCatalog ();
     Object annots;
     GooString *title = link->getAnnotTitle ();
     int i;
 
     for (i = 1; i <= document->doc->getNumPages (); ++i) {
-      Page *p = catalog->getPage (i);
+      Page *p = document->doc->getPage (i);
+      if (!p) continue;
 
       if (p->getAnnots (&annots)->isArray ()) {
         int j;
@@ -511,6 +519,18 @@ build_movie (PopplerDocument *document,
 		action->movie.movie = _poppler_movie_new (annot->getMovie());
 		delete annot;
 	}
+}
+
+static void
+build_javascript (PopplerAction *action,
+		  LinkJavaScript *link)
+{
+	GooString *script;
+
+	script = link->getScript();
+	if (script)
+		action->javascript.script = _poppler_goo_string_to_utf8 (script);
+
 }
 
 static void
@@ -649,6 +669,10 @@ _poppler_action_new (PopplerDocument *document,
 	case actionOCGState:
 		action->type = POPPLER_ACTION_OCG_STATE;
 		build_ocg_state (document, action, dynamic_cast<LinkOCGState*> (link));
+		break;
+	case actionJavaScript:
+		action->type = POPPLER_ACTION_JAVASCRIPT;
+		build_javascript (action, dynamic_cast<LinkJavaScript*> (link));
 		break;
 	case actionUnknown:
 	default:

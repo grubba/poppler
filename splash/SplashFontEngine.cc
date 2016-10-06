@@ -15,6 +15,7 @@
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
 // Copyright (C) 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2011 Andreas Hartmetz <ahartmetz@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -69,6 +70,7 @@ SplashFontEngine::SplashFontEngine(
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
 				   GBool enableFreeType,
 				   GBool enableFreeTypeHinting,
+				   GBool enableSlightHinting,
 #endif
 				   GBool aa) {
   int i;
@@ -86,7 +88,7 @@ SplashFontEngine::SplashFontEngine(
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
   if (enableFreeType) {
-    ftEngine = SplashFTFontEngine::init(aa, enableFreeTypeHinting);
+    ftEngine = SplashFTFontEngine::init(aa, enableFreeTypeHinting, enableSlightHinting);
   } else {
     ftEngine = NULL;
   }
@@ -131,7 +133,7 @@ SplashFontFile *SplashFontEngine::getFontFile(SplashFontFileID *id) {
 
 SplashFontFile *SplashFontEngine::loadType1Font(SplashFontFileID *idA,
 						SplashFontSrc *src,
-						char **enc) {
+						const char **enc) {
   SplashFontFile *fontFile;
 
   fontFile = NULL;
@@ -160,7 +162,7 @@ SplashFontFile *SplashFontEngine::loadType1Font(SplashFontFileID *idA,
 
 SplashFontFile *SplashFontEngine::loadType1CFont(SplashFontFileID *idA,
 						 SplashFontSrc *src,
-						 char **enc) {
+						 const char **enc) {
   SplashFontFile *fontFile;
 
   fontFile = NULL;
@@ -189,7 +191,7 @@ SplashFontFile *SplashFontEngine::loadType1CFont(SplashFontFileID *idA,
 
 SplashFontFile *SplashFontEngine::loadOpenTypeT1CFont(SplashFontFileID *idA,
 						      SplashFontSrc *src,
-						      char **enc) {
+						      const char **enc) {
   SplashFontFile *fontFile;
 
   fontFile = NULL;

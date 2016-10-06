@@ -131,11 +131,12 @@ static void
 pgd_form_field_view_set_field (GtkWidget        *field_view,
 			       PopplerFormField *field)
 {
-	GtkWidget  *alignment;
-	GtkWidget  *table;
-	GEnumValue *enum_value;
-	gchar      *text;
-	gint        row = 0;
+	GtkWidget     *alignment;
+	GtkWidget     *table;
+        PopplerAction *action;
+	GEnumValue    *enum_value;
+	gchar         *text;
+	gint           row = 0;
 
 	alignment = gtk_bin_get_child (GTK_BIN (field_view));
 	if (alignment) {
@@ -170,6 +171,16 @@ pgd_form_field_view_set_field (GtkWidget        *field_view,
 		g_free (text);
 	}
 
+        action = poppler_form_field_get_action (field);
+        if (action) {
+                GtkWidget *action_view;
+
+                action_view = pgd_action_view_new (NULL);
+                pgd_action_view_set_action (action_view, action);
+                pgd_table_add_property_with_custom_widget (GTK_TABLE (table), "<b>Action:</b>", action_view, &row);
+                gtk_widget_show (action_view);
+        }
+
 	switch (poppler_form_field_get_field_type (field)) {
 	case POPPLER_FORM_FIELD_BUTTON:
 		enum_value = g_enum_get_value ((GEnumClass *) g_type_class_ref (POPPLER_TYPE_FORM_BUTTON_TYPE),
@@ -202,7 +213,7 @@ pgd_form_field_view_set_field (GtkWidget        *field_view,
 		break;
 	case POPPLER_FORM_FIELD_CHOICE: {
 		gchar *item;
-		gint   selected;
+		gint   selected = -1;
 		
 		enum_value = g_enum_get_value ((GEnumClass *) g_type_class_ref (POPPLER_TYPE_FORM_CHOICE_TYPE),
 					       poppler_form_field_choice_get_choice_type (field));
@@ -222,7 +233,7 @@ pgd_form_field_view_set_field (GtkWidget        *field_view,
 
 		pgd_form_field_view_add_choice_items (GTK_TABLE (table), field, &selected, &row);
 
-		if (poppler_form_field_choice_get_n_items (field) > selected) {
+		if (selected >= 0 && poppler_form_field_choice_get_n_items (field) > selected) {
 			item = poppler_form_field_choice_get_item (field, selected);
 			text = g_strdup_printf ("%d (%s)", selected, item);
 			g_free (item);

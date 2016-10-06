@@ -19,7 +19,7 @@
 // Copyright (C) 2006-2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2006 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
 // Copyright (C) 2006 Scott Turner <scotty1024@mac.com>
-// Copyright (C) 2006-2010 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2006-2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2007 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright (C) 2008 Iñigo Martínez <inigomartinez@gmail.com>
 // Copyright (C) 2008 Brad Hards <bradh@kde.org>
@@ -196,7 +196,7 @@ PageAttrs::~PageAttrs() {
   resources.free();
 }
 
-GBool PageAttrs::readBox(Dict *dict, char *key, PDFRectangle *box) {
+GBool PageAttrs::readBox(Dict *dict, const char *key, PDFRectangle *box) {
   PDFRectangle tmp;
   double t;
   Object obj1, obj2;
@@ -262,7 +262,7 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
   xref = xrefA;
   num = numA;
   duration = -1;
-  pageWidgets = NULL;
+  annots = NULL;
 
   pageObj.initDict(pageDict);
   pageRef = pageRefA;
@@ -273,7 +273,7 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
   // transtion
   pageDict->lookupNF("Trans", &trans);
   if (!(trans.isRef() || trans.isDict() || trans.isNull())) {
-    error(-1, "Page transition object (page %d) is wrong type (%s)",
+    error(errSyntaxError, -1, "Page transition object (page {0:d}) is wrong type ({1:s})",
 	  num, trans.getTypeName());
     trans.free();
   }
@@ -281,7 +281,7 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
   // duration
   pageDict->lookupNF("Dur", &tmp);
   if (!(tmp.isNum() || tmp.isNull())) {
-    error(-1, "Page duration object (page %d) is wrong type (%s)",
+    error(errSyntaxError, -1, "Page duration object (page {0:d}) is wrong type ({1:s})",
 	  num, tmp.getTypeName());
   } else if (tmp.isNum()) {
     duration = tmp.getNum();
@@ -289,23 +289,19 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
   tmp.free();
 
   // annotations
-  pageDict->lookupNF("Annots", &annots);
-  if (!(annots.isRef() || annots.isArray() || annots.isNull())) {
-    error(-1, "Page annotations object (page %d) is wrong type (%s)",
-	  num, annots.getTypeName());
-    annots.free();
+  pageDict->lookupNF("Annots", &annotsObj);
+  if (!(annotsObj.isRef() || annotsObj.isArray() || annotsObj.isNull())) {
+    error(errSyntaxError, -1, "Page annotations object (page {0:d}) is wrong type ({1:s})",
+	  num, annotsObj.getTypeName());
+    annotsObj.free();
     goto err2;
   }
-
-  // forms
-  pageWidgets = new FormPageWidgets(xrefA, this->getAnnots(&tmp),num,form);
-  tmp.free();
 
   // contents
   pageDict->lookupNF("Contents", &contents);
   if (!(contents.isRef() || contents.isArray() ||
 	contents.isNull())) {
-    error(-1, "Page contents object (page %d) is wrong type (%s)",
+    error(errSyntaxError, -1, "Page contents object (page {0:d}) is wrong type ({1:s})",
 	  num, contents.getTypeName());
     contents.free();
     goto err1;
@@ -314,7 +310,7 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
   // thumb
   pageDict->lookupNF("Thumb", &thumb);
   if (!(thumb.isStream() || thumb.isNull() || thumb.isRef())) {
-      error(-1, "Page thumb object (page %d) is wrong type (%s)",
+      error(errSyntaxError, -1, "Page thumb object (page {0:d}) is wrong type ({1:s})",
             num, thumb.getTypeName());
       thumb.initNull(); 
   }
@@ -322,7 +318,7 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
   // actions
   pageDict->lookupNF("AA", &actions);
   if (!(actions.isDict() || actions.isNull())) {
-      error(-1, "Page additional action object (page %d) is wrong type (%s)",
+      error(errSyntaxError, -1, "Page additional action object (page {0:d}) is wrong type ({1:s})",
             num, actions.getTypeName());
       actions.initNull();
   }
@@ -331,17 +327,17 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
 
   trans.initNull();
  err2:
-  annots.initNull();
+  annotsObj.initNull();
  err1:
   contents.initNull();
   ok = gFalse;
 }
 
 Page::~Page() {
-  delete pageWidgets;
   delete attrs;
+  delete annots;
   pageObj.free();
-  annots.free();
+  annotsObj.free();
   contents.free();
   trans.free();
   thumb.free();
@@ -349,20 +345,26 @@ Page::~Page() {
 }
 
 Annots *Page::getAnnots(Catalog *catalog) {
-  Annots *annots;
-  Object obj;
+  if (!annots) {
+    Object obj;
+    annots = new Annots(xref, catalog, getAnnots(&obj));
+    obj.free();
+  }
 
-  annots = new Annots(xref, catalog, getAnnots(&obj));
-  obj.free();
   return annots;
 }
 
-void Page::addAnnot(Annot *annot) {
+void Page::addAnnot(Annot *annot, Catalog *catalog) {
   Object obj1;
   Object tmp;
   Ref annotRef = annot->getRef ();
 
-  if (annots.isNull()) {
+  // Make sure we have annots before adding the new one
+  // even if it's an empty list so that we can safely
+  // call annots->appendAnnot(annot)
+  getAnnots(catalog);
+
+  if (annotsObj.isNull()) {
     Ref annotsRef;
     // page doesn't have annots array,
     // we have to create it
@@ -372,31 +374,32 @@ void Page::addAnnot(Annot *annot) {
     tmp.free();
 
     annotsRef = xref->addIndirectObject (&obj1);
-    annots.initRef(annotsRef.num, annotsRef.gen);
-    pageObj.dictSet ("Annots", &annots);
+    annotsObj.initRef(annotsRef.num, annotsRef.gen);
+    pageObj.dictSet ("Annots", &annotsObj);
     xref->setModifiedObject (&pageObj, pageRef);
   } else {
     getAnnots(&obj1);
     if (obj1.isArray()) {
       obj1.arrayAdd (tmp.initRef (annotRef.num, annotRef.gen));
-      if (annots.isRef())
-        xref->setModifiedObject (&obj1, annots.getRef());
+      if (annotsObj.isRef())
+        xref->setModifiedObject (&obj1, annotsObj.getRef());
       else
         xref->setModifiedObject (&pageObj, pageRef);
     }
     obj1.free();
   }
 
+  annots->appendAnnot(annot);
+
   annot->setPage(&pageRef, num);
 }
 
 Links *Page::getLinks(Catalog *catalog) {
-  Links *links;
-  Object obj;
+  return new Links(getAnnots(catalog));
+}
 
-  links = new Links(getAnnots(&obj), catalog->getBaseURI());
-  obj.free();
-  return links;
+FormPageWidgets *Page::getFormWidgets(Catalog *catalog) {
+  return new FormPageWidgets(getAnnots(catalog), num, catalog->getForm());
 }
 
 void Page::display(OutputDev *out, double hDPI, double vDPI,
@@ -485,9 +488,8 @@ void Page::displaySlice(OutputDev *out, double hDPI, double vDPI,
   obj.free();
 
   // draw annotations
-  annotList = new Annots(xref, catalog, getAnnots(&obj));
-  obj.free();
-  
+  annotList = getAnnots(catalog);
+
   if (annotList->getNumAnnots() > 0) {
     if (globalParams->getPrintCommands()) {
       printf("***** Annotations\n");
@@ -502,7 +504,6 @@ void Page::displaySlice(OutputDev *out, double hDPI, double vDPI,
     }
     out->dump();
   }
-  delete annotList;
 
   delete gfx;
 }

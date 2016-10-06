@@ -13,6 +13,7 @@ poppler_include_HEADERS =			\
 	poppler-global.h			\
 	poppler-image.h			\
 	poppler-page.h				\
+	poppler-page-renderer.h			\
 	poppler-page-transition.h		\
 	poppler-rectangle.h			\
 	poppler-toc.h				\
@@ -20,6 +21,8 @@ poppler_include_HEADERS =			\
 
 lib_LTLIBRARIES = libpoppler-cpp.la
 libpoppler_cpp_la_SOURCES =			\
+	PNMWriter.cc				\
+	PNMWriter.h				\
 	poppler-document.cpp			\
 	poppler-document-private.h		\
 	poppler-embedded-file.cpp		\
@@ -30,6 +33,7 @@ libpoppler_cpp_la_SOURCES =			\
 	poppler-image-private.h			\
 	poppler-page.cpp			\
 	poppler-page-private.h			\
+	poppler-page-renderer.cpp		\
 	poppler-page-transition.cpp		\
 	poppler-private.cpp			\
 	poppler-private.h			\

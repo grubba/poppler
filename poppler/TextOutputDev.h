@@ -10,9 +10,12 @@
 //
 // Modified under the Poppler project - http://poppler.freedesktop.org
 //
+// All changes made under the Poppler project to this file are licensed
+// under GPL version 2 or later
+//
 // Copyright (C) 2005-2007 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2006 Ed Catmur <ed@catmur.co.uk>
-// Copyright (C) 2007-2008 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2007, 2008, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2007 Adrian Johnson <ajohnson@redneon.com>
 // Copyright (C) 2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2010 Brian Ewins <brian.ewins@gmail.com>
@@ -42,7 +45,7 @@ class Gfx;
 class GfxFont;
 class GfxState;
 class UnicodeMap;
-class Link;
+class AnnotLink;
 
 class TextWord;
 class TextPool;
@@ -56,7 +59,7 @@ class TextSelectionVisitor;
 
 //------------------------------------------------------------------------
 
-typedef void (*TextOutputFunc)(void *stream, char *text, int len);
+typedef void (*TextOutputFunc)(void *stream, const char *text, int len);
 
 enum SelectionStyle {
   selectionStyleGlyph,
@@ -75,6 +78,7 @@ public:
   ~TextFontInfo();
 
   GBool matches(GfxState *state);
+  GBool matches(TextFontInfo *fontInfo);
 
 #if TEXTOUT_WORD_LIST
   // Get the font name (which may be NULL).
@@ -160,7 +164,7 @@ public:
   GBool getSpaceAfter() { return spaceAfter; }
 #endif
   GBool isUnderlined() { return underlined; }
-  Link *getLink() { return link; }
+  AnnotLink *getLink() { return link; }
   double getEdge(int i) { return edge[i]; }
   double getBaseline () { return base; }
   GBool hasSpaceAfter  () { return spaceAfter; }
@@ -194,7 +198,7 @@ private:
 #endif
 
   GBool underlined;
-  Link *link;
+  AnnotLink *link;
 
   friend class TextPool;
   friend class TextLine;
@@ -510,7 +514,7 @@ public:
   void addUnderline(double x0, double y0, double x1, double y1);
 
   // Add a hyperlink.
-  void addLink(int xMin, int yMin, int xMax, int yMax, Link *link);
+  void addLink(int xMin, int yMin, int xMax, int yMax, AnnotLink *link);
 
   // Coalesce strings that look like parts of the same line.
   void coalesce(GBool physLayout, GBool doHTML);
@@ -727,7 +731,7 @@ public:
   virtual void eoFill(GfxState *state);
 
   //----- link borders
-  virtual void processLink(Link *link, Catalog *catalog);
+  virtual void processLink(AnnotLink *link, Catalog *catalog);
 
   //----- special access
 

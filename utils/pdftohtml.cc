@@ -18,6 +18,7 @@
 // Copyright (C) 2010 Mike Slegeir <tehpola@yahoo.com>
 // Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
 // Copyright (C) 2010 OSSD CDAC Mumbai by Leena Chourey (leenac@cdacmumbai.in) and Onkar Potdar (onkar@cdacmumbai.in)
+// Copyright (C) 2011 Steven Murdoch <Steven.Murdoch@cl.cam.ac.uk>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -53,6 +54,7 @@
 #endif
 #include "PSOutputDev.h"
 #include "GlobalParams.h"
+#include "PDFDocEncoding.h"
 #include "Error.h"
 #include "DateInfo.h"
 #include "goo/gfile.h"
@@ -70,10 +72,9 @@ GBool printHtml = gFalse;
 GBool complexMode=gFalse;
 GBool singleHtml=gFalse; // singleHtml
 GBool ignore=gFalse;
-GBool useSplash=gTrue;
-char extension[5]="png";
-double scale=1.5;
-int resolution=72;
+static GBool useSplash=gTrue;
+static char extension[5]="png";
+static double scale=1.5;
 GBool noframes=gFalse;
 GBool stout=gFalse;
 GBool xml=gFalse;
@@ -87,8 +88,8 @@ static char userPassword[33] = "";
 static char gsDevice[33] = "none";
 static GBool printVersion = gFalse;
 
-static GooString* getInfoString(Dict *infoDict, char *key);
-static GooString* getInfoDate(Dict *infoDict, char *key);
+static GooString* getInfoString(Dict *infoDict, const char *key);
+static GooString* getInfoDate(Dict *infoDict, const char *key);
 
 static char textEncName[128] = "";
 
@@ -119,8 +120,6 @@ static const ArgDesc argDesc[] = {
    "use standard output"},
   {"-zoom",   argFP,    &scale,         0,
    "zoom the pdf document (default 1.5)"},
-  {"-r",      argInt,   &resolution, 0,
-   "resolution to render the pdf document (default 72)"},
   {"-xml",    argFlag,    &xml,         0,
    "output for XML post-processing"},
   {"-hidden", argFlag,   &showHidden,   0,
@@ -186,7 +185,7 @@ int main(int argc, char *argv[]) {
   char *p;
   GooString *ownerPW, *userPW;
   Object info;
-  char * extsList[] = {"png", "jpeg", "bmp", "pcx", "tiff", "pbm", NULL};
+  const char * extsList[] = {"png", "jpeg", "bmp", "pcx", "tiff", "pbm", NULL};
 
   // parse args
   ok = parseArgs(argDesc, &argc, argv);
@@ -253,7 +252,7 @@ int main(int argc, char *argv[]) {
   // check for copy permission
   if (!doc->okToCopy()) {
     if (!noDrm) {
-      error(-1, "Copying of text from this document is not allowed.");
+      error(errNotAllowed, -1, "Copying of text from this document is not allowed.");
       goto error;
     }
     fprintf(stderr, "Document has copy-protection bit set.\n");
@@ -282,7 +281,7 @@ int main(int argc, char *argv[]) {
     }
     delete tmp;
   } else if (fileName->cmp("fd://0") == 0) {
-      error(-1, "You have to provide an output filename when reading form stdin.");
+      error(errCommandLine, -1, "You have to provide an output filename when reading form stdin.");
       goto error;
   } else {
     p = fileName->getCString() + fileName->getLength() - 4;
@@ -401,7 +400,7 @@ int main(int argc, char *argv[]) {
 
   if (htmlOut->isOk())
   {
-    doc->displayPages(htmlOut, firstPage, lastPage, 72, 72, 0,
+    doc->displayPages(htmlOut, firstPage, lastPage, 72 * scale, 72 * scale, 0,
 		      gTrue, gFalse, gFalse);
   	if (!xml)
 	{
@@ -424,16 +423,8 @@ int main(int argc, char *argv[]) {
       splashOut->startDoc(doc->getXRef());
 
       for (int pg = firstPage; pg <= lastPage; ++pg) {
-        int pg_w = doc->getPageMediaWidth(pg) / scale;
-        int pg_h = doc->getPageMediaHeight(pg) / scale;
-        if ((doc->getPageRotate(pg) == 90) || (doc->getPageRotate(pg) == 270)) {
-          int tmp = pg_w;
-          pg_w = pg_h;
-          pg_h = tmp;
-        }
-
         doc->displayPage(splashOut, pg,
-                         resolution, resolution,
+                         72 * scale, 72 * scale,
                          0, gTrue, gFalse, gFalse);
         SplashBitmap *bitmap = splashOut->getBitmap();
 
@@ -441,7 +432,7 @@ int main(int argc, char *argv[]) {
             htmlFileName->getCString(), pg, extension);
 
         bitmap->writeImgFile(format, imgFileName->getCString(),
-                             resolution, resolution);
+                             72 * scale, 72 * scale);
 
         delete imgFileName;
       }
@@ -457,7 +448,7 @@ int main(int argc, char *argv[]) {
       psFileName = new GooString(htmlFileName->getCString());
       psFileName->append(".ps");
 
-      psOut = new PSOutputDev(psFileName->getCString(), doc->getXRef(),
+      psOut = new PSOutputDev(psFileName->getCString(), doc, doc->getXRef(),
           doc->getCatalog(), NULL, firstPage, lastPage, psModePS, w, h);
       psOut->setDisplayText(gFalse);
       doc->displayPages(psOut, firstPage, lastPage, 72, 72, 0,
@@ -472,7 +463,7 @@ int main(int argc, char *argv[]) {
       gsCmd->append(" -sDEVICE=");
       gsCmd->append(gsDevice);
       gsCmd->append(" -dBATCH -dNOPROMPT -dNOPAUSE -r");
-      sc = GooString::fromInt(static_cast<int>(resolution*scale));
+      sc = GooString::fromInt(static_cast<int>(72*scale));
       gsCmd->append(sc);
       gsCmd->append(" -sOutputFile=");
       gsCmd->append("\"");
@@ -480,18 +471,18 @@ int main(int argc, char *argv[]) {
       gsCmd->append("%03d.");
       gsCmd->append(extension);
       gsCmd->append("\" -g");
-      tw = GooString::fromInt(static_cast<int>(scale*w*resolution/72.0));
+      tw = GooString::fromInt(static_cast<int>(scale*w));
       gsCmd->append(tw);
       gsCmd->append("x");
       th = GooString::fromInt(static_cast<int>(scale*h));
-      th = GooString::fromInt(static_cast<int>(scale*h*resolution/72.0));
+      th = GooString::fromInt(static_cast<int>(scale*h));
       gsCmd->append(th);
       gsCmd->append(" -q \"");
       gsCmd->append(psFileName);
       gsCmd->append("\"");
       //    printf("running: %s\n", gsCmd->getCString());
       if( !executeCommand(gsCmd->getCString()) && !errQuiet) {
-        error(-1, "Failed to launch Ghostscript!\n");
+        error(errIO, -1, "Failed to launch Ghostscript!\n");
       }
       unlink(psFileName->getCString());
       delete tw;
@@ -520,18 +511,51 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-static GooString* getInfoString(Dict *infoDict, char *key) {
+static GooString* getInfoString(Dict *infoDict, const char *key) {
   Object obj;
-  GooString *s1 = NULL;
+  // Raw value as read from PDF (may be in pdfDocEncoding or UCS2)
+  GooString *rawString;
+  // Value converted to unicode
+  Unicode *unicodeString;
+  int unicodeLength;
+  // Value HTML escaped and converted to desired encoding
+  GooString *encodedString = NULL;
+  // Is rawString UCS2 (as opposed to pdfDocEncoding)
+  GBool isUnicode;
 
   if (infoDict->lookup(key, &obj)->isString()) {
-    s1 = new GooString(obj.getString());
+    rawString = obj.getString();
+
+    // Convert rawString to unicode
+    encodedString = new GooString();
+    if (rawString->hasUnicodeMarker()) {
+      isUnicode = gTrue;
+      unicodeLength = (obj.getString()->getLength() - 2) / 2;
+    } else {
+      isUnicode = gFalse;
+      unicodeLength = obj.getString()->getLength();
+    }
+    unicodeString = new Unicode[unicodeLength];
+
+    for (int i=0; i<unicodeLength; i++) {
+      if (isUnicode) {
+        unicodeString[i] = ((rawString->getChar((i+1)*2) & 0xff) << 8) |
+          (rawString->getChar(((i+1)*2)+1) & 0xff);
+      } else {
+        unicodeString[i] = pdfDocEncoding[rawString->getChar(i) & 0xff];
+      }
+    }
+
+    // HTML escape and encode unicode
+    encodedString = HtmlFont::HtmlFilter(unicodeString, unicodeLength);
+    delete[] unicodeString;
   }
+
   obj.free();
-  return s1;
+  return encodedString;
 }
 
-static GooString* getInfoDate(Dict *infoDict, char *key) {
+static GooString* getInfoDate(Dict *infoDict, const char *key) {
   Object obj;
   char *s;
   int year, mon, day, hour, min, sec, tz_hour, tz_minute;

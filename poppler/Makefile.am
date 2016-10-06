@@ -73,6 +73,15 @@ libpng_includes =				\
 
 endif
 
+if BUILD_LIBTIFF
+
+libtiff_libs =					\
+	$(LIBTIFF_LIBS)
+libtiff_includes =				\
+	$(LIBTIFF_CFLAGS)
+
+endif
+
 if BUILD_LIBOPENJPEG
 
 libjpeg2000_sources =				\
@@ -120,20 +129,6 @@ curl_sources =					\
 
 endif
 
-if BUILD_ABIWORD_OUTPUT
-
-abiword_sources =				\
-	ABWOutputDev.h				\
-	ABWOutputDev.cc
-
-abiword_includes =				\
-	$(ABIWORD_CFLAGS)
-
-abiword_libs =					\
-	$(ABIWORD_LIBS)
-
-endif
-
 if USE_CMS
 cms_includes = $(LCMS_CFLAGS)
 cms_libs = $(LCMS_LIBS)
@@ -146,7 +141,7 @@ INCLUDES =					\
 	$(splash_includes)			\
 	$(cairo_includes)			\
 	$(arthur_includes)			\
-	$(abiword_includes)			\
+	$(libtiff_includes)			\
 	$(libpng_includes)			\
 	$(libcurl_includes)			\
 	$(FREETYPE_CFLAGS)			\
@@ -165,18 +160,18 @@ libpoppler_la_LIBADD =				\
 	$(top_builddir)/fofi/libfofi.la		\
 	$(cms_libs)				\
 	$(splash_libs)				\
+	$(libtiff_libs)				\
 	$(libjpeg_libs)				\
 	$(libpng_libs)				\
 	$(zlib_libs)				\
 	$(libcurl_libs)				\
 	$(libjpeg2000_libs)			\
-	$(abiword_libs)				\
 	$(FREETYPE_LIBS)			\
 	$(FONTCONFIG_LIBS)			\
 	$(PTHREAD_LIBS)				\
 	$(win32_libs)
 
-libpoppler_la_LDFLAGS = -version-info 8:0:0 @create_shared_lib@ @auto_import_flags@
+libpoppler_la_LDFLAGS = -version-info 17:0:0 @create_shared_lib@ @auto_import_flags@
 
 if ENABLE_XPDF_HEADERS
 
@@ -206,9 +201,11 @@ poppler_include_HEADERS =	\
 	GfxState.h		\
 	GfxState_helpers.h	\
 	GlobalParams.h		\
+	Hints.h			\
 	JArithmeticDecoder.h	\
 	JBIG2Stream.h		\
 	Lexer.h			\
+	Linearization.h 	\
 	Link.h			\
 	LocalPDFDocBuilder.h	\
 	Movie.h                 \
@@ -239,6 +236,7 @@ poppler_include_HEADERS =	\
 	UnicodeCClassTables.h	\
 	UnicodeCompTables.h	\
 	UnicodeDecompTables.h	\
+	ViewerPreferences.h	\
 	XRef.h			\
 	CharTypes.h		\
 	CompactFontTables.h	\
@@ -261,7 +259,6 @@ libpoppler_la_SOURCES =		\
 	$(libjpeg_sources)	\
 	$(zlib_sources)		\
 	$(libjpeg2000_sources)	\
-	$(abiword_sources)	\
 	$(curl_sources)		\
 	Annot.cc		\
 	Array.cc 		\
@@ -284,9 +281,11 @@ libpoppler_la_SOURCES =		\
 	GfxFont.cc 		\
 	GfxState.cc		\
 	GlobalParams.cc		\
+	Hints.cc		\
 	JArithmeticDecoder.cc	\
 	JBIG2Stream.cc		\
 	Lexer.cc 		\
+	Linearization.cc 	\
 	Link.cc 		\
 	LocalPDFDocBuilder.cc	\
 	Movie.cc                \
@@ -312,6 +311,7 @@ libpoppler_la_SOURCES =		\
 	strtok_r.cpp		\
 	UnicodeMap.cc		\
 	UnicodeTypeTable.cc	\
+	ViewerPreferences.cc	\
 	XRef.cc			\
 	PSOutputDev.cc		\
 	TextOutputDev.cc	\

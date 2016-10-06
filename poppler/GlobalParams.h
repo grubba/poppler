@@ -20,8 +20,9 @@
 // Copyright (C) 2007 Krzysztof Kowalczyk <kkowalczyk@gmail.com>
 // Copyright (C) 2009 Jonathan Kew <jonathan_kew@sil.org>
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
-// Copyright (C) 2009 William Bader <williambader@hotmail.com>
+// Copyright (C) 2009, 2011 William Bader <williambader@hotmail.com>
 // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+// Copyright (C) 2011 Pino Toscano <pino@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -38,9 +39,6 @@
 #include <assert.h>
 #include "poppler-config.h"
 #include <stdio.h>
-#if WITH_FONTCONFIGURATION_FONTCONFIG
-#include <fontconfig/fontconfig.h>
-#endif
 #include "goo/gtypes.h"
 #include "CharTypes.h"
 
@@ -168,7 +166,7 @@ public:
 
   ~GlobalParams();
 
-  void setBaseDir(char *dir);
+  void setBaseDir(const char *dir);
 
 #if WITH_FONTCONFIGURATION_WIN32
   void setupBaseFonts(char *dir);
@@ -183,7 +181,7 @@ public:
   CharCode getMacRomanCharCode(char *charName);
 
   GooString *getBaseDir();
-  Unicode mapNameToUnicode(char *charName);
+  Unicode mapNameToUnicode(const char *charName);
   UnicodeMap *getResidentUnicodeMap(GooString *encodingName);
   FILE *getUnicodeMapFile(GooString *encodingName);
   FILE *findCMapFile(GooString *collection, GooString *cMapName);
@@ -203,11 +201,12 @@ public:
   GBool getPSPreload();
   GBool getPSOPI();
   GBool getPSASCIIHex();
+  GBool getPSBinary();
   GooString *getTextEncodingName();
   EndOfLineKind getTextEOL();
   GBool getTextPageBreaks();
   GBool getTextKeepTinyChars();
-  GooString *findFontFile(GooString *fontName, char **exts);
+  GooString *findFontFile(GooString *fontName, const char **exts);
   GBool getEnableFreeType();
   GBool getAntialias();
   GBool getVectorAntialias();
@@ -223,6 +222,7 @@ public:
   GBool getPrintCommands();
   GBool getProfileCommands();
   GBool getErrQuiet();
+  double getSplashResolution();
 
   CharCodeToUnicode *getCIDToUnicode(GooString *collection);
   CharCodeToUnicode *getUnicodeToUnicode(GooString *fontName);
@@ -248,6 +248,7 @@ public:
   void setPSPreload(GBool preload);
   void setPSOPI(GBool opi);
   void setPSASCIIHex(GBool hex);
+  void setPSBinary(GBool binary);
   void setTextEncoding(char *encodingName);
   GBool setTextEOL(char *s);
   void setTextPageBreaks(GBool pageBreaks);
@@ -267,6 +268,7 @@ public:
   void setPrintCommands(GBool printCommandsA);
   void setProfileCommands(GBool profileCommandsA);
   void setErrQuiet(GBool errQuietA);
+  void setSplashResolution(double splashResolutionA);
 
   //----- security handlers
 
@@ -276,7 +278,7 @@ public:
 private:
 
   void parseNameToUnicode(GooString *name);
-  GBool parseYesNo2(char *token, GBool *flag);
+  GBool parseYesNo2(const char *token, GBool *flag);
   UnicodeMap *getUnicodeMap2(GooString *encodingName);
 
   void scanEncodingDirs();
@@ -329,6 +331,7 @@ private:
 				//   memory
   GBool psOPI;			// generate PostScript OPI comments?
   GBool psASCIIHex;		// use ASCIIHex instead of ASCII85?
+  GBool psBinary;		// use binary instead of hex
   GooString *textEncoding;	// encoding (unicodeMap) to use for text
 				//   output
   EndOfLineKind textEOL;	// type of EOL marker to use for text
@@ -351,6 +354,7 @@ private:
   GBool printCommands;		// print the drawing commands
   GBool profileCommands;	// profile the drawing commands
   GBool errQuiet;		// suppress error messages?
+  double splashResolution;	// resolution when rasterizing images
 
   CharCodeToUnicodeCache *cidToUnicodeCache;
   CharCodeToUnicodeCache *unicodeToUnicodeCache;

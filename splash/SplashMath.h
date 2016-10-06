@@ -11,7 +11,7 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2009, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2009-2011 Albert Astals Cid <aacid@kde.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -20,6 +20,8 @@
 
 #ifndef SPLASHMATH_H
 #define SPLASHMATH_H
+
+#include "poppler/poppler-config.h"
 
 #if USE_FIXEDPOINT
 #include "goo/FixedPoint.h"
@@ -95,15 +97,17 @@ static inline SplashCoord splashDist(SplashCoord x0, SplashCoord y0,
 #if USE_FIXEDPOINT
   // this handles the situation where dx*dx or dy*dy is too large to
   // fit in the 16.16 fixed point format
-  SplashCoord dxa, dya;
+  SplashCoord dxa, dya, d;
   dxa = splashAbs(dx);
   dya = splashAbs(dy);
   if (dxa == 0 && dya == 0) {
     return 0;
   } else if (dxa > dya) {
-    return dxa * FixedPoint::sqrt(dya / dxa + 1);
+    d = dya / dxa;
+    return dxa * FixedPoint::sqrt(d*d + 1);
   } else {
-    return dya * FixedPoint::sqrt(dxa / dya + 1);
+    d = dxa / dya;
+    return dya * FixedPoint::sqrt(d*d + 1);
   }
 #else
   return splashSqrt(dx * dx + dy * dy);

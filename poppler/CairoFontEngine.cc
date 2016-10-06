@@ -18,7 +18,7 @@
 // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
 // Copyright (C) 2005 Martin Kretzschmar <martink@gnome.org>
 // Copyright (C) 2005, 2009 Albert Astals Cid <aacid@kde.org>
-// Copyright (C) 2006, 2007, 2010 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2006, 2007, 2010, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2008, 2009 Chris Wilson <chris@chris-wilson.co.uk>
 // Copyright (C) 2008 Adrian Johnson <ajohnson@redneon.com>
@@ -425,7 +425,7 @@ CairoFreeTypeFont *CairoFreeTypeFont::create(GfxFont *gfxFont, XRef *xref,
       dfp = globalParams->getDisplayFont(gfxFont);
     }
     if (!dfp) {
-      error(-1, "Couldn't find a font for '%s'",
+      error(errSyntaxError, -1, "Couldn't find a font for '{0:s}'",
 	    gfxFont->getName() ? gfxFont->getName()->getCString()
 	    : "(unnamed)");
       goto err2;
@@ -452,7 +452,7 @@ CairoFreeTypeFont *CairoFreeTypeFont::create(GfxFont *gfxFont, XRef *xref,
   case fontType1C:
   case fontType1COT:
     if (! _ft_new_face (lib, fileNameC, font_data, font_data_len, &face, &font_face)) {
-      error(-1, "could not create type1 face");
+      error(errSyntaxError, -1, "could not create type1 face");
       goto err2;
     }
     
@@ -467,8 +467,8 @@ CairoFreeTypeFont *CairoFreeTypeFont::create(GfxFont *gfxFont, XRef *xref,
       }
     }
     break;
-    
   case fontCIDType2:
+  case fontCIDType2OT:
     codeToGID = NULL;
     n = 0;
     if (((GfxCIDFont *)gfxFont)->getCIDToGID()) {
@@ -498,7 +498,7 @@ CairoFreeTypeFont *CairoFreeTypeFont::create(GfxFont *gfxFont, XRef *xref,
       ff = FoFiTrueType::load(fileNameC);
     }
     if (! ff) {
-      error(-1, "failed to load truetype font\n");
+      error(errSyntaxError, -1, "failed to load truetype font\n");
       goto err2;
     }
     /* This might be set already for the CIDType2 case */
@@ -508,7 +508,7 @@ CairoFreeTypeFont *CairoFreeTypeFont::create(GfxFont *gfxFont, XRef *xref,
     }
     delete ff;
     if (! _ft_new_face (lib, fileNameC, font_data, font_data_len, &face, &font_face)) {
-      error(-1, "could not create truetype face\n");
+      error(errSyntaxError, -1, "could not create truetype face\n");
       goto err2;
     }
     break;
@@ -535,7 +535,7 @@ CairoFreeTypeFont *CairoFreeTypeFont::create(GfxFont *gfxFont, XRef *xref,
     if (! _ft_new_face (lib, fileNameC, font_data, font_data_len, &face, &font_face)) {
       gfree(codeToGID);
       codeToGID = NULL;
-      error(-1, "could not create cid face\n");
+      error(errSyntaxError, -1, "could not create cid face\n");
       goto err2;
     }
     break;
@@ -707,7 +707,7 @@ CairoType3Font *CairoType3Font::create(GfxFont *gfxFont, XRef *xref,
 
 CairoType3Font::CairoType3Font(Ref ref,
 			       XRef *xref,
-			       Catalog *cat,
+			       Catalog *catalog,
 			       cairo_font_face_t *cairo_font_face,
 			       Gushort *codeToGID,
 			       Guint codeToGIDLen,

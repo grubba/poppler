@@ -14,8 +14,12 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Takashi Iwai <tiwai@suse.de>
-// Copyright (C) 2009, 2010 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009-2011 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
+// Copyright (C) 2011 Andreas Hartmetz <ahartmetz@gmail.com>
+// Copyright (C) 2011 Andrea Canciani <ranma42@gmail.com>
+// Copyright (C) 2011 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -31,6 +35,7 @@
 
 #include "goo/gtypes.h"
 #include "splash/SplashTypes.h"
+#include "splash/SplashPattern.h"
 #include "poppler-config.h"
 #include "OutputDev.h"
 #include "GfxState.h"
@@ -39,13 +44,144 @@ class Gfx8BitFont;
 class SplashBitmap;
 class Splash;
 class SplashPath;
-class SplashPattern;
 class SplashFontEngine;
 class SplashFont;
 class T3FontCache;
 struct T3FontCacheTag;
 struct T3GlyphStack;
 struct SplashTransparencyGroup;
+
+//------------------------------------------------------------------------
+// SplashOverprintColor
+//------------------------------------------------------------------------
+
+class SplashOverprintColor: public SplashPattern {
+public:
+  SplashOverprintColor(GfxColorSpace *colorSpace, SplashColorPtr colorA, Guchar tolerance);
+
+  virtual SplashPattern *copy() { return new SplashOverprintColor(colorSpace, color, tolerance); }
+
+  virtual ~SplashOverprintColor();
+
+  virtual GBool getColor(int x, int y, SplashColorPtr c);
+
+  virtual GBool testPosition(int x, int y) { return gFalse; }
+
+  virtual GBool isStatic() { return gTrue; }
+
+  virtual void overprint(GBool op, Guchar alphaSrc, SplashColorPtr colorSrc, 
+                         Guchar alphaDest, SplashColorPtr colorDest, SplashColorPtr colorResult);
+
+private:
+  GfxColorSpace *colorSpace;
+  SplashColor color;
+  Guchar tolerance;
+};
+
+//------------------------------------------------------------------------
+// Splash dynamic pattern
+//------------------------------------------------------------------------
+
+class SplashUnivariatePattern: public SplashPattern {
+public:
+
+  SplashUnivariatePattern(SplashColorMode colorMode, GfxState *state, GfxUnivariateShading *shading);
+
+  virtual ~SplashUnivariatePattern();
+
+  virtual GBool getColor(int x, int y, SplashColorPtr c);
+
+  virtual GBool testPosition(int x, int y);
+
+  virtual GBool isStatic() { return gFalse; }
+
+  virtual GBool getParameter(double xs, double ys, double *t) = 0;
+
+  virtual GfxUnivariateShading *getShading() { return shading; }
+
+protected:
+  Matrix ictm;
+  double t0, t1, dt;
+  GfxUnivariateShading *shading;
+  GfxState *state;
+  SplashColorMode colorMode;
+};
+
+class SplashAxialPattern: public SplashUnivariatePattern {
+public:
+
+  SplashAxialPattern(SplashColorMode colorMode, GfxState *state, GfxAxialShading *shading);
+
+  virtual SplashPattern *copy() { return new SplashAxialPattern(colorMode, state, (GfxAxialShading *) shading); }
+
+  virtual ~SplashAxialPattern();
+
+  virtual GBool getParameter(double xs, double ys, double *t);
+
+  virtual void overprint(GBool op, Guchar alphaSrc, SplashColorPtr colorSrc, 
+                         Guchar alphaDest, SplashColorPtr colorDest, SplashColorPtr colorResult);
+
+private:
+  double x0, y0, x1, y1;
+  double dx, dy, mul;
+  SplashOverprintColor *opPattern;
+};
+
+// see GfxState.h, GfxGouraudTriangleShading
+class SplashGouraudPattern: public SplashGouraudColor {
+public:
+
+  SplashGouraudPattern(GBool bDirectColorTranslation, GfxState *state, GfxGouraudTriangleShading *shading, SplashColorMode mode);
+
+  virtual SplashPattern *copy() { return new SplashGouraudPattern(bDirectColorTranslation, state, shading, mode); }
+
+  virtual ~SplashGouraudPattern();
+
+  virtual GBool getColor(int x, int y, SplashColorPtr c) { return gFalse; }
+
+  virtual GBool testPosition(int x, int y) { return gFalse; }
+
+  virtual GBool isStatic() { return gFalse; }
+
+  virtual GBool isParameterized() { return shading->isParameterized(); }
+  virtual int getNTriangles() { return shading->getNTriangles(); }
+  virtual  void getTriangle(int i, double *x0, double *y0, double *color0,
+                            double *x1, double *y1, double *color1,
+                            double *x2, double *y2, double *color2)
+  { return shading->getTriangle(i, x0, y0, color0, x1, y1, color1, x2, y2, color2); }
+
+  virtual void getParameterizedColor(double t, SplashColorMode mode, SplashColorPtr c);
+
+  virtual void overprint(GBool op, Guchar alphaSrc, SplashColorPtr colorSrc, 
+                         Guchar alphaDest, SplashColorPtr colorDest, SplashColorPtr colorResult);
+private:
+  GfxGouraudTriangleShading *shading;
+  GfxState *state;
+  GBool bDirectColorTranslation;
+  SplashOverprintColor *opPattern;
+  SplashColorMode mode;
+};
+
+// see GfxState.h, GfxRadialShading
+class SplashRadialPattern: public SplashUnivariatePattern {
+public:
+
+  SplashRadialPattern(SplashColorMode colorMode, GfxState *state, GfxRadialShading *shading);
+
+  virtual SplashPattern *copy() { return new SplashRadialPattern(colorMode, state, (GfxRadialShading *) shading); }
+
+  virtual ~SplashRadialPattern();
+
+  virtual GBool getParameter(double xs, double ys, double *t);
+
+  virtual void overprint(GBool op, Guchar alphaSrc, SplashColorPtr colorSrc, 
+                         Guchar alphaDest, SplashColorPtr colorDest, SplashColorPtr colorResult);
+
+private:
+  double x0, y0, r0, dx, dy, dr;
+  double a, inva;
+  SplashOverprintColor *opPattern;
+};
 
 //------------------------------------------------------------------------
 
@@ -69,6 +205,17 @@ public:
   virtual ~SplashOutputDev();
 
   //----- get info about output device
+
+  // Does this device use tilingPatternFill()?  If this returns false,
+  // tiling pattern fills will be reduced to a series of other drawing
+  // operations.
+  virtual GBool useTilingPatternFill() { return gTrue; }
+
+  // Does this device use functionShadedFill(), axialShadedFill(), and
+  // radialShadedFill()?  If this returns false, these shaded fills
+  // will be reduced to a series of other drawing operations.
+  virtual GBool useShadedFills(int type)
+  { return (type >= 2 && type <= 5) ? gTrue : gFalse; }
 
   // Does this device use upside-down coordinates?
   // (Upside-down means (0,0) is the top left corner of the page.)
@@ -113,6 +260,9 @@ public:
   virtual void updateBlendMode(GfxState *state);
   virtual void updateFillOpacity(GfxState *state);
   virtual void updateStrokeOpacity(GfxState *state);
+  virtual void updateFillOverprint(GfxState *state);
+  virtual void updateStrokeOverprint(GfxState *state);
+  virtual void updateOverprintMode(GfxState *state);
 
   //----- update text state
   virtual void updateFont(GfxState *state);
@@ -121,6 +271,14 @@ public:
   virtual void stroke(GfxState *state);
   virtual void fill(GfxState *state);
   virtual void eoFill(GfxState *state);
+  virtual GBool tilingPatternFill(GfxState *state, Catalog *catalog, Object *str,
+				  double *pmat, int paintType, int tilingType, Dict *resDict,
+				  double *mat, double *bbox,
+				  int x0, int y0, int x1, int y1,
+				  double xStep, double yStep);
+  virtual GBool axialShadedFill(GfxState *state, GfxAxialShading *shading, double tMin, double tMax);
+  virtual GBool radialShadedFill(GfxState *state, GfxRadialShading *shading, double tMin, double tMax);
+  virtual GBool gouraudTriangleShadedFill(GfxState *state, GfxGouraudTriangleShading *shading);
 
   //----- path clipping
   virtual void clip(GfxState *state);
@@ -212,9 +370,6 @@ public:
   // Clear the modified region.
   void clearModRegion();
 
-  // Set the Splash fill color.
-  void setFillColor(int r, int g, int b);
-
   SplashFont *getCurrentFont() { return font; }
 
 #if 1 //~tmp: turn off anti-aliasing temporarily
@@ -222,13 +377,14 @@ public:
   virtual void setVectorAntialias(GBool vaa);
 #endif
 
-  void setFreeTypeHinting(GBool enable);
+  void setFreeTypeHinting(GBool enable, GBool enableSlightHinting);
 
 private:
+  GBool univariateShadedFill(GfxState *state, SplashUnivariatePattern *pattern, double tMin, double tMax);
 
   void setupScreenParams(double hDPI, double vDPI);
 #if SPLASH_CMYK
-  SplashPattern *getColor(GfxGray gray, GfxRGB *rgb, GfxCMYK *cmyk);
+  SplashPattern *getColor(GfxColorSpace *colorSpace, GfxGray gray, GfxRGB *rgb, GfxCMYK *cmyk);
 #else
   SplashPattern *getColor(GfxGray gray, GfxRGB *rgb);
 #endif
@@ -243,6 +399,8 @@ private:
 			     Guchar *alphaLine);
   static GBool maskedImageSrc(void *data, SplashColorPtr line,
 			      Guchar *alphaLine);
+  static GBool tilingBitmapSrc(void *data, SplashColorPtr line,
+			     Guchar *alphaLine);
 
   GBool haveCSPattern;		// set if text has been drawn with a
 							//   clipping render mode because of pattern colorspace
@@ -254,6 +412,7 @@ private:
   GBool allowAntialias;
   GBool vectorAntialias;
   GBool enableFreeTypeHinting;
+  GBool enableSlightHinting;
   GBool reverseVideo;		// reverse video mode
   SplashColor paperColor;	// paper color
   SplashScreenParams screenParams;

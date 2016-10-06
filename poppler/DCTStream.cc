@@ -8,6 +8,8 @@
 // Copyright 2005-2010 Albert Astals Cid <aacid@kde.org>
 // Copyright 2009 Ryszard Trojnacki <rysiek@menel.com>
 // Copyright 2010 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright 2011 Daiki Ueno <ueno@unixuser.org>
+// Copyright 2011 Tomas Hoger <thoger@redhat.com>
 //
 //========================================================================
 
@@ -70,14 +72,14 @@ DCTStream::~DCTStream() {
 
 static void exitErrorHandler(jpeg_common_struct *error) {
   j_decompress_ptr cinfo = (j_decompress_ptr)error;
-  str_src_mgr * src = (struct str_src_mgr *)cinfo->src;
-  longjmp(src->setjmp_buffer, 1);
+  str_error_mgr * err = (struct str_error_mgr *)cinfo->err;
+  longjmp(err->setjmp_buffer, 1);
 }
 
 void DCTStream::init()
 {
-  jpeg_std_error(&jerr);
-  jerr.error_exit = &exitErrorHandler;
+  jpeg_std_error(&err.pub);
+  err.pub.error_exit = &exitErrorHandler;
   src.pub.init_source = str_init_source;
   src.pub.fill_input_buffer = str_fill_input_buffer;
   src.pub.skip_input_data = str_skip_input_data;
@@ -90,9 +92,11 @@ void DCTStream::init()
   current = NULL;
   limit = NULL;
   
-  cinfo.err = &jerr;
-  jpeg_create_decompress(&cinfo);
-  cinfo.src = (jpeg_source_mgr *)&src;
+  cinfo.err = &err.pub;
+  if (!setjmp(err.setjmp_buffer)) {
+    jpeg_create_decompress(&cinfo);
+    cinfo.src = (jpeg_source_mgr *)&src;
+  }
   row_buffer = NULL;
 }
 
@@ -121,7 +125,7 @@ void DCTStream::reset() {
       c = str->getChar();
       if (c == -1)
       {
-        error(-1, "Could not find start of jpeg data");
+        error(errSyntaxError, -1, "Could not find start of jpeg data");
         return;
       }
       if (c != 0xFF) c = 0;
@@ -138,9 +142,8 @@ void DCTStream::reset() {
     }
   }
 
-  if (!setjmp(src.setjmp_buffer)) {
-    jpeg_read_header(&cinfo, TRUE);
-
+  if (!setjmp(err.setjmp_buffer) && jpeg_read_header(&cinfo, TRUE) != JPEG_SUSPENDED)
+  {
     // figure out color transform
     if (colorXform == -1 && !cinfo.saw_Adobe_marker) {
       if (cinfo.num_components == 3) {
@@ -182,7 +185,7 @@ void DCTStream::reset() {
   if (current == limit) { \
     if (cinfo.output_scanline < cinfo.output_height) \
     { \
-      if (!setjmp(src.setjmp_buffer)) \
+      if (!setjmp(err.setjmp_buffer)) \
       { \
         if (!jpeg_read_scanlines(&cinfo, row_buffer, 1)) c = EOF; \
         else { \
@@ -222,7 +225,7 @@ int DCTStream::lookChar() {
   return *current;
 }
 
-GooString *DCTStream::getPSFilter(int psLevel, char *indent) {
+GooString *DCTStream::getPSFilter(int psLevel, const char *indent) {
   GooString *s;
 
   if (psLevel < 2) {

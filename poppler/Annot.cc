@@ -15,14 +15,15 @@
 //
 // Copyright (C) 2006 Scott Turner <scotty1024@mac.com>
 // Copyright (C) 2007, 2008 Julien Rebetez <julienr@svn.gnome.org>
-// Copyright (C) 2007-2010 Albert Astals Cid <aacid@kde.org>
-// Copyright (C) 2007-2010 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2007-2011 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2007-2011 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2007, 2008 Iñigo Martínez <inigomartinez@gmail.com>
 // Copyright (C) 2007 Jeff Muizelaar <jeff@infidigm.net>
-// Copyright (C) 2008 Pino Toscano <pino@kde.org>
+// Copyright (C) 2008, 2011 Pino Toscano <pino@kde.org>
 // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
 // Copyright (C) 2008 Hugo Mercier <hmercier31@gmail.com>
 // Copyright (C) 2009 Ilya Gorenbein <igorenbein@finjan.com>
+// Copyright (C) 2011 José Aliste <jaliste@src.gnome.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -46,13 +47,13 @@
 #include "Catalog.h"
 #include "Gfx.h"
 #include "Lexer.h"
+#include "Page.h"
 #include "Annot.h"
 #include "GfxFont.h"
 #include "CharCodeToUnicode.h"
 #include "PDFDocEncoding.h"
 #include "Form.h"
 #include "Error.h"
-#include "Page.h"
 #include "XRef.h"
 #include "Movie.h"
 #include "OptionalContent.h"
@@ -127,14 +128,13 @@ static AnnotExternalDataType parseAnnotExternalData(Dict* dict) {
   AnnotExternalDataType type;
 
   if (dict->lookup("Subtype", &obj1)->isName()) {
-    GooString *typeName = new GooString(obj1.getName());
+    const char *typeName = obj1.getName();
 
-    if (!typeName->cmp("Markup3D")) {
+    if (!strcmp(typeName, "Markup3D")) {
       type = annotExternalDataMarkup3D;
     } else {
       type = annotExternalDataMarkupUnknown;
     }
-    delete typeName;
   } else {
     type = annotExternalDataMarkupUnknown;
   }
@@ -180,13 +180,12 @@ AnnotBorderEffect::AnnotBorderEffect(Dict *dict) {
   Object obj1;
 
   if (dict->lookup("S", &obj1)->isName()) {
-    GooString *effectName = new GooString(obj1.getName());
+    const char *effectName = obj1.getName();
 
-    if (!effectName->cmp("C"))
+    if (!strcmp(effectName, "C"))
       effectType = borderEffectCloudy;
     else
       effectType = borderEffectNoEffect;
-    delete effectName;
   } else {
     effectType = borderEffectNoEffect;
   }
@@ -252,7 +251,7 @@ void AnnotPath::parsePathArray(Array *array) {
   GBool correct = gTrue;
 
   if (array->getLength() % 2) {
-    error(-1, "Bad Annot Path");
+    error(errSyntaxError, -1, "Bad Annot Path");
     return;
   }
 
@@ -342,7 +341,7 @@ AnnotQuadrilaterals::AnnotQuadrilaterals(Array *array, PDFRectangle *rect) {
         } else {
             correct = gFalse;
 	    obj.free();
-	    error (-1, "Invalid QuadPoint in annot");
+	    error (errSyntaxError, -1, "Invalid QuadPoint in annot");
 	    break;
         }
         obj.free();
@@ -441,6 +440,34 @@ AnnotBorder::AnnotBorder() {
   style = borderSolid;
 }
 
+GBool AnnotBorder::parseDashArray(Object *dashObj) {
+  GBool correct = gTrue;
+  int tempLength = dashObj->arrayGetLength();
+  double *tempDash = (double *) gmallocn (tempLength, sizeof (double));
+
+  // TODO: check not all zero (Line Dash Pattern Page 217 PDF 8.1)
+  for (int i = 0; i < tempLength && i < DASH_LIMIT && correct; i++) {
+    Object obj1;
+
+    if (dashObj->arrayGet(i, &obj1)->isNum()) {
+      tempDash[i] = obj1.getNum();
+
+      correct = tempDash[i] >= 0;
+      obj1.free();
+    }
+  }
+
+  if (correct) {
+    dashLength = tempLength;
+    dash = tempDash;
+    style = borderDashed;
+  } else {
+    gfree (tempDash);
+  }
+
+  return correct;
+}
+
 AnnotBorder::~AnnotBorder() {
   if (dash)
     gfree (dash); 
@@ -482,37 +509,11 @@ AnnotBorderArray::AnnotBorderArray(Array *array) {
       correct = gFalse;
     obj1.free();
 
-    // TODO: check not all zero ? (Line Dash Pattern Page 217 PDF 8.1)
     if (arrayLength == 4) {
-      if (array->get(3, &obj1)->isArray()) {
-        Array *dashPattern = obj1.getArray();
-        int tempLength = dashPattern->getLength();
-        double *tempDash = (double *) gmallocn (tempLength, sizeof (double));
-
-        for(int i = 0; i < tempLength && i < DASH_LIMIT && correct; i++) {
-
-          if (dashPattern->get(i, &obj1)->isNum()) {
-            tempDash[i] = obj1.getNum();
-
-            if (tempDash[i] < 0)
-              correct = gFalse;
-
-          } else {
-            correct = gFalse;
-          }
-          obj1.free();
-        }
-
-        if (correct) {
-          dashLength = tempLength;
-          dash = tempDash;
-          style = borderDashed;
-        } else {
-          gfree (tempDash);
-        }
-      } else {
+      if (array->get(3, &obj1)->isArray())
+        correct = parseDashArray(&obj1);
+      else
         correct = gFalse;
-      }
       obj1.free();
     }
   } else {
@@ -544,66 +545,40 @@ AnnotBorderBS::AnnotBorderBS(Dict *dict) {
   dict->lookup("W", &obj1);
   dict->lookup("S", &obj2);
   if (obj1.isNum() && obj2.isName()) {
-    GooString *styleName = new GooString(obj2.getName());
+    const char *styleName = obj2.getName();
 
     width = obj1.getNum();
 
-    if (!styleName->cmp("S")) {
+    if (!strcmp(styleName, "S")) {
       style = borderSolid;
-    } else if (!styleName->cmp("D")) {
+    } else if (!strcmp(styleName, "D")) {
       style = borderDashed;
-    } else if (!styleName->cmp("B")) {
+    } else if (!strcmp(styleName, "B")) {
       style = borderBeveled;
-    } else if (!styleName->cmp("I")) {
+    } else if (!strcmp(styleName, "I")) {
       style = borderInset;
-    } else if (!styleName->cmp("U")) {
+    } else if (!strcmp(styleName, "U")) {
       style = borderUnderlined;
     } else {
       style = borderSolid;
     }
-    delete styleName;
   } else {
     width = 0;
   }
   obj2.free();
   obj1.free();
 
-  // TODO: check not all zero (Line Dash Pattern Page 217 PDF 8.1)
-  if (dict->lookup("D", &obj1)->isArray()) {
-    GBool correct = gTrue;
-    int tempLength = obj1.arrayGetLength();
-    double *tempDash = (double *) gmallocn (tempLength, sizeof (double));
+  if (style == borderDashed) {
+    if (dict->lookup("D", &obj1)->isArray())
+      parseDashArray(&obj1);
+    obj1.free();
 
-    for(int i = 0; i < tempLength && correct; i++) {
-      Object obj2;
-
-      if (obj1.arrayGet(i, &obj2)->isNum()) {
-        tempDash[i] = obj2.getNum();
-
-        if (tempDash[i] < 0)
-          correct = gFalse;
-      } else {
-        correct = gFalse;
-      }
-      obj2.free();
+    if (!dash) {
+      dashLength = 1;
+      dash = (double *) gmallocn (dashLength, sizeof (double));
+      dash[0] = 3;
     }
-
-    if (correct) {
-      dashLength = tempLength;
-      dash = tempDash;
-      style = borderDashed;
-    } else {
-      gfree (tempDash);
-    }
-
   }
-
-  if (!dash) {
-    dashLength = 1;
-    dash = (double *) gmallocn (dashLength, sizeof (double));
-    dash[0] = 3;
-  }
-  obj1.free();
 }
 
 //------------------------------------------------------------------------
@@ -661,6 +636,13 @@ AnnotColor::AnnotColor(Array *array, int adjust) {
     obj1.free();
   }
 
+  if (adjust != 0)
+    adjustColor(adjust);
+}
+
+void AnnotColor::adjustColor(int adjust) {
+  int i;
+
   if (length == 4) {
     adjust = -adjust;
   }
@@ -676,28 +658,6 @@ AnnotColor::AnnotColor(Array *array, int adjust) {
 }
 
 //------------------------------------------------------------------------
-// AnnotBorderStyle
-//------------------------------------------------------------------------
-
-AnnotBorderStyle::AnnotBorderStyle(AnnotBorderType typeA, double widthA,
-				   double *dashA, int dashLengthA,
-				   double rA, double gA, double bA) {
-  type = typeA;
-  width = widthA;
-  dash = dashA;
-  dashLength = dashLengthA;
-  r = rA;
-  g = gA;
-  b = bA;
-}
-
-AnnotBorderStyle::~AnnotBorderStyle() {
-  if (dash) {
-    gfree(dash);
-  }
-}
-
-//------------------------------------------------------------------------
 // AnnotIconFit
 //------------------------------------------------------------------------
 
@@ -705,32 +665,30 @@ AnnotIconFit::AnnotIconFit(Dict* dict) {
   Object obj1;
 
   if (dict->lookup("SW", &obj1)->isName()) {
-    GooString *scaleName = new GooString(obj1.getName());
+    const char *scaleName = obj1.getName();
 
-    if(!scaleName->cmp("B")) {
+    if(!strcmp(scaleName, "B")) {
       scaleWhen = scaleBigger;
-    } else if(!scaleName->cmp("S")) {
+    } else if(!strcmp(scaleName, "S")) {
       scaleWhen = scaleSmaller;
-    } else if(!scaleName->cmp("N")) {
+    } else if(!strcmp(scaleName, "N")) {
       scaleWhen = scaleNever;
     } else {
       scaleWhen = scaleAlways;
     }
-    delete scaleName;
   } else {
     scaleWhen = scaleAlways;
   }
   obj1.free();
 
   if (dict->lookup("S", &obj1)->isName()) {
-    GooString *scaleName = new GooString(obj1.getName());
+    const char *scaleName = obj1.getName();
 
-    if(!scaleName->cmp("A")) {
+    if(!strcmp(scaleName, "A")) {
       scale = scaleAnamorphic;
     } else {
       scale = scaleProportional;
     }
-    delete scaleName;
   } else {
     scale = scaleProportional;
   }
@@ -790,22 +748,22 @@ AnnotAppearanceCharacs::AnnotAppearanceCharacs(Dict *dict) {
   }
   obj1.free();
 
-  if (dict->lookup("CA", &obj1)->isName()) {
-    normalCaption = new GooString(obj1.getName());
+  if (dict->lookup("CA", &obj1)->isString()) {
+    normalCaption = new GooString(obj1.getString());
   } else {
     normalCaption = NULL;
   }
   obj1.free();
 
-  if (dict->lookup("RC", &obj1)->isName()) {
-    rolloverCaption = new GooString(obj1.getName());
+  if (dict->lookup("RC", &obj1)->isString()) {
+    rolloverCaption = new GooString(obj1.getString());
   } else {
     rolloverCaption = NULL;
   }
   obj1.free();
 
-  if (dict->lookup("AC", &obj1)->isName()) {
-    alternateCaption = new GooString(obj1.getName());
+  if (dict->lookup("AC", &obj1)->isString()) {
+    alternateCaption = new GooString(obj1.getString());
   } else {
     alternateCaption = NULL;
   }
@@ -853,6 +811,7 @@ AnnotAppearanceCharacs::~AnnotAppearanceCharacs() {
 Annot::Annot(XRef *xrefA, PDFRectangle *rectA, Catalog *catalog) {
   Object obj1;
 
+  refCnt = 1;
   flags = flagUnknown;
   type = typeUnknown;
 
@@ -875,6 +834,7 @@ Annot::Annot(XRef *xrefA, PDFRectangle *rectA, Catalog *catalog) {
 }
 
 Annot::Annot(XRef *xrefA, Dict *dict, Catalog* catalog) {
+  refCnt = 1;
   hasRef = false;
   flags = flagUnknown;
   type = typeUnknown;
@@ -883,6 +843,7 @@ Annot::Annot(XRef *xrefA, Dict *dict, Catalog* catalog) {
 }
 
 Annot::Annot(XRef *xrefA, Dict *dict, Catalog* catalog, Object *obj) {
+  refCnt = 1;
   if (obj->isRef()) {
     hasRef = gTrue;
     ref = obj->getRef();
@@ -934,7 +895,7 @@ void Annot::initialize(XRef *xrefA, Dict *dict, Catalog *catalog) {
   } else {
     rect->x1 = rect->y1 = 0;
     rect->x2 = rect->y2 = 1;
-    error(-1, "Bad bounding box for annotation");
+    error(errSyntaxError, -1, "Bad bounding box for annotation");
     ok = gFalse;
   }
   obj1.free();
@@ -1044,8 +1005,19 @@ void Annot::initialize(XRef *xrefA, Dict *dict, Catalog *catalog) {
   optContentConfig = catalog ? catalog->getOptContentConfig() : NULL;
   dict->lookupNF("OC", &oc);
   if (!oc.isRef() && !oc.isNull()) {
-    error (-1, "Annotation OC value not null or dict: %i", oc.getType());
+    error (errSyntaxError, -1, "Annotation OC value not null or dict: {0:d}", oc.getType());
   }
+}
+
+void Annot::getRect(double *x1, double *y1, double *x2, double *y2) const {
+  *x1 = rect->x1;
+  *y1 = rect->y1;
+  *x2 = rect->x2;
+  *y2 = rect->y2;
+}
+
+GBool Annot::inRect(double x, double y) const {
+  return rect->contains(x, y);
 }
 
 void Annot::update(const char *key, Object *value) {
@@ -1107,6 +1079,40 @@ void Annot::setPage(Ref *pageRef, int pageIndex)
   page = pageIndex;
 }
 
+void Annot::setAppearanceState(const char *state) {
+  if (!state)
+    return;
+
+  if (appearState && appearState->cmp(state) == 0)
+    return;
+
+  delete appearState;
+  appearState = new GooString(state);
+
+  Object obj1;
+  obj1.initName(state);
+  update ("AS", &obj1);
+
+  // The appearance state determines the current appearance stream
+  Object obj2;
+  if (annotObj.dictLookup("AP", &obj2)->isDict()) {
+    Object obj3;
+
+    if (obj2.dictLookup("N", &obj3)->isDict()) {
+      Object obj4;
+
+      appearance.free();
+      if (obj3.dictLookupNF(state, &obj4)->isRef())
+        obj4.copy(&appearance);
+      else
+        appearance.initNull();
+      obj4.free();
+    }
+    obj3.free();
+  }
+  obj2.free();
+}
+
 double Annot::getXMin() {
   return rect->x1;
 }
@@ -1126,6 +1132,15 @@ void Annot::readArrayNum(Object *pdfArray, int key, double *value) {
     ok = gFalse;
   }
   valueObject.free();
+}
+
+void Annot::incRefCnt() {
+  refCnt++;
+}
+
+void Annot::decRefCnt() {
+  if (--refCnt == 0)
+    delete this;
 }
 
 Annot::~Annot() {
@@ -1283,9 +1298,9 @@ void Annot::createForm(double *bbox, GBool transparencyGroup, Object *resDict, O
   aStream->initStream(mStream);
 }
 
-void Annot::createResourcesDict(char *formName, Object *formStream,
-				char *stateName,
-				double opacity,	char *blendMode,
+void Annot::createResourcesDict(const char *formName, Object *formStream,
+				const char *stateName,
+				double opacity, const char *blendMode,
 				Object *resDict) {
   Object gsDict, stateDict, formDict, obj1;
 
@@ -1468,16 +1483,15 @@ void AnnotMarkup::initialize(XRef *xrefA, Dict *dict, Catalog *catalog, Object *
   obj1.free();
 
   if (dict->lookup("RT", &obj1)->isName()) {
-    GooString *replyName = new GooString(obj1.getName());
+    const char *replyName = obj1.getName();
 
-    if (!replyName->cmp("R")) {
+    if (!strcmp(replyName, "R")) {
       replyTo = replyTypeR;
-    } else if (!replyName->cmp("Group")) {
+    } else if (!strcmp(replyName, "Group")) {
       replyTo = replyTypeGroup;
     } else {
       replyTo = replyTypeR;
     }
-    delete replyName;
   } else {
     replyTo = replyTypeR;
   }
@@ -1999,11 +2013,7 @@ AnnotLink::AnnotLink(XRef *xrefA, Dict *dict, Catalog *catalog, Object *obj) :
 }
 
 AnnotLink::~AnnotLink() {
-  /*
-  if (actionDict)
-    delete actionDict;
-  */
-  dest.free();
+  delete action;
   /*
   if (uriAction)
     delete uriAction;
@@ -2014,30 +2024,35 @@ AnnotLink::~AnnotLink() {
 
 void AnnotLink::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
   Object obj1;
-  /*
-  if (dict->lookup("A", &obj1)->isDict()) {
-    actionDict = NULL;
+
+  action = NULL;
+
+  // look for destination
+  if (!dict->lookup("Dest", &obj1)->isNull()) {
+    action = LinkAction::parseDest(&obj1);
+  // look for action
   } else {
-    actionDict = NULL;
+    obj1.free();
+    if (dict->lookup("A", &obj1)->isDict()) {
+      action = LinkAction::parseAction(&obj1, catalog->getBaseURI());
+    }
   }
   obj1.free();
-  */
-  dict->lookup("Dest", &dest);
-  if (dict->lookup("H", &obj1)->isName()) {
-    GooString *effect = new GooString(obj1.getName());
 
-    if (!effect->cmp("N")) {
+  if (dict->lookup("H", &obj1)->isName()) {
+    const char *effect = obj1.getName();
+
+    if (!strcmp(effect, "N")) {
       linkEffect = effectNone;
-    } else if (!effect->cmp("I")) {
+    } else if (!strcmp(effect, "I")) {
       linkEffect = effectInvert;
-    } else if (!effect->cmp("O")) {
+    } else if (!strcmp(effect, "O")) {
       linkEffect = effectOutline;
-    } else if (!effect->cmp("P")) {
+    } else if (!strcmp(effect, "P")) {
       linkEffect = effectPush;
     } else {
       linkEffect = effectInvert;
     }
-    delete effect;
   } else {
     linkEffect = effectInvert;
   }
@@ -2118,7 +2133,7 @@ void AnnotFreeText::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
     appearanceString = obj1.getString()->copy();
   } else {
     appearanceString = new GooString();
-    error(-1, "Bad appearance for annotation");
+    error(errSyntaxError, -1, "Bad appearance for annotation");
     ok = gFalse;
   }
   obj1.free();
@@ -2166,18 +2181,17 @@ void AnnotFreeText::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
   obj1.free();
 
   if (dict->lookup("IT", &obj1)->isName()) {
-    GooString *intentName = new GooString(obj1.getName());
+    const char *intentName = obj1.getName();
 
-    if (!intentName->cmp("FreeText")) {
+    if (!strcmp(intentName, "FreeText")) {
       intent = intentFreeText;
-    } else if (!intentName->cmp("FreeTextCallout")) {
+    } else if (!strcmp(intentName, "FreeTextCallout")) {
       intent = intentFreeTextCallout;
-    } else if (!intentName->cmp("FreeTextTypeWriter")) {
+    } else if (!strcmp(intentName, "FreeTextTypeWriter")) {
       intent = intentFreeTextTypeWriter;
     } else {
       intent = intentFreeText;
     }
-    delete intentName;
   } else {
     intent = intentFreeText;
   }
@@ -2198,9 +2212,8 @@ void AnnotFreeText::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
   obj1.free();
 
   if (dict->lookup("LE", &obj1)->isName()) {
-    GooString *styleName = new GooString(obj1.getName());
-    endStyle = parseAnnotLineEndingStyle(styleName);
-    delete styleName;
+    GooString styleName(obj1.getName());
+    endStyle = parseAnnotLineEndingStyle(&styleName);
   } else {
     endStyle = annotLineEndingNone;
   }
@@ -2322,16 +2335,15 @@ void AnnotLine::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
   obj1.free();
 
   if (dict->lookup("IT", &obj1)->isName()) {
-    GooString *intentName = new GooString(obj1.getName());
+    const char *intentName = obj1.getName();
 
-    if(!intentName->cmp("LineArrow")) {
+    if(!strcmp(intentName, "LineArrow")) {
       intent = intentLineArrow;
-    } else if(!intentName->cmp("LineDimension")) {
+    } else if(!strcmp(intentName, "LineDimension")) {
       intent = intentLineDimension;
     } else {
       intent = intentLineArrow;
     }
-    delete intentName;
   } else {
     intent = intentLineArrow;
   }
@@ -2348,16 +2360,15 @@ void AnnotLine::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
   obj1.free();
 
   if (dict->lookup("CP", &obj1)->isName()) {
-    GooString *captionName = new GooString(obj1.getName());
+    const char *captionName = obj1.getName();
 
-    if(!captionName->cmp("Inline")) {
+    if(!strcmp(captionName, "Inline")) {
       captionPos = captionPosInline;
-    } else if(!captionName->cmp("Top")) {
+    } else if(!strcmp(captionName, "Top")) {
       captionPos = captionPosTop;
     } else {
       captionPos = captionPosInline;
     }
-    delete captionName;
   } else {
     captionPos = captionPosInline;
   }
@@ -2534,7 +2545,7 @@ void AnnotTextMarkup::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
   if(dict->lookup("QuadPoints", &obj1)->isArray()) {
     quadrilaterals = new AnnotQuadrilaterals(obj1.getArray(), rect);
   } else {
-    error(-1, "Bad Annot Text Markup QuadPoints");
+    error(errSyntaxError, -1, "Bad Annot Text Markup QuadPoints");
     quadrilaterals = NULL;
     ok = gFalse;
   }
@@ -2571,14 +2582,11 @@ void AnnotTextMarkup::draw(Gfx *gfx, GBool printing) {
       }
 
       for (i = 0; i < quadrilaterals->getQuadrilateralsLength(); ++i) {
-        double x1, y1, x2, y2, x3, y3;
+        double x1, x2, y3;
 	double x, y;
 
 	x1 = quadrilaterals->getX1(i);
-	y1 = quadrilaterals->getY1(i);
 	x2 = quadrilaterals->getX2(i);
-	y2 = quadrilaterals->getY2(i);
-	x3 = quadrilaterals->getX3(i);
 	y3 = quadrilaterals->getY3(i);
 
 	x = x1 - rect->x1;
@@ -2596,15 +2604,13 @@ void AnnotTextMarkup::draw(Gfx *gfx, GBool printing) {
       }
 
       for (i = 0; i < quadrilaterals->getQuadrilateralsLength(); ++i) {
-        double x1, y1, x2, y2, x3, y3;
+        double x1, y1, x2, y3;
 	double x, y;
 	double h2;
 
 	x1 = quadrilaterals->getX1(i);
 	y1 = quadrilaterals->getY1(i);
 	x2 = quadrilaterals->getX2(i);
-	y2 = quadrilaterals->getY2(i);
-	x3 = quadrilaterals->getX3(i);
 	y3 = quadrilaterals->getY3(i);
 	h2 = (y1 - y3) / 2.0;
 
@@ -2637,7 +2643,7 @@ void AnnotTextMarkup::draw(Gfx *gfx, GBool printing) {
 	y3 = quadrilaterals->getY3(i);
 	x4 = quadrilaterals->getX4(i);
 	y4 = quadrilaterals->getY4(i);
-	h4 = (y1 - y3) / 4.0;
+	h4 = abs(y1 - y3) / 4.0;
 
 	appearBuf->appendf ("{0:.2f} {1:.2f} m\n", x3, y3);
 	appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
@@ -2688,7 +2694,14 @@ void AnnotTextMarkup::draw(Gfx *gfx, GBool printing) {
 AnnotWidget::AnnotWidget(XRef *xrefA, Dict *dict, Catalog *catalog, Object *obj) :
     Annot(xrefA, dict, catalog, obj) {
   type = typeWidget;
-  widget = NULL;
+  field = NULL;
+  initialize(xrefA, catalog, dict);
+}
+
+AnnotWidget::AnnotWidget(XRef *xrefA, Dict *dict, Catalog *catalog, Object *obj, FormField *fieldA) :
+    Annot(xrefA, dict, catalog, obj) {
+  type = typeWidget;
+  field = fieldA;
   initialize(xrefA, catalog, dict);
 }
 
@@ -2709,35 +2722,20 @@ AnnotWidget::~AnnotWidget() {
 void AnnotWidget::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
   Object obj1;
 
-  if ((form = catalog->getForm ())) {
-    widget = form->findWidgetByRef (ref);
-
-    // check if field apperances need to be regenerated
-    // Only text or choice fields needs to have appearance regenerated
-    // see section 8.6.2 "Variable Text" of PDFReference
-    regen = gFalse;
-    if (widget != NULL && (widget->getType () == formText || widget->getType () == formChoice)) {
-      regen = form->getNeedAppearances ();
-    }
-  }
-
-  // If field doesn't have an AP we'll have to generate it
-  if (appearance.isNone () || appearance.isNull ())
-    regen = gTrue;
+  form = catalog->getForm();
 
   if(dict->lookup("H", &obj1)->isName()) {
-    GooString *modeName = new GooString(obj1.getName());
+    const char *modeName = obj1.getName();
 
-    if(!modeName->cmp("N")) {
+    if(!strcmp(modeName, "N")) {
       mode = highlightModeNone;
-    } else if(!modeName->cmp("O")) {
+    } else if(!strcmp(modeName, "O")) {
       mode = highlightModeOutline;
-    } else if(!modeName->cmp("P") || !modeName->cmp("T")) {
+    } else if(!strcmp(modeName, "P") || !strcmp(modeName, "T")) {
       mode = highlightModePush;
     } else {
       mode = highlightModeInvert;
     }
-    delete modeName;
   } else {
     mode = highlightModeInvert;
   }
@@ -2750,10 +2748,9 @@ void AnnotWidget::initialize(XRef *xrefA, Catalog *catalog, Dict *dict) {
   }
   obj1.free();
 
+  action = NULL;
   if(dict->lookup("A", &obj1)->isDict()) {
-    action = NULL;
-  } else {
-    action = NULL;
+    action = LinkAction::parseAction(&obj1, catalog->getBaseURI());
   }
   obj1.free();
 
@@ -2818,7 +2815,7 @@ void AnnotWidget::layoutText(GooString *text, GooString *outBuf, int *i,
   int last_i1, last_i2, last_o1, last_o2;
 
   if (unicode && text->getLength() % 2 != 0) {
-    error(-1, "AnnotWidget::layoutText, bad unicode string");
+    error(errSyntaxError, -1, "AnnotWidget::layoutText, bad unicode string");
     return;
   }
 
@@ -3013,7 +3010,7 @@ void AnnotWidget::writeString(GooString *str, GooString *appearBuf)
 }
 
 // Draw the variable text or caption for a field.
-void AnnotWidget::drawText(GooString *text, GooString *da, GfxFontDict *fontDict,
+void AnnotWidget::drawText(GooString *text, GooString *da, GfxResources *resources,
     GBool multiline, int comb, int quadding,
     GBool txField, GBool forceZapfDingbats,
     GBool password) {
@@ -3073,7 +3070,7 @@ void AnnotWidget::drawText(GooString *text, GooString *da, GfxFontDict *fontDict
   if (tfPos >= 0) {
     tok = (GooString *)daToks->get(tfPos);
     if (tok->getLength() >= 1 && tok->getChar(0) == '/') {
-      if (!fontDict || !(font = fontDict->lookup(tok->getCString() + 1))) {
+      if (!resources || !(font = resources->lookupFont(tok->getCString() + 1))) {
         if (forceZapfDingbats) {
           // We are forcing ZaDb but the font does not exist
           // so create a fake one
@@ -3086,16 +3083,16 @@ void AnnotWidget::drawText(GooString *text, GooString *da, GfxFontDict *fontDict
           freeFont = gTrue;
           addDingbatsResource = gTrue;
         } else {
-          error(-1, "Unknown font in field's DA string");
+          error(errSyntaxError, -1, "Unknown font in field's DA string");
         }
       }
     } else {
-      error(-1, "Invalid font name in 'Tf' operator in field's DA string");
+      error(errSyntaxError, -1, "Invalid font name in 'Tf' operator in field's DA string");
     }
     tok = (GooString *)daToks->get(tfPos + 1);
     fontSize = gatof(tok->getCString());
   } else {
-    error(-1, "Missing 'Tf' operator in field's DA string");
+    error(errSyntaxError, -1, "Missing 'Tf' operator in field's DA string");
   }
   if (!font) {
     if (daToks) {
@@ -3194,16 +3191,16 @@ void AnnotWidget::drawText(GooString *text, GooString *da, GfxFontDict *fontDict
 
       // compute text start position
       switch (quadding) {
-        case fieldQuadLeft:
-        default:
-          x = borderWidth + 2;
-          break;
-        case fieldQuadCenter:
-          x = (rect->x2 - rect->x1 - w) / 2;
-          break;
-        case fieldQuadRight:
-          x = rect->x2 - rect->x1 - borderWidth - 2 - w;
-          break;
+      case quaddingLeftJustified:
+      default:
+        x = borderWidth + 2;
+        break;
+      case quaddingCentered:
+        x = (rect->x2 - rect->x1 - w) / 2;
+        break;
+      case quaddingRightJustified:
+        x = rect->x2 - rect->x1 - borderWidth - 2 - w;
+        break;
       }
 
       // draw the line
@@ -3248,16 +3245,16 @@ void AnnotWidget::drawText(GooString *text, GooString *da, GfxFontDict *fontDict
 
       // compute starting text cell
       switch (quadding) {
-        case fieldQuadLeft:
-        default:
+      case quaddingLeftJustified:
+      default:
           x = borderWidth;
-          break;
-        case fieldQuadCenter:
-          x = borderWidth + (comb - charCount) / 2 * w;
-          break;
-        case fieldQuadRight:
-          x = borderWidth + (comb - charCount) * w;
-          break;
+        break;
+      case quaddingCentered:
+        x = borderWidth + (comb - charCount) / 2 * w;
+        break;
+      case quaddingRightJustified:
+        x = borderWidth + (comb - charCount) * w;
+        break;
       }
       y = 0.5 * (rect->y2 - rect->y1) - 0.4 * fontSize;
 
@@ -3339,16 +3336,16 @@ void AnnotWidget::drawText(GooString *text, GooString *da, GfxFontDict *fontDict
       // compute text start position
       w *= fontSize;
       switch (quadding) {
-        case fieldQuadLeft:
-        default:
-          x = borderWidth + 2;
-          break;
-        case fieldQuadCenter:
-          x = (rect->x2 - rect->x1 - w) / 2;
-          break;
-        case fieldQuadRight:
-          x = rect->x2 - rect->x1 - borderWidth - 2 - w;
-          break;
+      case quaddingLeftJustified:
+      default:
+        x = borderWidth + 2;
+        break;
+      case quaddingCentered:
+        x = (rect->x2 - rect->x1 - w) / 2;
+        break;
+      case quaddingRightJustified:
+        x = rect->x2 - rect->x1 - borderWidth - 2 - w;
+        break;
       }
       y = 0.5 * (rect->y2 - rect->y1) - 0.4 * fontSize;
 
@@ -3398,9 +3395,8 @@ void AnnotWidget::drawText(GooString *text, GooString *da, GfxFontDict *fontDict
 }
 
 // Draw the variable text or caption for a field.
-void AnnotWidget::drawListBox(GooString **text, GBool *selection,
-			      int nOptions, int topIdx,
-			      GooString *da, GfxFontDict *fontDict, int quadding) {
+void AnnotWidget::drawListBox(FormFieldChoice *fieldChoice,
+			      GooString *da, GfxResources *resources, int quadding) {
   GooList *daToks;
   GooString *tok, *convertedText;
   GfxFont *font;
@@ -3445,16 +3441,16 @@ void AnnotWidget::drawListBox(GooString **text, GBool *selection,
   if (tfPos >= 0) {
     tok = (GooString *)daToks->get(tfPos);
     if (tok->getLength() >= 1 && tok->getChar(0) == '/') {
-      if (!fontDict || !(font = fontDict->lookup(tok->getCString() + 1))) {
-        error(-1, "Unknown font in field's DA string");
+      if (!resources || !(font = resources->lookupFont(tok->getCString() + 1))) {
+        error(errSyntaxError, -1, "Unknown font in field's DA string");
       }
     } else {
-      error(-1, "Invalid font name in 'Tf' operator in field's DA string");
+      error(errSyntaxError, -1, "Invalid font name in 'Tf' operator in field's DA string");
     }
     tok = (GooString *)daToks->get(tfPos + 1);
     fontSize = gatof(tok->getCString());
   } else {
-    error(-1, "Missing 'Tf' operator in field's DA string");
+    error(errSyntaxError, -1, "Missing 'Tf' operator in field's DA string");
   }
   if (!font) {
     if (daToks) {
@@ -3471,9 +3467,9 @@ void AnnotWidget::drawListBox(GooString **text, GBool *selection,
   // compute font autosize
   if (fontSize == 0) {
     wMax = 0;
-    for (i = 0; i < nOptions; ++i) {
+    for (i = 0; i < fieldChoice->getNumChoices(); ++i) {
       j = 0;
-      layoutText(text[i], convertedText, &j, font, &w, 0.0, NULL, gFalse);
+      layoutText(fieldChoice->getChoice(i), convertedText, &j, font, &w, 0.0, NULL, gFalse);
       if (w > wMax) {
         wMax = w;
       }
@@ -3492,12 +3488,12 @@ void AnnotWidget::drawListBox(GooString **text, GBool *selection,
   }
   // draw the text
   y = rect->y2 - rect->y1 - 1.1 * fontSize;
-  for (i = topIdx; i < nOptions; ++i) {
+  for (i = fieldChoice->getTopIndex(); i < fieldChoice->getNumChoices(); ++i) {
     // setup
     appearBuf->append("q\n");
 
     // draw the background if selected
-    if (selection[i]) {
+    if (fieldChoice->isSelected(i)) {
       appearBuf->append("0 g f\n");
       appearBuf->appendf("{0:.2f} {1:.2f} {2:.2f} {3:.2f} re f\n",
           borderWidth,
@@ -3511,19 +3507,19 @@ void AnnotWidget::drawListBox(GooString **text, GBool *selection,
 
     // compute text width and start position
     j = 0;
-    layoutText(text[i], convertedText, &j, font, &w, 0.0, NULL, gFalse);
+    layoutText(fieldChoice->getChoice(i), convertedText, &j, font, &w, 0.0, NULL, gFalse);
     w *= fontSize;
     switch (quadding) {
-      case fieldQuadLeft:
-      default:
-        x = borderWidth + 2;
-        break;
-      case fieldQuadCenter:
-        x = (rect->x2 - rect->x1 - w) / 2;
-        break;
-      case fieldQuadRight:
-        x = rect->x2 - rect->x1 - borderWidth - 2 - w;
-        break;
+    case quaddingLeftJustified:
+    default:
+      x = borderWidth + 2;
+      break;
+    case quaddingCentered:
+      x = (rect->x2 - rect->x1 - w) / 2;
+      break;
+    case quaddingRightJustified:
+      x = rect->x2 - rect->x1 - borderWidth - 2 - w;
+      break;
     }
 
     // set the font matrix
@@ -3549,7 +3545,7 @@ void AnnotWidget::drawListBox(GooString **text, GBool *selection,
     }
 
     // change the text color if selected
-    if (selection[i]) {
+    if (fieldChoice->isSelected(i)) {
       appearBuf->append("1 g\n");
     }
 
@@ -3572,363 +3568,233 @@ void AnnotWidget::drawListBox(GooString **text, GBool *selection,
   delete convertedText;
 }
 
-void AnnotWidget::generateFieldAppearance() {
-  Object mkObj, ftObj, appearDict, drObj, obj1, obj2, obj3;
-  Dict *field;
-  Dict *annot;
-  Dict *acroForm;
-  Dict *mkDict;
-  MemStream *appearStream;
-  GfxFontDict *fontDict;
-  GBool hasCaption;
-  double w, dx, dy, r;
+void AnnotWidget::drawBorder() {
+  int dashLength;
   double *dash;
-  GooString *caption, *da;
-  GooString **text;
-  GBool *selection;
-  int dashLength, ff, quadding, comb, nOptions, topIdx, i, j;
-  GBool modified;
-  AnnotColor aColor;
+  AnnotColor adjustedColor;
+  double w = border->getWidth();
 
-  if (widget == NULL || !widget->getField () || !widget->getField ()->getObj ()->isDict ())
+  AnnotColor *aColor = appearCharacs->getBorderColor();
+  if (!aColor)
+    aColor = appearCharacs->getBackColor();
+  if (!aColor)
     return;
 
-  field = widget->getField ()->getObj ()->getDict ();
-  annot = widget->getObj ()->getDict ();
-  acroForm = form->getObj ()->getDict ();
-  
-  // do not regenerate appearence if widget has not changed
-  modified = widget->isModified ();
+  double dx = rect->x2 - rect->x1;
+  double dy = rect->y2 - rect->y1;
 
-  // only regenerate when it doesn't have an AP or
-  // it already has an AP but widget has been modified
-  if (!regen && !modified) {
-    return;
+  // radio buttons with no caption have a round border
+  GBool hasCaption = appearCharacs->getNormalCaption() != NULL;
+  if (field->getType() == formButton &&
+      static_cast<FormFieldButton*>(field)->getButtonType() == formButtonRadio && !hasCaption) {
+    double r = 0.5 * (dx < dy ? dx : dy);
+    switch (border->getStyle()) {
+    case AnnotBorder::borderDashed:
+      appearBuf->append("[");
+      dashLength = border->getDashLength();
+      dash = border->getDash();
+      for (int i = 0; i < dashLength; ++i) {
+        appearBuf->appendf(" {0:.2f}", dash[i]);
+      }
+      appearBuf->append("] 0 d\n");
+      // fall through to the solid case
+    case AnnotBorder::borderSolid:
+    case AnnotBorder::borderUnderlined:
+      appearBuf->appendf("{0:.2f} w\n", w);
+      setColor(aColor, gFalse);
+      drawCircle(0.5 * dx, 0.5 * dy, r - 0.5 * w, gFalse);
+      break;
+    case AnnotBorder::borderBeveled:
+    case AnnotBorder::borderInset:
+      appearBuf->appendf("{0:.2f} w\n", 0.5 * w);
+      setColor(aColor, gFalse);
+      drawCircle(0.5 * dx, 0.5 * dy, r - 0.25 * w, gFalse);
+      adjustedColor = AnnotColor(*aColor);
+      adjustedColor.adjustColor(border->getStyle() == AnnotBorder::borderBeveled ? 1 : -1);
+      setColor(&adjustedColor, gFalse);
+      drawCircleTopLeft(0.5 * dx, 0.5 * dy, r - 0.75 * w);
+      adjustedColor = AnnotColor(*aColor);
+      adjustedColor.adjustColor(border->getStyle() == AnnotBorder::borderBeveled ? -1 : 1);
+      setColor(&adjustedColor, gFalse);
+      drawCircleBottomRight(0.5 * dx, 0.5 * dy, r - 0.75 * w);
+      break;
+    }
+  } else {
+    switch (border->getStyle()) {
+    case AnnotBorder::borderDashed:
+      appearBuf->append("[");
+      dashLength = border->getDashLength();
+      dash = border->getDash();
+      for (int i = 0; i < dashLength; ++i) {
+        appearBuf->appendf(" {0:.2f}", dash[i]);
+      }
+      appearBuf->append("] 0 d\n");
+      // fall through to the solid case
+    case AnnotBorder::borderSolid:
+      appearBuf->appendf("{0:.2f} w\n", w);
+      setColor(aColor, gFalse);
+      appearBuf->appendf("{0:.2f} {0:.2f} {1:.2f} {2:.2f} re s\n",
+                         0.5 * w, dx - w, dy - w);
+      break;
+    case AnnotBorder::borderBeveled:
+    case AnnotBorder::borderInset:
+      adjustedColor = AnnotColor(*aColor);
+      adjustedColor.adjustColor(border->getStyle() == AnnotBorder::borderBeveled ? 1 : -1);
+      setColor(&adjustedColor, gTrue);
+      appearBuf->append("0 0 m\n");
+      appearBuf->appendf("0 {0:.2f} l\n", dy);
+      appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx, dy);
+      appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx - w, dy - w);
+      appearBuf->appendf("{0:.2f} {1:.2f} l\n", w, dy - w);
+      appearBuf->appendf("{0:.2f} {0:.2f} l\n", w);
+      appearBuf->append("f\n");
+      adjustedColor = AnnotColor(*aColor);
+      adjustedColor.adjustColor(border->getStyle() == AnnotBorder::borderBeveled ? -1 : 1);
+      setColor(&adjustedColor, gTrue);
+      appearBuf->append("0 0 m\n");
+      appearBuf->appendf("{0:.2f} 0 l\n", dx);
+      appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx, dy);
+      appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx - w, dy - w);
+      appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx - w, w);
+      appearBuf->appendf("{0:.2f} {0:.2f} l\n", w);
+      appearBuf->append("f\n");
+      break;
+    case AnnotBorder::borderUnderlined:
+      appearBuf->appendf("{0:.2f} w\n", w);
+      setColor(aColor, gFalse);
+      appearBuf->appendf("0 0 m {0:.2f} 0 l s\n", dx);
+      break;
+    }
+
+    // clip to the inside of the border
+    appearBuf->appendf("{0:.2f} {0:.2f} {1:.2f} {2:.2f} re W n\n",
+                       w, dx - 2 * w, dy - 2 * w);
   }
+}
+
+void AnnotWidget::drawFormFieldButton(GfxResources *resources, GooString *da) {
+  GooString *caption = NULL;
+  if (appearCharacs)
+    caption = appearCharacs->getNormalCaption();
+
+  switch (static_cast<FormFieldButton *>(field)->getButtonType()) {
+  case formButtonRadio: {
+    //~ Acrobat doesn't draw a caption if there is no AP dict (?)
+    if (appearState && appearState->cmp("Off") != 0) {
+      if (caption) {
+        drawText(caption, da, resources, gFalse, 0, fieldQuadCenter,
+                 gFalse, gTrue);
+      } else if (appearCharacs) {
+        AnnotColor *aColor = appearCharacs->getBorderColor();
+        if (aColor) {
+          double dx = rect->x2 - rect->x1;
+          double dy = rect->y2 - rect->y1;
+          setColor(aColor, gTrue);
+          drawCircle(0.5 * dx, 0.5 * dy, 0.2 * (dx < dy ? dx : dy), gTrue);
+        }
+      }
+    }
+  }
+    break;
+  case formButtonPush:
+    if (caption)
+      drawText(caption, da, resources, gFalse, 0, fieldQuadCenter, gFalse, gFalse);
+    break;
+  case formButtonCheck:
+    if (appearState && appearState->cmp("Off") != 0) {
+      if (!caption) {
+        GooString checkMark("3");
+        drawText(&checkMark, da, resources, gFalse, 0, fieldQuadCenter, gFalse, gTrue);
+      } else {
+        drawText(caption, da, resources, gFalse, 0, fieldQuadCenter, gFalse, gTrue);
+      }
+    }
+    break;
+  }
+}
+
+void AnnotWidget::drawFormFieldText(GfxResources *resources, GooString *da) {
+  VariableTextQuadding quadding;
+  GooString *contents;
+  FormFieldText *fieldText = static_cast<FormFieldText *>(field);
+
+  contents = fieldText->getContent();
+  if (contents) {
+    quadding = field->hasTextQuadding() ? field->getTextQuadding() : form->getTextQuadding();
+
+    int comb = 0;
+    if (fieldText->isComb())
+      comb = fieldText->getMaxLen();
+
+    drawText(contents, da, resources,
+             fieldText->isMultiline(), comb, quadding, gTrue, gFalse, fieldText->isPassword());
+  }
+}
+
+void AnnotWidget::drawFormFieldChoice(GfxResources *resources, GooString *da) {
+  GooString *selected;
+  VariableTextQuadding quadding;
+  FormFieldChoice *fieldChoice = static_cast<FormFieldChoice *>(field);
+
+  quadding = field->hasTextQuadding() ? field->getTextQuadding() : form->getTextQuadding();
+
+  if (fieldChoice->isCombo()) {
+    selected = fieldChoice->getSelectedChoice();
+    if (selected) {
+      drawText(selected, da, resources, gFalse, 0, quadding, gTrue, gFalse);
+      //~ Acrobat draws a popup icon on the right side
+    }
+  // list box
+  } else {
+    drawListBox(fieldChoice, da, resources, quadding);
+  }
+}
+
+void AnnotWidget::generateFieldAppearance() {
+  Object appearDict, obj1, obj2;
+  GfxResources *resources;
+  MemStream *appearStream;
+  GooString *da;
 
   appearBuf = new GooString ();
-  // get the appearance characteristics (MK) dictionary
-  if (annot->lookup("MK", &mkObj)->isDict()) {
-    mkDict = mkObj.getDict();
-  } else {
-    mkDict = NULL;
-  }
+
   // draw the background
-  if (mkDict) {
-    if (mkDict->lookup("BG", &obj1)->isArray() &&
-        obj1.arrayGetLength() > 0) {
-      AnnotColor aColor = AnnotColor (obj1.getArray());
-      setColor(&aColor, gTrue);
+  if (appearCharacs) {
+    AnnotColor *aColor = appearCharacs->getBackColor();
+    if (aColor) {
+      setColor(aColor, gTrue);
       appearBuf->appendf("0 0 {0:.2f} {1:.2f} re f\n",
-          rect->x2 - rect->x1, rect->y2 - rect->y1);
+                         rect->x2 - rect->x1, rect->y2 - rect->y1);
     }
-    obj1.free();
   }
-
-  // get the field type
-  Form::fieldLookup(field, "FT", &ftObj);
-
-  // get the field flags (Ff) value
-  if (Form::fieldLookup(field, "Ff", &obj1)->isInt()) {
-    ff = obj1.getInt();
-  } else {
-    ff = 0;
-  }
-  obj1.free();
 
   // draw the border
-  if (mkDict && border) {
-    w = border->getWidth();
-    if (w > 0) {
-      mkDict->lookup("BC", &obj1);
-      if (!(obj1.isArray() && obj1.arrayGetLength() > 0)) {
-        mkDict->lookup("BG", &obj1);
-      }
-      if (obj1.isArray() && obj1.arrayGetLength() > 0) {
-        dx = rect->x2 - rect->x1;
-        dy = rect->y2 - rect->y1;
+  if (appearCharacs && border && border->getWidth() > 0)
+    drawBorder();
 
-        // radio buttons with no caption have a round border
-        hasCaption = mkDict->lookup("CA", &obj2)->isString();
-        obj2.free();
-        if (ftObj.isName("Btn") && (ff & fieldFlagRadio) && !hasCaption) {
-          r = 0.5 * (dx < dy ? dx : dy);
-          switch (border->getStyle()) {
-            case AnnotBorder::borderDashed:
-              appearBuf->append("[");
-              dashLength = border->getDashLength();
-              dash = border->getDash();
-              for (i = 0; i < dashLength; ++i) {
-                appearBuf->appendf(" {0:.2f}", dash[i]);
-              }
-              appearBuf->append("] 0 d\n");
-              // fall through to the solid case
-            case AnnotBorder::borderSolid:
-            case AnnotBorder::borderUnderlined:
-              appearBuf->appendf("{0:.2f} w\n", w);
-	      aColor = AnnotColor (obj1.getArray());
-              setColor(&aColor, gFalse);
-              drawCircle(0.5 * dx, 0.5 * dy, r - 0.5 * w, gFalse);
-              break;
-            case AnnotBorder::borderBeveled:
-            case AnnotBorder::borderInset:
-              appearBuf->appendf("{0:.2f} w\n", 0.5 * w);
-	      aColor = AnnotColor (obj1.getArray());
-              setColor(&aColor, gFalse);
-              drawCircle(0.5 * dx, 0.5 * dy, r - 0.25 * w, gFalse);
-	      aColor = AnnotColor (obj1.getArray(),
-				   border->getStyle() == AnnotBorder::borderBeveled ? 1 : -1);
-              setColor(&aColor, gFalse);
-              drawCircleTopLeft(0.5 * dx, 0.5 * dy, r - 0.75 * w);
-	      aColor = AnnotColor (obj1.getArray(),
-				   border->getStyle() == AnnotBorder::borderBeveled ? -1 : 1);
-              setColor(&aColor, gFalse);
-              drawCircleBottomRight(0.5 * dx, 0.5 * dy, r - 0.75 * w);
-              break;
-          }
+  da = field->getDefaultAppearance();
+  if (!da)
+    da = form->getDefaultAppearance();
 
-        } else {
-          switch (border->getStyle()) {
-            case AnnotBorder::borderDashed:
-              appearBuf->append("[");
-              dashLength = border->getDashLength();
-              dash = border->getDash();
-              for (i = 0; i < dashLength; ++i) {
-                appearBuf->appendf(" {0:.2f}", dash[i]);
-              }
-              appearBuf->append("] 0 d\n");
-              // fall through to the solid case
-            case AnnotBorder::borderSolid:
-              appearBuf->appendf("{0:.2f} w\n", w);
-	      aColor = AnnotColor (obj1.getArray());
-              setColor(&aColor, gFalse);
-              appearBuf->appendf("{0:.2f} {0:.2f} {1:.2f} {2:.2f} re s\n",
-                  0.5 * w, dx - w, dy - w);
-              break;
-            case AnnotBorder::borderBeveled:
-            case AnnotBorder::borderInset:
-	      aColor = AnnotColor (obj1.getArray(),
-				   border->getStyle() == AnnotBorder::borderBeveled ? 1 : -1);
-	      setColor(&aColor, gTrue);
-              appearBuf->append("0 0 m\n");
-              appearBuf->appendf("0 {0:.2f} l\n", dy);
-              appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx, dy);
-              appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx - w, dy - w);
-              appearBuf->appendf("{0:.2f} {1:.2f} l\n", w, dy - w);
-              appearBuf->appendf("{0:.2f} {0:.2f} l\n", w);
-              appearBuf->append("f\n");
-	      aColor = AnnotColor (obj1.getArray(),
-				   border->getStyle() == AnnotBorder::borderBeveled ? -1 : 1);
-              setColor(&aColor, gTrue);
-              appearBuf->append("0 0 m\n");
-              appearBuf->appendf("{0:.2f} 0 l\n", dx);
-              appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx, dy);
-              appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx - w, dy - w);
-              appearBuf->appendf("{0:.2f} {1:.2f} l\n", dx - w, w);
-              appearBuf->appendf("{0:.2f} {0:.2f} l\n", w);
-              appearBuf->append("f\n");
-              break;
-            case AnnotBorder::borderUnderlined:
-              appearBuf->appendf("{0:.2f} w\n", w);
-	      aColor = AnnotColor (obj1.getArray());
-              setColor(&aColor, gFalse);
-              appearBuf->appendf("0 0 m {0:.2f} 0 l s\n", dx);
-              break;
-          }
-
-          // clip to the inside of the border
-          appearBuf->appendf("{0:.2f} {0:.2f} {1:.2f} {2:.2f} re W n\n",
-              w, dx - 2 * w, dy - 2 * w);
-        }
-      }
-      obj1.free();
-    }
-  }
-
-  // get the resource dictionary
-  acroForm->lookup("DR", &drObj);
-
-  // build the font dictionary
-  if (drObj.isDict() && drObj.dictLookup("Font", &obj1)->isDict()) {
-    fontDict = new GfxFontDict(xref, NULL, obj1.getDict());
-  } else {
-    fontDict = NULL;
-  }
-  obj1.free();
-
-  // get the default appearance string
-  if (Form::fieldLookup(field, "DA", &obj1)->isNull()) {
-    obj1.free();
-    acroForm->lookup("DA", &obj1);
-  }
-  if (obj1.isString()) {
-    da = obj1.getString()->copy();
-    //TODO: look for a font size / name HERE
-    // => create a function
-  } else {
-    da = NULL;
-  }
-  obj1.free();
+  resources = form->getDefaultResources();
 
   // draw the field contents
-  if (ftObj.isName("Btn")) {
-    caption = NULL;
-    if (mkDict) {
-      if (mkDict->lookup("CA", &obj1)->isString()) {
-        caption = obj1.getString()->copy();
-      }
-      obj1.free();
-    }
-    // radio button
-    if (ff & fieldFlagRadio) {
-      //~ Acrobat doesn't draw a caption if there is no AP dict (?)
-      if (Form::fieldLookup(field, "V", &obj1)->isName()) {
-        if (annot->lookup("AS", &obj2)->isName(obj1.getName()) &&
-	    strcmp (obj1.getName(), "Off") != 0) {
-          if (caption) {
-            drawText(caption, da, fontDict, gFalse, 0, fieldQuadCenter,
-                gFalse, gTrue);
-          } else {
-            if (mkDict) {
-              if (mkDict->lookup("BC", &obj3)->isArray() &&
-                  obj3.arrayGetLength() > 0) {
-                dx = rect->x2 - rect->x1;
-                dy = rect->y2 - rect->y1;
-		aColor = AnnotColor (obj1.getArray());
-                setColor(&aColor, gTrue);
-                drawCircle(0.5 * dx, 0.5 * dy, 0.2 * (dx < dy ? dx : dy),
-                    gTrue);
-              }
-              obj3.free();
-            }
-          }
-        }
-        obj2.free();
-      }
-      obj1.free();
-      // pushbutton
-    } else if (ff & fieldFlagPushbutton) {
-      if (caption) {
-        drawText(caption, da, fontDict, gFalse, 0, fieldQuadCenter,
-            gFalse, gFalse);
-      }
-      // checkbox
-    } else {
-      if (annot->lookup("AS", &obj1)->isName() &&
-          strcmp(obj1.getName(), "Off") != 0) {
-        if (!caption) {
-          caption = new GooString("3"); // ZapfDingbats checkmark
-        }
-        drawText(caption, da, fontDict, gFalse, 0, fieldQuadCenter,
-            gFalse, gTrue);
-      }
-      obj1.free();
-    }
-    if (caption) {
-      delete caption;
-    }
-  } else if (ftObj.isName("Tx")) {
-    if (Form::fieldLookup(field, "V", &obj1)->isString()) {
-      if (Form::fieldLookup(field, "Q", &obj2)->isInt()) {
-        quadding = obj2.getInt();
-      } else {
-        quadding = fieldQuadLeft;
-      }
-      obj2.free();
-      comb = 0;
-      if (ff & fieldFlagComb) {
-        if (Form::fieldLookup(field, "MaxLen", &obj2)->isInt()) {
-          comb = obj2.getInt();
-        }
-        obj2.free();
-      }
-      drawText(obj1.getString(), da, fontDict,
-          ff & fieldFlagMultiline, comb, quadding, gTrue, gFalse, ff & fieldFlagPassword);
-    }
-    obj1.free();
-  } else if (ftObj.isName("Ch")) {
-    if (Form::fieldLookup(field, "Q", &obj1)->isInt()) {
-      quadding = obj1.getInt();
-    } else {
-      quadding = fieldQuadLeft;
-    }
-    obj1.free();
-    // combo box
-    if (ff & fieldFlagCombo) {
-      if (Form::fieldLookup(field, "V", &obj1)->isString()) {
-        drawText(obj1.getString(), da, fontDict,
-            gFalse, 0, quadding, gTrue, gFalse);
-        //~ Acrobat draws a popup icon on the right side
-      }
-      obj1.free();
-      // list box
-    } else {
-      if (field->lookup("Opt", &obj1)->isArray()) {
-        nOptions = obj1.arrayGetLength();
-        // get the option text
-        text = (GooString **)gmallocn(nOptions, sizeof(GooString *));
-        for (i = 0; i < nOptions; ++i) {
-          text[i] = NULL;
-          obj1.arrayGet(i, &obj2);
-          if (obj2.isString()) {
-            text[i] = obj2.getString()->copy();
-          } else if (obj2.isArray() && obj2.arrayGetLength() == 2) {
-            if (obj2.arrayGet(1, &obj3)->isString()) {
-              text[i] = obj3.getString()->copy();
-            }
-            obj3.free();
-          }
-          obj2.free();
-          if (!text[i]) {
-            text[i] = new GooString();
-          }
-        }
-        // get the selected option(s)
-        selection = (GBool *)gmallocn(nOptions, sizeof(GBool));
-        //~ need to use the I field in addition to the V field
-	Form::fieldLookup(field, "V", &obj2);
-        for (i = 0; i < nOptions; ++i) {
-          selection[i] = gFalse;
-          if (obj2.isString()) {
-            if (!obj2.getString()->cmp(text[i])) {
-              selection[i] = gTrue;
-            }
-          } else if (obj2.isArray()) {
-            for (j = 0; j < obj2.arrayGetLength(); ++j) {
-              if (obj2.arrayGet(j, &obj3)->isString() &&
-                  !obj3.getString()->cmp(text[i])) {
-                selection[i] = gTrue;
-              }
-              obj3.free();
-            }
-          }
-        }
-        obj2.free();
-        // get the top index
-        if (field->lookup("TI", &obj2)->isInt()) {
-          topIdx = obj2.getInt();
-        } else {
-          topIdx = 0;
-        }
-        obj2.free();
-        // draw the text
-        drawListBox(text, selection, nOptions, topIdx, da, fontDict, quadding);
-        for (i = 0; i < nOptions; ++i) {
-          delete text[i];
-        }
-        gfree(text);
-        gfree(selection);
-      }
-      obj1.free();
-    }
-  } else if (ftObj.isName("Sig")) {
+  switch (field->getType()) {
+  case formButton:
+    drawFormFieldButton(resources, da);
+    break;
+  case formText:
+    drawFormFieldText(resources, da);
+    break;
+  case formChoice:
+    drawFormFieldChoice(resources, da);
+    break;
+  case formSignature:
     //~unimp
-  } else {
-    error(-1, "Unknown field type");
-  }
-
-  if (da) {
-    delete da;
+    break;
+  case formUndef:
+  default:
+    error(errSyntaxError, -1, "Unknown field type");
   }
 
   // build the appearance stream dictionary
@@ -3944,10 +3810,10 @@ void AnnotWidget::generateFieldAppearance() {
   appearDict.dictAdd(copyString("BBox"), &obj1);
 
   // set the resource dictionary
-  if (drObj.isDict()) {
-    appearDict.dictAdd(copyString("Resources"), drObj.copy(&obj1));
+  Object *resDict = form->getDefaultResourcesObj();
+  if (resDict->isDict()) {
+    appearDict.dictAdd(copyString("Resources"), resDict->copy(&obj1));
   }
-  drObj.free();
 
   // build the appearance stream
   appearStream = new MemStream(strdup(appearBuf->getCString()), 0,
@@ -3957,48 +3823,6 @@ void AnnotWidget::generateFieldAppearance() {
   delete appearBuf;
 
   appearStream->setNeedFree(gTrue);
-
-  if (widget->isModified()) {
-    //create a new object that will contains the new appearance
-    
-    //if we already have a N entry in our AP dict, reuse it
-    if (annot->lookup("AP", &obj1)->isDict() &&
-        obj1.dictLookupNF("N", &obj2)->isRef()) {
-      appRef = obj2.getRef();
-    }
-
-    obj2.free();
-    obj1.free();
-
-    // this annot doesn't have an AP yet, create one
-    if (appRef.num == 0)
-      appRef = xref->addIndirectObject(&appearance);
-    else // since we reuse the already existing AP, we have to notify the xref about this update
-      xref->setModifiedObject(&appearance, appRef);
-
-    // update object's AP and AS
-    Object apObj;
-    apObj.initDict(xref);
-
-    Object oaRef;
-    oaRef.initRef(appRef.num, appRef.gen);
-
-    apObj.dictSet("N", &oaRef);
-    annot->set("AP", &apObj);
-    Dict* d = new Dict(annot);
-    d->decRef();
-    Object dictObj;
-    dictObj.initDict(d);
-
-    xref->setModifiedObject(&dictObj, ref);
-    dictObj.free();
-  }
-
-  if (fontDict) {
-    delete fontDict;
-  }
-  ftObj.free();
-  mkObj.free();
 }
 
 
@@ -4009,7 +3833,18 @@ void AnnotWidget::draw(Gfx *gfx, GBool printing) {
     return;
 
   addDingbatsResource = gFalse;
-  generateFieldAppearance ();
+
+  // Only construct the appearance stream when
+  // - annot doesn't have an AP or
+  // - it's a field containing text (text and choices) and
+  // - NeedAppearances is true or
+  // - widget has been modified or
+  if (field) {
+    if (appearance.isNull() || (form && form->getNeedAppearances()) ||
+        ((field->getType() == formText || field->getType() == formChoice) &&
+         field->isModified()))
+      generateFieldAppearance();
+  }
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
@@ -4100,7 +3935,8 @@ void AnnotMovie::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
     }
     obj2.free();
   } else {
-    error(-1, "Bad Annot Movie");
+    error(errSyntaxError, -1, "Bad Annot Movie");
+    movie = NULL;
     ok = gFalse;
   }
   movieDict.free();
@@ -4240,12 +4076,13 @@ void AnnotScreen::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
   if (dict->lookup("A", &obj1)->isDict()) {
     action = LinkAction::parseAction(&obj1, catalog->getBaseURI());
     if (action->getKind() == actionRendition && page == 0) {
-      error (-1, "Invalid Rendition action: associated screen annotation without P");
+      error (errSyntaxError, -1, "Invalid Rendition action: associated screen annotation without P");
       delete action;
       action = NULL;
       ok = gFalse;
     }
   }
+  obj1.free();
 
   dict->lookup("AA", &additionAction);
 
@@ -4554,7 +4391,7 @@ void AnnotPolygon::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
     vertices = new AnnotPath(obj1.getArray());
   } else {
     vertices = new AnnotPath();
-    error(-1, "Bad Annot Polygon Vertices");
+    error(errSyntaxError, -1, "Bad Annot Polygon Vertices");
     ok = gFalse;
   }
   obj1.free();
@@ -4594,16 +4431,15 @@ void AnnotPolygon::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
   obj1.free();
 
   if (dict->lookup("IT", &obj1)->isName()) {
-    GooString *intentName = new GooString(obj1.getName());
+    const char *intentName = obj1.getName();
 
-    if(!intentName->cmp("PolygonCloud")) {
+    if(!strcmp(intentName, "PolygonCloud")) {
       intent = polygonCloud;
-    } else if(!intentName->cmp("PolyLineDimension")) {
+    } else if(!strcmp(intentName, "PolyLineDimension")) {
       intent = polylineDimension;
     } else {
       intent = polygonDimension;
     }
-    delete intentName;
   } else {
     intent = polygonCloud;
   }
@@ -4721,7 +4557,7 @@ void AnnotInk::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
   } else {
     inkListLength = 0;
     inkList = NULL;
-    error(-1, "Bad Annot Ink List");
+    error(errSyntaxError, -1, "Bad Annot Ink List");
     ok = gFalse;
   }
   obj1.free();
@@ -4764,7 +4600,7 @@ void AnnotFileAttachment::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) 
   if (dict->lookup("FS", &obj1)->isDict() || dict->lookup("FS", &obj1)->isString()) {
     obj1.copy(&file);
   } else {
-    error(-1, "Bad Annot File Attachment");
+    error(errSyntaxError, -1, "Bad Annot File Attachment");
     ok = gFalse;
   }
   obj1.free();
@@ -4979,7 +4815,7 @@ void AnnotSound::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
 
   sound = Sound::parseSound(dict->lookup("Sound", &obj1));
   if (!sound) {
-    error(-1, "Bad Annot Sound");
+    error(errSyntaxError, -1, "Bad Annot Sound");
     ok = gFalse;
   }
   obj1.free();
@@ -5143,70 +4979,66 @@ Annot3D::Activation::Activation(Dict *dict) {
   Object obj1;
 
   if (dict->lookup("A", &obj1)->isName()) {
-    GooString *name = new GooString(obj1.getName());
+    const char *name = obj1.getName();
 
-    if(!name->cmp("PO")) {
+    if(!strcmp(name, "PO")) {
       aTrigger = aTriggerPageOpened;
-    } else if(!name->cmp("PV")) {
+    } else if(!strcmp(name, "PV")) {
       aTrigger = aTriggerPageVisible;
-    } else if(!name->cmp("XA")) {
+    } else if(!strcmp(name, "XA")) {
       aTrigger = aTriggerUserAction;
     } else {
       aTrigger = aTriggerUnknown;
     }
-    delete name;
   } else {
     aTrigger = aTriggerUnknown;
   }
   obj1.free();
 
   if(dict->lookup("AIS", &obj1)->isName()) {
-    GooString *name = new GooString(obj1.getName());
+    const char *name = obj1.getName();
 
-    if(!name->cmp("I")) {
+    if(!strcmp(name, "I")) {
       aState = aStateEnabled;
-    } else if(!name->cmp("L")) {
+    } else if(!strcmp(name, "L")) {
       aState = aStateDisabled;
     } else {
       aState = aStateUnknown;
     }
-    delete name;
   } else {
     aState = aStateUnknown;
   }
   obj1.free();
 
   if(dict->lookup("D", &obj1)->isName()) {
-    GooString *name = new GooString(obj1.getName());
+    const char *name = obj1.getName();
 
-    if(!name->cmp("PC")) {
+    if(!strcmp(name, "PC")) {
       dTrigger = dTriggerPageClosed;
-    } else if(!name->cmp("PI")) {
+    } else if(!strcmp(name, "PI")) {
       dTrigger = dTriggerPageInvisible;
-    } else if(!name->cmp("XD")) {
+    } else if(!strcmp(name, "XD")) {
       dTrigger = dTriggerUserAction;
     } else {
       dTrigger = dTriggerUnknown;
     }
-    delete name;
   } else {
     dTrigger = dTriggerUnknown;
   }
   obj1.free();
 
   if(dict->lookup("DIS", &obj1)->isName()) {
-    GooString *name = new GooString(obj1.getName());
+    const char *name = obj1.getName();
 
-    if(!name->cmp("U")) {
+    if(!strcmp(name, "U")) {
       dState = dStateUninstantiaded;
-    } else if(!name->cmp("I")) {
+    } else if(!strcmp(name, "I")) {
       dState = dStateInstantiated;
-    } else if(!name->cmp("L")) {
+    } else if(!strcmp(name, "L")) {
       dState = dStateLive;
     } else {
       dState = dStateUnknown;
     }
-    delete name;
   } else {
     dState = dStateUnknown;
   }
@@ -5234,7 +5066,6 @@ Annot3D::Activation::Activation(Dict *dict) {
 Annots::Annots(XRef *xref, Catalog *catalog, Object *annotsObj) {
   Annot *annot;
   Object obj1;
-  int size;
   int i;
 
   annots = NULL;
@@ -5250,14 +5081,11 @@ Annots::Annots(XRef *xref, Catalog *catalog, Object *annotsObj) {
       if (annotsObj->arrayGet(i, &obj1)->isDict()) {
         annotsObj->arrayGetNF(i, &obj2);
         annot = createAnnot (xref, obj1.getDict(), catalog, &obj2);
-        if (annot && annot->isOk()) {
-          if (nAnnots >= size) {
-            size += 16;
-            annots = (Annot **)greallocn(annots, size, sizeof(Annot *));
+        if (annot) {
+          if (annot->isOk()) {
+            appendAnnot(annot);
           }
-          annots[nAnnots++] = annot;
-        } else {
-          delete annot;
+          annot->decRefCnt();
         }
       }
       obj2.free();
@@ -5266,62 +5094,85 @@ Annots::Annots(XRef *xref, Catalog *catalog, Object *annotsObj) {
   }
 }
 
+void Annots::appendAnnot(Annot *annot) {
+  if (annot && annot->isOk()) {
+    if (nAnnots >= size) {
+      size += 16;
+      annots = (Annot **)greallocn(annots, size, sizeof(Annot *));
+    }
+    annots[nAnnots++] = annot;
+    annot->incRefCnt();
+  }
+}
+
 Annot *Annots::createAnnot(XRef *xref, Dict* dict, Catalog *catalog, Object *obj) {
-  Annot *annot;
+  Annot *annot = NULL;
   Object obj1;
 
   if (dict->lookup("Subtype", &obj1)->isName()) {
-    GooString *typeName = new GooString(obj1.getName());
+    const char *typeName = obj1.getName();
 
-    if (!typeName->cmp("Text")) {
+    if (!strcmp(typeName, "Text")) {
       annot = new AnnotText(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Link")) {
+    } else if (!strcmp(typeName, "Link")) {
       annot = new AnnotLink(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("FreeText")) {
+    } else if (!strcmp(typeName, "FreeText")) {
       annot = new AnnotFreeText(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Line")) {
+    } else if (!strcmp(typeName, "Line")) {
       annot = new AnnotLine(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Square")) {
+    } else if (!strcmp(typeName, "Square")) {
       annot = new AnnotGeometry(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Circle")) {
+    } else if (!strcmp(typeName, "Circle")) {
       annot = new AnnotGeometry(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Polygon")) {
+    } else if (!strcmp(typeName, "Polygon")) {
       annot = new AnnotPolygon(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("PolyLine")) {
+    } else if (!strcmp(typeName, "PolyLine")) {
       annot = new AnnotPolygon(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Highlight")) {
+    } else if (!strcmp(typeName, "Highlight")) {
       annot = new AnnotTextMarkup(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Underline")) {
+    } else if (!strcmp(typeName, "Underline")) {
       annot = new AnnotTextMarkup(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Squiggly")) {
+    } else if (!strcmp(typeName, "Squiggly")) {
       annot = new AnnotTextMarkup(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("StrikeOut")) {
+    } else if (!strcmp(typeName, "StrikeOut")) {
       annot = new AnnotTextMarkup(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Stamp")) {
+    } else if (!strcmp(typeName, "Stamp")) {
       annot = new AnnotStamp(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Caret")) {
+    } else if (!strcmp(typeName, "Caret")) {
       annot = new AnnotCaret(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Ink")) {
+    } else if (!strcmp(typeName, "Ink")) {
       annot = new AnnotInk(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("FileAttachment")) {
+    } else if (!strcmp(typeName, "FileAttachment")) {
       annot = new AnnotFileAttachment(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Sound")) {
+    } else if (!strcmp(typeName, "Sound")) {
       annot = new AnnotSound(xref, dict, catalog, obj);
-    } else if(!typeName->cmp("Movie")) {
+    } else if(!strcmp(typeName, "Movie")) {
       annot = new AnnotMovie(xref, dict, catalog, obj);
-    } else if(!typeName->cmp("Widget")) {
-      annot = new AnnotWidget(xref, dict, catalog, obj);
-    } else if(!typeName->cmp("Screen")) {
+    } else if(!strcmp(typeName, "Widget")) {
+      // Find the annot in forms
+      if (obj->isRef()) {
+        Form *form = catalog->getForm();
+        if (form) {
+          FormWidget *widget = form->findWidgetByRef(obj->getRef());
+          if (widget) {
+            annot = widget->getWidgetAnnotation();
+            annot->incRefCnt();
+          }
+        }
+      }
+      if (!annot)
+        annot = new AnnotWidget(xref, dict, catalog, obj);
+    } else if(!strcmp(typeName, "Screen")) {
       annot = new AnnotScreen(xref, dict, catalog, obj);
-    } else if(!typeName->cmp("PrinterMark")) {
+    } else if(!strcmp(typeName, "PrinterMark")) {
       annot = new Annot(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("TrapNet")) {
+    } else if (!strcmp(typeName, "TrapNet")) {
       annot = new Annot(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Watermark")) {
+    } else if (!strcmp(typeName, "Watermark")) {
       annot = new Annot(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("3D")) {
+    } else if (!strcmp(typeName, "3D")) {
       annot = new Annot3D(xref, dict, catalog, obj);
-    } else if (!typeName->cmp("Popup")) {
+    } else if (!strcmp(typeName, "Popup")) {
       /* Popup annots are already handled by markup annots
        * Here we only care about popup annots without a
        * markup annotation associated
@@ -5337,10 +5188,6 @@ Annot *Annots::createAnnot(XRef *xref, Dict* dict, Catalog *catalog, Object *obj
     } else {
       annot = new Annot(xref, dict, catalog, obj);
     }
-
-    delete typeName;
-  } else {
-    annot = NULL;
   }
   obj1.free();
 
@@ -5363,7 +5210,7 @@ Annots::~Annots() {
   int i;
 
   for (i = 0; i < nAnnots; ++i) {
-    delete annots[i];
+    annots[i]->decRefCnt();
   }
   gfree(annots);
 }

@@ -1,13 +1,15 @@
 /* poppler-page.cc: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2005-2010, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2005-2011, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2005, Stefan Kebekus <stefan.kebekus@math.uni-koeln.de>
- * Copyright (C) 2006-2010, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2006-2011, Pino Toscano <pino@kde.org>
  * Copyright (C) 2008 Carlos Garcia Campos <carlosgc@gnome.org>
  * Copyright (C) 2009 Shawn Rutledge <shawn.t.rutledge@gmail.com>
  * Copyright (C) 2010, Guillermo Amaral <gamaral@kdab.com>
  * Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+ * Copyright (C) 2010 Matthias Fauconneau <matthias.fauconneau@gmail.com>
+ * Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,6 +42,7 @@
 #include <TextOutputDev.h>
 #include <Annot.h>
 #include <Link.h>
+#include <FileSpec.h>
 #include <ArthurOutputDev.h>
 #if defined(HAVE_SPLASH)
 #include <SplashOutputDev.h>
@@ -190,7 +193,7 @@ Page::Page(DocumentData *doc, int index) {
   m_page = new PageData();
   m_page->index = index;
   m_page->parentDoc = doc;
-  m_page->page = doc->doc->getCatalog()->getPage(m_page->index + 1);
+  m_page->page = doc->doc->getPage(m_page->index + 1);
   m_page->transition = 0;
 }
 
@@ -250,25 +253,7 @@ QImage Page::renderToImage(double xres, double yres, int x, int y, int w, int h,
       QImage tmpimg(w == -1 ? qRound( size.width() * xres / 72.0 ) : w, h == -1 ? qRound( size.height() * yres / 72.0 ) : h, QImage::Format_ARGB32);
 
       QPainter painter(&tmpimg);
-      if (m_page->parentDoc->m_hints & Document::Antialiasing)
-          painter.setRenderHint(QPainter::Antialiasing);
-      if (m_page->parentDoc->m_hints & Document::TextAntialiasing)
-          painter.setRenderHint(QPainter::TextAntialiasing);
-      painter.translate(x == -1 ? 0 : -x, y == -1 ? 0 : -y);
-      ArthurOutputDev arthur_output(&painter);
-      arthur_output.startDoc(m_page->parentDoc->doc->getXRef());
-      m_page->parentDoc->doc->displayPageSlice(&arthur_output,
-						 m_page->index + 1,
-						 xres,
-						 yres,
-						 rotation,
-						 false,
-						 true,
-						 false,
-						 x,
-						 y,
-						 w,
-						 h);
+      renderToPainter(&painter, xres, yres, x, y, w, h, rotate, DontSaveAndRestore);
       painter.end();
       img = tmpimg;
       break;
@@ -276,6 +261,47 @@ QImage Page::renderToImage(double xres, double yres, int x, int y, int w, int h,
   }
 
   return img;
+}
+
+bool Page::renderToPainter(QPainter* painter, double xres, double yres, int x, int y, int w, int h, Rotation rotate, PainterFlags flags) const
+{
+  if (!painter)
+    return false;
+
+  switch(m_page->parentDoc->m_backend)
+  {
+    case Poppler::Document::SplashBackend:
+      return false;
+    case Poppler::Document::ArthurBackend:
+    {
+      const bool savePainter = !(flags & DontSaveAndRestore);
+      if (savePainter)
+         painter->save();
+      if (m_page->parentDoc->m_hints & Document::Antialiasing)
+          painter->setRenderHint(QPainter::Antialiasing);
+      if (m_page->parentDoc->m_hints & Document::TextAntialiasing)
+          painter->setRenderHint(QPainter::TextAntialiasing);
+      painter->translate(x == -1 ? 0 : -x, y == -1 ? 0 : -y);
+      ArthurOutputDev arthur_output(painter);
+      arthur_output.startDoc(m_page->parentDoc->doc->getXRef());
+      m_page->parentDoc->doc->displayPageSlice(&arthur_output,
+                                               m_page->index + 1,
+                                               xres,
+                                               yres,
+                                               (int)rotate * 90,
+                                               false,
+                                               true,
+                                               false,
+                                               x,
+                                               y,
+                                               w,
+                                               h);
+      if (savePainter)
+         painter->restore();
+      return true;
+    }
+  }
+  return false;
 }
 
 QImage Page::thumbnail() const
@@ -533,7 +559,6 @@ QList<Annotation*> Page::annotations() const
     const uint numAnnotations = annots->getNumAnnots();
     if ( numAnnotations == 0 )
     {
-        delete annots;
         return QList<Annotation*>();
     }
 
@@ -882,11 +907,9 @@ QList<Annotation*> Page::annotations() const
                 // TODO
 
                 // reading link action
-                if ( !linkann->getDest()->isNull() )
+                if ( linkann->getAction() )
                 {
-                    ::LinkAction *act = ::LinkAction::parseDest( linkann->getDest() );
-                    Link * popplerLink = m_page->convertLinkActionToLink( act, QRectF() );
-                    delete act;
+                    Link * popplerLink = m_page->convertLinkActionToLink( linkann->getAction(), QRectF() );
                     if ( popplerLink )
                     {
                         l->setLinkDestination( popplerLink );
@@ -917,8 +940,8 @@ QList<Annotation*> Page::annotations() const
                 // -> fileIcon
                 f->setFileIconName( QString::fromLatin1( attachann->getName()->getCString() ) );
                 // -> embeddedFile
-                EmbFile *embfile = new EmbFile( attachann->getFile(), attachann->getContents() );
-                f->setEmbeddedFile( new EmbeddedFile( embfile ) );
+                FileSpec *filespec = new FileSpec( attachann->getFile() );
+                f->setEmbeddedFile( new EmbeddedFile( *new EmbeddedFileData( filespec ) ) );
                 break;
             }
             case Annot::typeSound:
@@ -955,6 +978,9 @@ QList<Annotation*> Page::annotations() const
             // special case for ignoring unknwon annotations
             case Annot::typeUnknown:
                 continue;
+            // handled as forms or some other way
+            case Annot::typeWidget:
+                continue;
             default:
             {
 #define CASE_FOR_TYPE( thetype ) \
@@ -964,7 +990,6 @@ QList<Annotation*> Page::annotations() const
                 QByteArray type;
                 switch ( subType )
                 {
-                    CASE_FOR_TYPE( Widget )
                     CASE_FOR_TYPE( Screen )
                     CASE_FOR_TYPE( PrinterMark )
                     CASE_FOR_TYPE( TrapNet )
@@ -1276,7 +1301,6 @@ QList<Annotation*> Page::annotations() const
         }
     }
 
-    delete annots;
     /** 5 - finally RETURN ANNOTATIONS */
     return annotationsMap.values();
 }
@@ -1285,7 +1309,7 @@ QList<FormField*> Page::formFields() const
 {
   QList<FormField*> fields;
   ::Page *p = m_page->page;
-  ::FormPageWidgets * form = p->getPageWidgets();
+  ::FormPageWidgets * form = p->getFormWidgets(m_page->parentDoc->doc->getCatalog());
   int formcount = form->getNumWidgets();
   for (int i = 0; i < formcount; ++i)
   {
@@ -1318,6 +1342,8 @@ QList<FormField*> Page::formFields() const
       fields.append(ff);
   }
 
+  delete form;
+
   return fields;
 }
 
@@ -1332,7 +1358,7 @@ QString Page::label() const
   if (!m_page->parentDoc->doc->getCatalog()->indexToLabel(m_page->index, &goo))
     return QString();
 
-  return QString(goo.getCString());
+  return UnicodeParsedString(&goo);
 }
 
 

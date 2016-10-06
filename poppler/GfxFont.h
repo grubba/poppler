@@ -19,6 +19,8 @@
 // Copyright (C) 2007 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright (C) 2007 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
+// Copyright (C) 2011 Axel Strübing <axel.struebing@freenet.de>
+// Copyright (C) 2011 Adrian Johnson <ajohnson@redneon.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -131,9 +133,9 @@ public:
 	W900 };
 
   // Build a GfxFont object.
-  static GfxFont *makeFont(XRef *xref, char *tagA, Ref idA, Dict *fontDict);
+  static GfxFont *makeFont(XRef *xref, const char *tagA, Ref idA, Dict *fontDict);
 
-  GfxFont(char *tagA, Ref idA, GooString *nameA);
+  GfxFont(const char *tagA, Ref idA, GooString *nameA);
 
   GBool isOk() { return ok; }
 
@@ -220,6 +222,9 @@ public:
 			  Unicode **u, int *uLen,
 			  double *dx, double *dy, double *ox, double *oy) = 0;
 
+  // Does this font have a toUnicode map?
+  GBool hasToUnicodeCMap() { return hasToUnicode; }
+
   /* XXX: dfp shouldn't be public, however the font finding code is currently in
    * GlobalParams. Instead it should be inside the GfxFont class. However,
    * getDisplayFont currently uses FCcfg so moving it is not as simple. */
@@ -253,6 +258,7 @@ protected:
   double descent;		// max depth below baseline
   int refCnt;
   GBool ok;
+  GBool hasToUnicode;
 };
 
 //------------------------------------------------------------------------
@@ -262,7 +268,7 @@ protected:
 class Gfx8BitFont: public GfxFont {
 public:
 
-  Gfx8BitFont(XRef *xref, char *tagA, Ref idA, GooString *nameA,
+  Gfx8BitFont(XRef *xref, const char *tagA, Ref idA, GooString *nameA,
 	      GfxFontType typeA, Dict *fontDict);
 
   virtual int getNextChar(char *s, int len, CharCode *code,
@@ -321,7 +327,7 @@ private:
 class GfxCIDFont: public GfxFont {
 public:
 
-  GfxCIDFont(XRef *xref, char *tagA, Ref idA, GooString *nameA,
+  GfxCIDFont(XRef *xref, const char *tagA, Ref idA, GooString *nameA,
 	     Dict *fontDict);
 
   virtual GBool isCIDFont() { return gTrue; }

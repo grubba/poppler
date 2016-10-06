@@ -438,6 +438,31 @@ pgd_action_view_set_action (GtkWidget     *action_view,
 		gtk_widget_show (button);
 	}
 		break;
+        case POPPLER_ACTION_JAVASCRIPT: {
+                GtkTextBuffer *buffer;
+                GtkWidget     *textview;
+                GtkWidget     *swindow;
+
+                pgd_table_add_property (GTK_TABLE (table), "<b>Type:</b>", "JavaScript", &row);
+
+                buffer = gtk_text_buffer_new (NULL);
+                if (action->javascript.script)
+                        gtk_text_buffer_set_text (buffer, action->javascript.script, -1);
+
+                textview = gtk_text_view_new_with_buffer (buffer);
+                gtk_text_view_set_editable (GTK_TEXT_VIEW (textview), FALSE);
+                g_object_unref (buffer);
+
+                swindow = gtk_scrolled_window_new (NULL, NULL);
+                gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (swindow),
+                                                GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+                gtk_container_add (GTK_CONTAINER (swindow), textview);
+                gtk_widget_show (textview);
+
+                pgd_table_add_property_with_custom_widget (GTK_TABLE (table), NULL, swindow, &row);
+                gtk_widget_show (swindow);
+        }
+                break;
 	default:
 		g_assert_not_reached ();
 	}
@@ -557,4 +582,31 @@ pgd_movie_view_set_movie (GtkWidget    *movie_view,
 
 	gtk_container_add (GTK_CONTAINER (alignment), table);
 	gtk_widget_show (table);
+}
+
+GdkPixbuf *
+pgd_pixbuf_new_for_color (PopplerColor *poppler_color)
+{
+        GdkPixbuf *pixbuf;
+	gint num, x;
+	guchar *pixels;
+
+        if (!poppler_color)
+                return NULL;
+
+        pixbuf = gdk_pixbuf_new (GDK_COLORSPACE_RGB,
+                                 FALSE, 8,
+                                 64, 16);
+
+	pixels = gdk_pixbuf_get_pixels (pixbuf);
+	num = gdk_pixbuf_get_width (pixbuf) * gdk_pixbuf_get_height (pixbuf);
+
+	for (x = 0; x < num; x++) {
+                pixels[0] = poppler_color->red;
+                pixels[1] = poppler_color->green;
+                pixels[2] = poppler_color->blue;
+                pixels += 3;
+	}
+
+        return pixbuf;
 }

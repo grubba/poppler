@@ -1,7 +1,7 @@
 /* poppler-private.cc: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
- * Copyright (C) 2006 by Albert Astals Cid <aacid@kde.org>
- * Copyright (C) 2008, 2010 by Pino Toscano <pino@kde.org>
+ * Copyright (C) 2006, 2011 by Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2008, 2010, 2011 by Pino Toscano <pino@kde.org>
  * Inspired on code by
  * Copyright (C) 2004 by Albert Astals Cid <tsdgeos@terra.es>
  * Copyright (C) 2004 by Enrico Ros <eros.kde@email.it>
@@ -29,10 +29,31 @@
 
 #include <Link.h>
 #include <Outline.h>
+#include <UnicodeMap.h>
 
 namespace Poppler {
 
-    void qt4ErrorFunction(int pos, char *msg, va_list args)
+namespace Debug {
+
+    void qDebugDebugFunction(const QString &message, const QVariant & /*closure*/)
+    {
+        qDebug() << message;
+    }
+
+    PopplerDebugFunc debugFunction = qDebugDebugFunction;
+    QVariant debugClosure;
+
+}
+
+    static UnicodeMap *utf8Map = 0;
+
+    void setDebugErrorFunction(PopplerDebugFunc function, const QVariant &closure)
+    {
+        Debug::debugFunction = function ? function : Debug::qDebugDebugFunction;
+        Debug::debugClosure = closure;
+    }
+
+    void qt4ErrorFunction(int pos, const char *msg, va_list args)
     {
         QString emsg;
         char buffer[1024]; // should be big enough
@@ -47,16 +68,32 @@ namespace Poppler {
         }
         qvsnprintf(buffer, sizeof(buffer) - 1, msg, args);
         emsg += QString::fromAscii(buffer);
-        qDebug() << qPrintable(emsg);
+        (*Debug::debugFunction)(emsg, Debug::debugClosure);
     }
 
     QString unicodeToQString(Unicode* u, int len) {
-        QString ret;
-        ret.resize(len);
-        QChar* qch = (QChar*) ret.unicode();
-        for (;len;--len)
-          *qch++ = (QChar) *u++;
-        return ret;
+        if (!utf8Map)
+        {
+                GooString enc("UTF-8");
+                utf8Map = globalParams->getUnicodeMap(&enc);
+                utf8Map->incRefCnt();
+        }
+
+        // ignore the last character if it is 0x0
+        if ((len > 0) && (u[len - 1] == 0))
+        {
+            --len;
+        }
+
+        GooString convertedStr;
+        for (int i = 0; i < len; ++i)
+        {
+            char buf[8];
+            const int n = utf8Map->mapUnicode(u[i], buf, sizeof(buf));
+            convertedStr.append(buf, n);
+        }
+
+        return QString::fromUtf8(convertedStr.getCString(), convertedStr.getLength());
     }
 
     QString UnicodeParsedString(GooString *s1) {
@@ -185,6 +222,41 @@ namespace Poppler {
             default: ;
         }
     }
+    
+    DocumentData::~DocumentData()
+    {
+        qDeleteAll(m_embeddedFiles);
+        delete (OptContentModel *)m_optContentModel;
+        delete doc;
+        delete m_outputDev;
+        delete m_fontInfoIterator;
+    
+        count --;
+        if ( count == 0 )
+        {
+            utf8Map = 0;
+            delete globalParams;
+        }
+      }
+    
+    void DocumentData::init()
+    {
+        m_fontInfoIterator = 0;
+        m_backend = Document::SplashBackend;
+        m_outputDev = 0;
+        paperColor = Qt::white;
+        m_hints = 0;
+        m_optContentModel = 0;
+      
+        if ( count == 0 )
+        {
+            utf8Map = 0;
+            globalParams = new GlobalParams();
+            setErrorFunction(qt4ErrorFunction);
+        }
+        count ++;
+    }
+
 
     void DocumentData::addTocChildren( QDomDocument * docSyn, QDomNode * parent, GooList * items )
     {
