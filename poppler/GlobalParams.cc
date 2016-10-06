@@ -591,6 +591,10 @@ GlobalParams::GlobalParams(const char *customPopplerDataDir)
   psOPI = gFalse;
   psASCIIHex = gFalse;
   psBinary = gFalse;
+  psUncompressPreloadedImages = gFalse;
+  psRasterResolution = 300;
+  psRasterMono = gFalse;
+  psAlwaysRasterize = gFalse;
   textEncoding = new GooString("UTF-8");
 #if defined(_WIN32)
   textEOL = eolDOS;
@@ -605,6 +609,7 @@ GlobalParams::GlobalParams(const char *customPopplerDataDir)
   disableFreeTypeHinting = gFalse;
   antialias = gTrue;
   vectorAntialias = gTrue;
+  antialiasPrinting = gFalse;
   strokeAdjust = gTrue;
   screenType = screenUnset;
   screenSize = -1;
@@ -619,7 +624,6 @@ GlobalParams::GlobalParams(const char *customPopplerDataDir)
   printCommands = gFalse;
   profileCommands = gFalse;
   errQuiet = gFalse;
-  splashResolution = 0.0;
 
   cidToUnicodeCache = new CharCodeToUnicodeCache(cidToUnicodeCacheSize);
   unicodeToUnicodeCache =
@@ -1112,7 +1116,7 @@ static FcPattern *buildFcPattern(GfxFont *font)
 #endif
 
 GooString *GlobalParams::findFontFile(GooString *fontName) {
-  static const char *exts[] = { ".pfa", ".pfb", ".ttf", ".ttc" };
+  static const char *exts[] = { ".pfa", ".pfb", ".ttf", ".ttc", ".otf" };
   GooString *path, *dir;
 #ifdef WIN32
   GooString *fontNameU;
@@ -1162,7 +1166,7 @@ void GlobalParams::setupBaseFonts(char *dir) {
 
 GooString *GlobalParams::findSystemFontFile(GfxFont *font,
 					  SysFontType *type,
-					  int *fontNum) {
+					  int *fontNum, GooString *substituteFontName) {
   SysFontInfo *fi = NULL;
   FcPattern *p=0;
   GooString *path = NULL;
@@ -1218,10 +1222,33 @@ GooString *GlobalParams::findSystemFontFile(GfxFont *font,
 	    continue;
 	  }
 	}
+	FcChar8* s2;
+	if (substituteFontName) {
+	  res = FcPatternGetString(set->fonts[i], FC_FULLNAME, 0, &s2);
+	  if (res == FcResultMatch && s2) {
+	    substituteFontName->Set((char*)s2);
+	  } else {
+	    // fontconfig does not extract fullname for some fonts
+	    // create the fullname from family and style
+	    res = FcPatternGetString(set->fonts[i], FC_FAMILY, 0, &s2);
+	    if (res == FcResultMatch && s2) {
+	      substituteFontName->Set((char*)s2);
+	      res = FcPatternGetString(set->fonts[i], FC_STYLE, 0, &s2);
+	      if (res == FcResultMatch && s2) {
+		GooString *style = new GooString((char*)s2);
+		if (style->cmp("Regular") != 0) {
+		  substituteFontName->append(" ");
+		  substituteFontName->append(style);
+		}
+		delete style;
+	      }
+	    }
+	  }
+	}
 	ext = strrchr((char*)s,'.');
 	if (!ext)
 	  continue;
-	if (!strncasecmp(ext,".ttf",4) || !strncasecmp(ext, ".ttc", 4))
+	if (!strncasecmp(ext,".ttf",4) || !strncasecmp(ext, ".ttc", 4) || !strncasecmp(ext, ".otf", 4))
 	{
 	  int weight, slant;
 	  GBool bold = font->isBold();
@@ -1236,7 +1263,7 @@ GooString *GlobalParams::findSystemFontFile(GfxFont *font,
 	  if (slant == FC_SLANT_ITALIC)
 	    italic = gTrue;
 	  *fontNum = 0;
-	  *type = (!strncasecmp(ext,".ttf",4)) ? sysFontTTF : sysFontTTC;
+	  *type = (!strncasecmp(ext,".ttc",4)) ? sysFontTTC : sysFontTTF;
 	  FcPatternGetInteger(set->fonts[i], FC_INDEX, 0, fontNum);
 	  fi = new SysFontInfo(fontName->copy(), bold, italic,
 			       new GooString((char*)s), *type, *fontNum);
@@ -1371,7 +1398,7 @@ void GlobalParams::setupBaseFonts(char *dir) {
 
 GooString *GlobalParams::findSystemFontFile(GfxFont *font,
 					  SysFontType *type,
-					  int *fontNum) {
+					  int *fontNum, GooString * /*substituteFontName*/) {
   SysFontInfo *fi;
   GooString *path;
 
@@ -1577,6 +1604,42 @@ GBool GlobalParams::getPSBinary() {
   return binary;
 }
 
+GBool GlobalParams::getPSUncompressPreloadedImages() {
+  GBool ah;
+
+  lockGlobalParams;
+  ah = psUncompressPreloadedImages;
+  unlockGlobalParams;
+  return ah;
+}
+
+double GlobalParams::getPSRasterResolution() {
+  double res;
+
+  lockGlobalParams;
+  res = psRasterResolution;
+  unlockGlobalParams;
+  return res;
+}
+
+GBool GlobalParams::getPSRasterMono() {
+  GBool mono;
+
+  lockGlobalParams;
+  mono = psRasterMono;
+  unlockGlobalParams;
+  return mono;
+}
+
+GBool GlobalParams::getPSAlwaysRasterize() {
+  GBool rast;
+
+  lockGlobalParams;
+  rast = psAlwaysRasterize;
+  unlockGlobalParams;
+  return rast;
+}
+
 GooString *GlobalParams::getTextEncodingName() {
   GooString *s;
 
@@ -1645,6 +1708,15 @@ GBool GlobalParams::getVectorAntialias() {
 
   lockGlobalParams;
   f = vectorAntialias;
+  unlockGlobalParams;
+  return f;
+}
+
+GBool GlobalParams::getAntialiasPrinting() {
+  GBool f;
+
+  lockGlobalParams;
+  f = antialiasPrinting;
   unlockGlobalParams;
   return f;
 }
@@ -1761,14 +1833,6 @@ GBool GlobalParams::getErrQuiet() {
   // no locking -- this function may get called from inside a locked
   // section
   return errQuiet;
-}
-
-double GlobalParams::getSplashResolution() {
-  double r;
-  lockGlobalParams;
-  r = splashResolution;
-  unlockGlobalParams;
-  return r;
 }
 
 CharCodeToUnicode *GlobalParams::getCIDToUnicode(GooString *collection) {
@@ -1962,6 +2026,30 @@ void GlobalParams::setPSBinary(GBool binary) {
   unlockGlobalParams;
 }
 
+void GlobalParams::setPSUncompressPreloadedImages(GBool uncomp) {
+  lockGlobalParams;
+  psUncompressPreloadedImages = uncomp;
+  unlockGlobalParams;
+}
+
+void GlobalParams::setPSRasterResolution(double res) {
+  lockGlobalParams;
+  psRasterResolution = res;
+  unlockGlobalParams;
+}
+
+void GlobalParams::setPSRasterMono(GBool mono) {
+  lockGlobalParams;
+  psRasterMono = mono;
+  unlockGlobalParams;
+}
+
+void GlobalParams::setPSAlwaysRasterize(GBool always) {
+  lockGlobalParams;
+  psAlwaysRasterize = always;
+  unlockGlobalParams;
+}
+
 void GlobalParams::setTextEncoding(char *encodingName) {
   lockGlobalParams;
   delete textEncoding;
@@ -2031,6 +2119,12 @@ GBool GlobalParams::setVectorAntialias(char *s) {
   ok = parseYesNo2(s, &vectorAntialias);
   unlockGlobalParams;
   return ok;
+}
+
+void GlobalParams::setAntialiasPrinting(GBool anti) {
+  lockGlobalParams;
+  antialiasPrinting = anti;
+  unlockGlobalParams;
 }
 
 void GlobalParams::setStrokeAdjust(GBool adjust)
@@ -2122,12 +2216,6 @@ void GlobalParams::setProfileCommands(GBool profileCommandsA) {
 void GlobalParams::setErrQuiet(GBool errQuietA) {
   lockGlobalParams;
   errQuiet = errQuietA;
-  unlockGlobalParams;
-}
-
-void GlobalParams::setSplashResolution(double SplashResolutionA) {
-  lockGlobalParams;
-  splashResolution = SplashResolutionA;
   unlockGlobalParams;
 }
 
