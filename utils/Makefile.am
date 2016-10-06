@@ -25,8 +25,11 @@ bin_PROGRAMS =					\
 	pdfseparate				\
 	pdfunite
 
+UTILS_LIBS =
+
 if BUILD_NSS
 bin_PROGRAMS += pdfsig
+UTILS_LIBS += $(NSS3_LIBS)
 endif
 
 if BUILD_SPLASH_OUTPUT
