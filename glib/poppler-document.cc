@@ -127,7 +127,7 @@ _poppler_document_new_from_pdfdoc (PDFDoc  *newDoc,
   document->doc = newDoc;
 
   document->output_dev = new CairoOutputDev ();
-  document->output_dev->startDoc(document->doc->getXRef (), document->doc->getCatalog ());
+  document->output_dev->startDoc(document->doc);
 
   return document;
 }
@@ -2514,7 +2514,7 @@ poppler_document_get_form_field (PopplerDocument *document,
   if (!page)
     return NULL;
 
-  widgets = page->getFormWidgets (document->doc->getCatalog ());
+  widgets = page->getFormWidgets ();
   if (!widgets)
     return NULL;
 

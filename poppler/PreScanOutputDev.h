@@ -45,7 +45,7 @@ class PreScanOutputDev: public OutputDev {
 public:
 
   // Constructor.
-  PreScanOutputDev(XRef *xrefA);
+  PreScanOutputDev(PDFDoc *docA);
 
   // Destructor.
   virtual ~PreScanOutputDev();
@@ -80,7 +80,7 @@ public:
   virtual void stroke(GfxState *state);
   virtual void fill(GfxState *state);
   virtual void eoFill(GfxState *state);
-  virtual GBool tilingPatternFill(GfxState *state, Catalog *cat, Object *str,
+  virtual GBool tilingPatternFill(GfxState *state, Gfx *gfx, Catalog *cat, Object *str,
 				  double *pmat, int paintType, int tilingType, Dict *resDict,
 				  double *mat, double *bbox,
 				  int x0, int y0, int x1, int y1,
@@ -159,7 +159,7 @@ private:
   void check(GfxColorSpace *colorSpace, GfxColor *color,
 	     double opacity, GfxBlendMode blendMode);
 
-  XRef *xref;
+  PDFDoc *doc;
   GBool mono;
   GBool gray;
   GBool transparency;

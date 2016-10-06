@@ -228,8 +228,9 @@ Object *Lexer::getObj(Object *obj, int objNum) {
 	break;
       }
     }
-    if (neg)
+    if (neg) {
       xi = -xi;
+    }
     if (unlikely(overflownInteger)) {
       if (overflownUnsignedInteger) {
         obj->initError();
@@ -263,8 +264,9 @@ Object *Lexer::getObj(Object *obj, int objNum) {
       xf = xf + scale * (c - '0');
       scale *= 0.1;
     }
-    if (neg)
+    if (neg) {
       xf = -xf;
+    }
     obj->initReal(xf);
     break;
 
@@ -430,30 +432,27 @@ Object *Lexer::getObj(Object *obj, int objNum) {
 	}
       }
      notEscChar:
-      if (n == tokBufSize) {
-	if (!s)
-	{
-	  error(errSyntaxError, getPos(), "Warning: name token is longer than what the specification says it can be");
-	  s = new GooString(tokBuf, tokBufSize);
-	}
-	else
-	{
-	  // the spec says 127 is the maximum, we are already at 256 so bail out
-	  error(errSyntaxError, getPos(), "Name token too long");
-	  break;
-	}
-	p = tokBuf;
-	n = 0;
-      }
-      *p++ = c;
+      // the PDF spec claims that names are limited to 127 chars, but
+      // Distiller 8 will produce longer names, and Acrobat 8 will
+      // accept longer names
       ++n;
+      if (n < tokBufSize) {
+	*p++ = c;
+      } else if (n == tokBufSize) {
+	error(errSyntaxError, getPos(), "Warning: name token is longer than what the specification says it can be");
+	*p = c;
+	s = new GooString(tokBuf, n);
+      } else {
+	s->append((char)c);
+      }
     }
-    *p = '\0';
-    if (s) {
-      s->append(tokBuf, n);
+    if (n < tokBufSize) {
+      *p = '\0';
+      obj->initName(tokBuf);
+    } else {
       obj->initName(s->getCString());
       delete s;
-    } else obj->initName(tokBuf);
+    }
     break;
 
   // array punctuation

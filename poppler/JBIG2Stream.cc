@@ -675,6 +675,7 @@ public:
   void clearToOne();
   int getWidth() { return w; }
   int getHeight() { return h; }
+  int getLineSize() { return line; }
   int getPixel(int x, int y)
     { return (x < 0 || x >= w || y < 0 || y >= h) ? 0 :
              (data[y * line + (x >> 3)] >> (7 - (x & 7))) & 1; }
@@ -1052,9 +1053,14 @@ private:
 JBIG2SymbolDict::JBIG2SymbolDict(Guint segNumA, Guint sizeA):
   JBIG2Segment(segNumA)
 {
+  Guint i;
+
   size = sizeA;
   bitmaps = (JBIG2Bitmap **)gmallocn_checkoverflow(size, sizeof(JBIG2Bitmap *));
   if (!bitmaps) size = 0;
+  for (i = 0; i < size; ++i) {
+    bitmaps[i] = NULL;
+  }
   genericRegionStats = NULL;
   refinementRegionStats = NULL;
 }
@@ -1266,6 +1272,23 @@ int JBIG2Stream::getPos() {
   return dataPtr - pageBitmap->getDataPtr();
 }
 
+int JBIG2Stream::getChars(int nChars, Guchar *buffer) {
+  int n, i;
+
+  if (nChars <= 0) {
+    return 0;
+  }
+  if (dataEnd - dataPtr < nChars) {
+    n = (int)(dataEnd - dataPtr);
+  } else {
+    n = nChars;
+  }
+  for (i = 0; i < n; ++i) {
+    buffer[i] = *dataPtr++ ^ 0xff;
+  }
+  return n;
+}
+
 GooString *JBIG2Stream::getPSFilter(int psLevel, const char *indent) {
   return NULL;
 }
@@ -1304,7 +1327,9 @@ void JBIG2Stream::readSegments() {
       refFlags = (refFlags << 24) | (c1 << 16) | (c2 << 8) | c3;
       nRefSegs = refFlags & 0x1fffffff;
       for (i = 0; i < (nRefSegs + 9) >> 3; ++i) {
-	c1 = curStr->getChar();
+	if ((c1 = curStr->getChar()) == EOF) {
+	  goto eofError1;
+	}
       }
     }
 
@@ -1506,7 +1531,7 @@ GBool JBIG2Stream::readSymbolDictSeg(Guint segNum, Guint length,
   Guint symHeight, symWidth, totalWidth, x, symID;
   int dh, dw, refAggNum, refDX, refDY, bmSize;
   GBool ex;
-  int run, cnt;
+  int run, cnt, c;
   Guint i, j, k;
   Guchar *p;
 
@@ -1595,10 +1620,14 @@ GBool JBIG2Stream::readSymbolDictSeg(Guint segNum, Guint length,
 
   // compute symbol code length, per 6.5.8.2.3
   //  symCodeLen = ceil( log2( numInputSyms + numNewSyms ) )
-  symCodeLen = 1;
-  if (likely(numInputSyms + numNewSyms > 0)) { // don't fail too badly if the sum is 0
-    i = (numInputSyms + numNewSyms - 1) >> 1;
-    while (i) {
+  i = numInputSyms + numNewSyms;
+  if (i <= 1) {
+    symCodeLen = huff ? 1 : 0;
+  } else {
+    --i;
+    symCodeLen = 0;
+    // i = floor((numSyms-1) / 2^symCodeLen)
+    while (i > 0) {
       ++symCodeLen;
       i >>= 1;
     }
@@ -1816,7 +1845,10 @@ GBool JBIG2Stream::readSymbolDictSeg(Guint segNum, Guint length,
 	bmSize = symHeight * ((totalWidth + 7) >> 3);
 	p = collBitmap->getDataPtr();
 	for (k = 0; k < (Guint)bmSize; ++k) {
-	  *p++ = curStr->getChar();
+	  if ((c = curStr->getChar()) == EOF) {
+	    break;
+	  }
+	  *p++ = (Guchar)c;
 	}
       } else {
 	collBitmap = readGenericBitmap(gTrue, totalWidth, symHeight,
@@ -2003,11 +2035,17 @@ void JBIG2Stream::readTextRegionSeg(Guint segNum, GBool imm,
       return;
     }
   }
-  symCodeLen = 0;
-  i = 1;
-  while (i < numSyms) {
-    ++symCodeLen;
-    i <<= 1;
+  i = numSyms;
+  if (i <= 1) {
+    symCodeLen = huff ? 1 : 0;
+  } else {
+    --i;
+    symCodeLen = 0;
+    // i = floor((numSyms-1) / 2^symCodeLen)
+    while (i > 0) {
+      ++symCodeLen;
+      i >>= 1;
+    }
   }
 
   // get the symbol bitmaps
@@ -2289,6 +2327,8 @@ JBIG2Bitmap *JBIG2Stream::readTextRegion(GBool huff, GBool refine,
     s = sFirst;
 
     // read the instances
+    // (this loop test is here to avoid an infinite loop with damaged
+    // JBIG2 streams where the normal loop exit doesn't get triggered)
     while (inst < numInstances) {
 
       // T value
@@ -2546,11 +2586,17 @@ void JBIG2Stream::readHalftoneRegionSeg(Guint segNum, GBool imm,
   }
 
   patternDict = (JBIG2PatternDict *)seg;
-  bpp = 0;
-  i = 1;
-  while (i < patternDict->getSize()) {
-    ++bpp;
-    i <<= 1;
+  i = patternDict->getSize();
+  if (i <= 1) {
+    bpp = 0;
+  } else {
+    --i;
+    bpp = 0;
+    // i = floor((size-1) / 2^bpp)
+    while (i > 0) {
+      ++bpp;
+      i >>= 1;
+    }
   }
   patW = patternDict->getBitmap(0)->getWidth();
   patH = patternDict->getBitmap(0)->getHeight();
@@ -2650,7 +2696,7 @@ void JBIG2Stream::readHalftoneRegionSeg(Guint segNum, GBool imm,
 void JBIG2Stream::readGenericRegionSeg(Guint segNum, GBool imm,
 				       GBool lossless, Guint length) {
   JBIG2Bitmap *bitmap;
-  Guint w, h, x, y, segInfoFlags, extCombOp;
+  Guint w, h, x, y, segInfoFlags, extCombOp, rowCount;
   Guint flags, mmr, templ, tpgdOn;
   int atx[4], aty[4];
 
@@ -2717,6 +2763,12 @@ void JBIG2Stream::readGenericRegionSeg(Guint segNum, GBool imm,
     segments->append(bitmap);
   }
 
+  // immediate generic segments can have an unspecified length, in
+  // which case, a row count is stored at the end of the segment
+  if (imm && length == 0xffffffff) {
+    readULong(&rowCount);
+  }
+
   return;
 
  eofError:
@@ -2768,11 +2820,15 @@ JBIG2Bitmap *JBIG2Stream::readGenericBitmap(GBool mmr, int w, int h,
   JBIG2Bitmap *bitmap;
   GBool ltp;
   Guint ltpCX, cx, cx0, cx1, cx2;
-  JBIG2BitmapPtr cxPtr0 = {0}, cxPtr1 = {0};
-  JBIG2BitmapPtr atPtr0 = {0}, atPtr1 = {0}, atPtr2 = {0}, atPtr3 = {0};
   int *refLine, *codingLine;
   int code1, code2, code3;
-  int x, y, a0i, b1i, blackPixels, pix, i;
+  Guchar *p0, *p1, *p2, *pp;
+  Guchar *atP0, *atP1, *atP2, *atP3;
+  Guint buf0, buf1, buf2;
+  Guint atBuf0, atBuf1, atBuf2, atBuf3;
+  int atShift0, atShift1, atShift2, atShift3;
+  Guchar mask;
+  int x, y, x0, x1, a0i, b1i, blackPixels, pix, i;
 
   bitmap = new JBIG2Bitmap(0, w, h);
   if (!bitmap->isOk()) {
@@ -3014,145 +3070,497 @@ JBIG2Bitmap *JBIG2Stream::readGenericBitmap(GBool mmr, int w, int h,
       case 0:
 
 	// set up the context
-	bitmap->getPixelPtr(0, y-2, &cxPtr0);
-	cx0 = bitmap->nextPixel(&cxPtr0);
-	cx0 = (cx0 << 1) | bitmap->nextPixel(&cxPtr0);
-	bitmap->getPixelPtr(0, y-1, &cxPtr1);
-	cx1 = bitmap->nextPixel(&cxPtr1);
-	cx1 = (cx1 << 1) | bitmap->nextPixel(&cxPtr1);
-	cx1 = (cx1 << 1) | bitmap->nextPixel(&cxPtr1);
-	cx2 = 0;
-	bitmap->getPixelPtr(atx[0], y + aty[0], &atPtr0);
-	bitmap->getPixelPtr(atx[1], y + aty[1], &atPtr1);
-	bitmap->getPixelPtr(atx[2], y + aty[2], &atPtr2);
-	bitmap->getPixelPtr(atx[3], y + aty[3], &atPtr3);
+	p2 = pp = bitmap->getDataPtr() + y * bitmap->getLineSize();
+	buf2 = *p2++ << 8;
+	if (y >= 1) {
+	  p1 = bitmap->getDataPtr() + (y - 1) * bitmap->getLineSize();
+	  buf1 = *p1++ << 8;
+	  if (y >= 2) {
+	    p0 = bitmap->getDataPtr() + (y - 2) * bitmap->getLineSize();
+	    buf0 = *p0++ << 8;
+	  } else {
+	    p0 = NULL;
+	    buf0 = 0;
+	  }
+	} else {
+	  p1 = p0 = NULL;
+	  buf1 = buf0 = 0;
+	}
 
-	// decode the row
-	for (x = 0; x < w; ++x) {
+	if (atx[0] >= -8 && atx[0] <= 8 &&
+	    atx[1] >= -8 && atx[1] <= 8 &&
+	    atx[2] >= -8 && atx[2] <= 8 &&
+	    atx[3] >= -8 && atx[3] <= 8) {
+	  // set up the adaptive context
+	  if (y + aty[0] >= 0) {
+	    atP0 = bitmap->getDataPtr() + (y + aty[0]) * bitmap->getLineSize();
+	    atBuf0 = *atP0++ << 8;
+	  } else {
+	    atP0 = NULL;
+	    atBuf0 = 0;
+	  }
+	  atShift0 = 15 - atx[0];
+	  if (y + aty[1] >= 0) {
+	    atP1 = bitmap->getDataPtr() + (y + aty[1]) * bitmap->getLineSize();
+	    atBuf1 = *atP1++ << 8;
+	  } else {
+	    atP1 = NULL;
+	    atBuf1 = 0;
+	  }
+	  atShift1 = 15 - atx[1];
+	  if (y + aty[2] >= 0) {
+	    atP2 = bitmap->getDataPtr() + (y + aty[2]) * bitmap->getLineSize();
+	    atBuf2 = *atP2++ << 8;
+	  } else {
+	    atP2 = NULL;
+	    atBuf2 = 0;
+	  }
+	  atShift2 = 15 - atx[2];
+	  if (y + aty[3] >= 0) {
+	    atP3 = bitmap->getDataPtr() + (y + aty[3]) * bitmap->getLineSize();
+	    atBuf3 = *atP3++ << 8;
+	  } else {
+	    atP3 = NULL;
+	    atBuf3 = 0;
+	  }
+	  atShift3 = 15 - atx[3];
 
-	  // build the context
-	  cx = (cx0 << 13) | (cx1 << 8) | (cx2 << 4) |
-	       (bitmap->nextPixel(&atPtr0) << 3) |
-	       (bitmap->nextPixel(&atPtr1) << 2) |
-	       (bitmap->nextPixel(&atPtr2) << 1) |
-	       bitmap->nextPixel(&atPtr3);
+	  // decode the row
+	  for (x0 = 0, x = 0; x0 < w; x0 += 8, ++pp) {
+	    if (x0 + 8 < w) {
+	      if (p0) {
+		buf0 |= *p0++;
+	      }
+	      if (p1) {
+		buf1 |= *p1++;
+	      }
+	      buf2 |= *p2++;
+	      if (atP0) {
+		atBuf0 |= *atP0++;
+	      }
+	      if (atP1) {
+		atBuf1 |= *atP1++;
+	      }
+	      if (atP2) {
+		atBuf2 |= *atP2++;
+	      }
+	      if (atP3) {
+		atBuf3 |= *atP3++;
+	      }
+	    }
+	    for (x1 = 0, mask = 0x80; x1 < 8 && x < w; ++x1, ++x, mask >>= 1) {
 
-	  // check for a skipped pixel
-	  if (useSkip && skip->getPixel(x, y)) {
-	    pix = 0;
+	      // build the context
+	      cx0 = (buf0 >> 14) & 0x07;
+	      cx1 = (buf1 >> 13) & 0x1f;
+	      cx2 = (buf2 >> 16) & 0x0f;
+	      cx = (cx0 << 13) | (cx1 << 8) | (cx2 << 4) |
+		   (((atBuf0 >> atShift0) & 1) << 3) |
+		   (((atBuf1 >> atShift1) & 1) << 2) |
+		   (((atBuf2 >> atShift2) & 1) << 1) |
+		   ((atBuf3 >> atShift3) & 1);
 
-	  // decode the pixel
-	  } else if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
-	    bitmap->setPixel(x, y);
+	      // check for a skipped pixel
+	      if (!(useSkip && skip->getPixel(x, y))) {
+
+		// decode the pixel
+		if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
+		  *pp |= mask;
+		  buf2 |= 0x8000;
+		  if (aty[0] == 0) {
+		    atBuf0 |= 0x8000;
+		  }
+		  if (aty[1] == 0) {
+		    atBuf1 |= 0x8000;
+		  }
+		  if (aty[2] == 0) {
+		    atBuf2 |= 0x8000;
+		  }
+		  if (aty[3] == 0) {
+		    atBuf3 |= 0x8000;
+		  }
+		}
+	      }
+
+	      // update the context
+	      buf0 <<= 1;
+	      buf1 <<= 1;
+	      buf2 <<= 1;
+	      atBuf0 <<= 1;
+	      atBuf1 <<= 1;
+	      atBuf2 <<= 1;
+	      atBuf3 <<= 1;
+	    }
 	  }
 
-	  // update the context
-	  cx0 = ((cx0 << 1) | bitmap->nextPixel(&cxPtr0)) & 0x07;
-	  cx1 = ((cx1 << 1) | bitmap->nextPixel(&cxPtr1)) & 0x1f;
-	  cx2 = ((cx2 << 1) | pix) & 0x0f;
+	} else {
+	  // decode the row
+	  for (x0 = 0, x = 0; x0 < w; x0 += 8, ++pp) {
+	    if (x0 + 8 < w) {
+	      if (p0) {
+		buf0 |= *p0++;
+	      }
+	      if (p1) {
+		buf1 |= *p1++;
+	      }
+	      buf2 |= *p2++;
+	    }
+	    for (x1 = 0, mask = 0x80; x1 < 8 && x < w; ++x1, ++x, mask >>= 1) {
+
+	      // build the context
+	      cx0 = (buf0 >> 14) & 0x07;
+	      cx1 = (buf1 >> 13) & 0x1f;
+	      cx2 = (buf2 >> 16) & 0x0f;
+	      cx = (cx0 << 13) | (cx1 << 8) | (cx2 << 4) |
+		   (bitmap->getPixel(x + atx[0], y + aty[0]) << 3) |
+		   (bitmap->getPixel(x + atx[1], y + aty[1]) << 2) |
+		   (bitmap->getPixel(x + atx[2], y + aty[2]) << 1) |
+		   bitmap->getPixel(x + atx[3], y + aty[3]);
+
+	      // check for a skipped pixel
+	      if (!(useSkip && skip->getPixel(x, y))) {
+
+		// decode the pixel
+		if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
+		  *pp |= mask;
+		  buf2 |= 0x8000;
+		}
+	      }
+
+	      // update the context
+	      buf0 <<= 1;
+	      buf1 <<= 1;
+	      buf2 <<= 1;
+	    }
+	  }
 	}
 	break;
 
       case 1:
 
 	// set up the context
-	bitmap->getPixelPtr(0, y-2, &cxPtr0);
-	cx0 = bitmap->nextPixel(&cxPtr0);
-	cx0 = (cx0 << 1) | bitmap->nextPixel(&cxPtr0);
-	cx0 = (cx0 << 1) | bitmap->nextPixel(&cxPtr0);
-	bitmap->getPixelPtr(0, y-1, &cxPtr1);
-	cx1 = bitmap->nextPixel(&cxPtr1);
-	cx1 = (cx1 << 1) | bitmap->nextPixel(&cxPtr1);
-	cx1 = (cx1 << 1) | bitmap->nextPixel(&cxPtr1);
-	cx2 = 0;
-	bitmap->getPixelPtr(atx[0], y + aty[0], &atPtr0);
+	p2 = pp = bitmap->getDataPtr() + y * bitmap->getLineSize();
+	buf2 = *p2++ << 8;
+	if (y >= 1) {
+	  p1 = bitmap->getDataPtr() + (y - 1) * bitmap->getLineSize();
+	  buf1 = *p1++ << 8;
+	  if (y >= 2) {
+	    p0 = bitmap->getDataPtr() + (y - 2) * bitmap->getLineSize();
+	    buf0 = *p0++ << 8;
+	  } else {
+	    p0 = NULL;
+	    buf0 = 0;
+	  }
+	} else {
+	  p1 = p0 = NULL;
+	  buf1 = buf0 = 0;
+	}
 
-	// decode the row
-	for (x = 0; x < w; ++x) {
+	if (atx[0] >= -8 && atx[0] <= 8) {
+	  // set up the adaptive context
+	  if (y + aty[0] >= 0) {
+	    atP0 = bitmap->getDataPtr() + (y + aty[0]) * bitmap->getLineSize();
+	    atBuf0 = *atP0++ << 8;
+	  } else {
+	    atP0 = NULL;
+	    atBuf0 = 0;
+	  }
+	  atShift0 = 15 - atx[0];
 
-	  // build the context
-	  cx = (cx0 << 9) | (cx1 << 4) | (cx2 << 1) |
-	       bitmap->nextPixel(&atPtr0);
+	  // decode the row
+	  for (x0 = 0, x = 0; x0 < w; x0 += 8, ++pp) {
+	    if (x0 + 8 < w) {
+	      if (p0) {
+		buf0 |= *p0++;
+	      }
+	      if (p1) {
+		buf1 |= *p1++;
+	      }
+	      buf2 |= *p2++;
+	      if (atP0) {
+		atBuf0 |= *atP0++;
+	      }
+	    }
+	    for (x1 = 0, mask = 0x80; x1 < 8 && x < w; ++x1, ++x, mask >>= 1) {
 
-	  // check for a skipped pixel
-	  if (useSkip && skip->getPixel(x, y)) {
-	    pix = 0;
+	      // build the context
+	      cx0 = (buf0 >> 13) & 0x0f;
+	      cx1 = (buf1 >> 13) & 0x1f;
+	      cx2 = (buf2 >> 16) & 0x07;
+	      cx = (cx0 << 9) | (cx1 << 4) | (cx2 << 1) |
+		   ((atBuf0 >> atShift0) & 1);
 
-	  // decode the pixel
-	  } else if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
-	    bitmap->setPixel(x, y);
+	      // check for a skipped pixel
+	      if (!(useSkip && skip->getPixel(x, y))) {
+
+		// decode the pixel
+		if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
+		  *pp |= mask;
+		  buf2 |= 0x8000;
+		  if (aty[0] == 0) {
+		    atBuf0 |= 0x8000;
+		  }
+		}
+	      }
+
+	      // update the context
+	      buf0 <<= 1;
+	      buf1 <<= 1;
+	      buf2 <<= 1;
+	      atBuf0 <<= 1;
+	    }
 	  }
 
-	  // update the context
-	  cx0 = ((cx0 << 1) | bitmap->nextPixel(&cxPtr0)) & 0x0f;
-	  cx1 = ((cx1 << 1) | bitmap->nextPixel(&cxPtr1)) & 0x1f;
-	  cx2 = ((cx2 << 1) | pix) & 0x07;
+	} else {
+	  // decode the row
+	  for (x0 = 0, x = 0; x0 < w; x0 += 8, ++pp) {
+	    if (x0 + 8 < w) {
+	      if (p0) {
+		buf0 |= *p0++;
+	      }
+	      if (p1) {
+		buf1 |= *p1++;
+	      }
+	      buf2 |= *p2++;
+	    }
+	    for (x1 = 0, mask = 0x80; x1 < 8 && x < w; ++x1, ++x, mask >>= 1) {
+
+	      // build the context
+	      cx0 = (buf0 >> 13) & 0x0f;
+	      cx1 = (buf1 >> 13) & 0x1f;
+	      cx2 = (buf2 >> 16) & 0x07;
+	      cx = (cx0 << 9) | (cx1 << 4) | (cx2 << 1) |
+		   bitmap->getPixel(x + atx[0], y + aty[0]);
+
+	      // check for a skipped pixel
+	      if (!(useSkip && skip->getPixel(x, y))) {
+
+		// decode the pixel
+		if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
+		  *pp |= mask;
+		  buf2 |= 0x8000;
+		}
+	      }
+
+	      // update the context
+	      buf0 <<= 1;
+	      buf1 <<= 1;
+	      buf2 <<= 1;
+	    }
+	  }
 	}
 	break;
 
       case 2:
 
 	// set up the context
-	bitmap->getPixelPtr(0, y-2, &cxPtr0);
-	cx0 = bitmap->nextPixel(&cxPtr0);
-	cx0 = (cx0 << 1) | bitmap->nextPixel(&cxPtr0);
-	bitmap->getPixelPtr(0, y-1, &cxPtr1);
-	cx1 = bitmap->nextPixel(&cxPtr1);
-	cx1 = (cx1 << 1) | bitmap->nextPixel(&cxPtr1);
-	cx2 = 0;
-	bitmap->getPixelPtr(atx[0], y + aty[0], &atPtr0);
+	p2 = pp = bitmap->getDataPtr() + y * bitmap->getLineSize();
+	buf2 = *p2++ << 8;
+	if (y >= 1) {
+	  p1 = bitmap->getDataPtr() + (y - 1) * bitmap->getLineSize();
+	  buf1 = *p1++ << 8;
+	  if (y >= 2) {
+	    p0 = bitmap->getDataPtr() + (y - 2) * bitmap->getLineSize();
+	    buf0 = *p0++ << 8;
+	  } else {
+	    p0 = NULL;
+	    buf0 = 0;
+	  }
+	} else {
+	  p1 = p0 = NULL;
+	  buf1 = buf0 = 0;
+	}
 
-	// decode the row
-	for (x = 0; x < w; ++x) {
+	if (atx[0] >= -8 && atx[0] <= 8) {
+	  // set up the adaptive context
+	  if (y + aty[0] >= 0) {
+	    atP0 = bitmap->getDataPtr() + (y + aty[0]) * bitmap->getLineSize();
+	    atBuf0 = *atP0++ << 8;
+	  } else {
+	    atP0 = NULL;
+	    atBuf0 = 0;
+	  }
+	  atShift0 = 15 - atx[0];
 
-	  // build the context
-	  cx = (cx0 << 7) | (cx1 << 3) | (cx2 << 1) |
-	       bitmap->nextPixel(&atPtr0);
+	  // decode the row
+	  for (x0 = 0, x = 0; x0 < w; x0 += 8, ++pp) {
+	    if (x0 + 8 < w) {
+	      if (p0) {
+		buf0 |= *p0++;
+	      }
+	      if (p1) {
+		buf1 |= *p1++;
+	      }
+	      buf2 |= *p2++;
+	      if (atP0) {
+		atBuf0 |= *atP0++;
+	      }
+	    }
+	    for (x1 = 0, mask = 0x80; x1 < 8 && x < w; ++x1, ++x, mask >>= 1) {
 
-	  // check for a skipped pixel
-	  if (useSkip && skip->getPixel(x, y)) {
-	    pix = 0;
+	      // build the context
+	      cx0 = (buf0 >> 14) & 0x07;
+	      cx1 = (buf1 >> 14) & 0x0f;
+	      cx2 = (buf2 >> 16) & 0x03;
+	      cx = (cx0 << 7) | (cx1 << 3) | (cx2 << 1) |
+		   ((atBuf0 >> atShift0) & 1);
 
-	  // decode the pixel
-	  } else if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
-	    bitmap->setPixel(x, y);
+	      // check for a skipped pixel
+	      if (!(useSkip && skip->getPixel(x, y))) {
+
+		// decode the pixel
+		if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
+		  *pp |= mask;
+		  buf2 |= 0x8000;
+		  if (aty[0] == 0) {
+		    atBuf0 |= 0x8000;
+		  }
+		}
+	      }
+
+	      // update the context
+	      buf0 <<= 1;
+	      buf1 <<= 1;
+	      buf2 <<= 1;
+	      atBuf0 <<= 1;
+	    }
 	  }
 
-	  // update the context
-	  cx0 = ((cx0 << 1) | bitmap->nextPixel(&cxPtr0)) & 0x07;
-	  cx1 = ((cx1 << 1) | bitmap->nextPixel(&cxPtr1)) & 0x0f;
-	  cx2 = ((cx2 << 1) | pix) & 0x03;
+	} else {
+	  // decode the row
+	  for (x0 = 0, x = 0; x0 < w; x0 += 8, ++pp) {
+	    if (x0 + 8 < w) {
+	      if (p0) {
+		buf0 |= *p0++;
+	      }
+	      if (p1) {
+		buf1 |= *p1++;
+	      }
+	      buf2 |= *p2++;
+	    }
+	    for (x1 = 0, mask = 0x80; x1 < 8 && x < w; ++x1, ++x, mask >>= 1) {
+
+	      // build the context
+	      cx0 = (buf0 >> 14) & 0x07;
+	      cx1 = (buf1 >> 14) & 0x0f;
+	      cx2 = (buf2 >> 16) & 0x03;
+	      cx = (cx0 << 7) | (cx1 << 3) | (cx2 << 1) |
+		   bitmap->getPixel(x + atx[0], y + aty[0]);
+
+	      // check for a skipped pixel
+	      if (!(useSkip && skip->getPixel(x, y))) {
+
+		// decode the pixel
+		if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
+		  *pp |= mask;
+		  buf2 |= 0x8000;
+		}
+	      }
+
+	      // update the context
+	      buf0 <<= 1;
+	      buf1 <<= 1;
+	      buf2 <<= 1;
+	    }
+	  }
 	}
 	break;
 
       case 3:
 
 	// set up the context
-	bitmap->getPixelPtr(0, y-1, &cxPtr1);
-	cx1 = bitmap->nextPixel(&cxPtr1);
-	cx1 = (cx1 << 1) | bitmap->nextPixel(&cxPtr1);
-	cx2 = 0;
-	bitmap->getPixelPtr(atx[0], y + aty[0], &atPtr0);
+	p2 = pp = bitmap->getDataPtr() + y * bitmap->getLineSize();
+	buf2 = *p2++ << 8;
+	if (y >= 1) {
+	  p1 = bitmap->getDataPtr() + (y - 1) * bitmap->getLineSize();
+	  buf1 = *p1++ << 8;
+	} else {
+	  p1 = NULL;
+	  buf1 = 0;
+	}
 
-	// decode the row
-	for (x = 0; x < w; ++x) {
+	if (atx[0] >= -8 && atx[0] <= 8) {
+	  // set up the adaptive context
+	  if (y + aty[0] >= 0) {
+	    atP0 = bitmap->getDataPtr() + (y + aty[0]) * bitmap->getLineSize();
+	    atBuf0 = *atP0++ << 8;
+	  } else {
+	    atP0 = NULL;
+	    atBuf0 = 0;
+	  }
+	  atShift0 = 15 - atx[0];
 
-	  // build the context
-	  cx = (cx1 << 5) | (cx2 << 1) |
-	       bitmap->nextPixel(&atPtr0);
+	  // decode the row
+	  for (x0 = 0, x = 0; x0 < w; x0 += 8, ++pp) {
+	    if (x0 + 8 < w) {
+	      if (p1) {
+		buf1 |= *p1++;
+	      }
+	      buf2 |= *p2++;
+	      if (atP0) {
+		atBuf0 |= *atP0++;
+	      }
+	    }
+	    for (x1 = 0, mask = 0x80; x1 < 8 && x < w; ++x1, ++x, mask >>= 1) {
 
-	  // check for a skipped pixel
-	  if (useSkip && skip->getPixel(x, y)) {
-	    pix = 0;
+	      // build the context
+	      cx1 = (buf1 >> 14) & 0x1f;
+	      cx2 = (buf2 >> 16) & 0x0f;
+	      cx = (cx1 << 5) | (cx2 << 1) |
+		   ((atBuf0 >> atShift0) & 1);
 
-	  // decode the pixel
-	  } else if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
-	    bitmap->setPixel(x, y);
+	      // check for a skipped pixel
+	      if (!(useSkip && skip->getPixel(x, y))) {
+
+		// decode the pixel
+		if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
+		  *pp |= mask;
+		  buf2 |= 0x8000;
+		  if (aty[0] == 0) {
+		    atBuf0 |= 0x8000;
+		  }
+		}
+	      }
+
+	      // update the context
+	      buf1 <<= 1;
+	      buf2 <<= 1;
+	      atBuf0 <<= 1;
+	    }
 	  }
 
-	  // update the context
-	  cx1 = ((cx1 << 1) | bitmap->nextPixel(&cxPtr1)) & 0x1f;
-	  cx2 = ((cx2 << 1) | pix) & 0x0f;
+	} else {
+	  // decode the row
+	  for (x0 = 0, x = 0; x0 < w; x0 += 8, ++pp) {
+	    if (x0 + 8 < w) {
+	      if (p1) {
+		buf1 |= *p1++;
+	      }
+	      buf2 |= *p2++;
+	    }
+	    for (x1 = 0, mask = 0x80; x1 < 8 && x < w; ++x1, ++x, mask >>= 1) {
+
+	      // build the context
+	      cx1 = (buf1 >> 14) & 0x1f;
+	      cx2 = (buf2 >> 16) & 0x0f;
+	      cx = (cx1 << 5) | (cx2 << 1) |
+		   bitmap->getPixel(x + atx[0], y + aty[0]);
+
+	      // check for a skipped pixel
+	      if (!(useSkip && skip->getPixel(x, y))) {
+
+		// decode the pixel
+		if ((pix = arithDecoder->decodeBit(cx, genericRegionStats))) {
+		  *pp |= mask;
+		  buf2 |= 0x8000;
+		}
+	      }
+
+	      // update the context
+	      buf1 <<= 1;
+	      buf2 <<= 1;
+	    }
+	  }
 	}
 	break;
       }
@@ -3488,7 +3896,9 @@ void JBIG2Stream::readEndOfStripeSeg(Guint length) {
 
   // skip the segment
   for (i = 0; i < length; ++i) {
-    curStr->getChar();
+    if (curStr->getChar() == EOF) {
+      break;
+    }
   }
 }
 
@@ -3497,7 +3907,9 @@ void JBIG2Stream::readProfilesSeg(Guint length) {
 
   // skip the segment
   for (i = 0; i < length; ++i) {
-    curStr->getChar();
+    if (curStr->getChar() == EOF) {
+      break;
+    }
   }
 }
 
@@ -3570,7 +3982,9 @@ void JBIG2Stream::readExtensionSeg(Guint length) {
 
   // skip the segment
   for (i = 0; i < length; ++i) {
-    curStr->getChar();
+    if (curStr->getChar() == EOF) {
+      break;
+    }
   }
 }
 

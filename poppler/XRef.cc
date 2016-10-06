@@ -826,25 +826,25 @@ GBool XRef::constructXRef(GBool *wasReconstructed) {
         delete parser;
 
       // look for object
-      } else if (isdigit(*p)) {
+      } else if (*p > 0 && isdigit(*p)) {
         num = atoi(p);
         if (num > 0) {
 	  do {
 	    ++p;
-	  } while (*p && isdigit(*p));
-	  if (isspace(*p)) {
+	  } while (*p > 0 && isdigit(*p));
+	  if (*p > 0 && isspace(*p)) {
 	    do {
 	      ++p;
-	    } while (*p && isspace(*p));
-	    if (isdigit(*p)) {
+	    } while (*p > 0 && isspace(*p));
+	    if (*p > 0 && isdigit(*p)) {
 	      gen = atoi(p);
 	      do {
 	        ++p;
-	      } while (*p && isdigit(*p));
-	      if (isspace(*p)) {
+	      } while (*p > 0 && isdigit(*p));
+	      if (*p > 0 && isspace(*p)) {
 	        do {
 		  ++p;
-	        } while (*p && isspace(*p));
+	        } while (*p > 0 && isspace(*p));
 	        if (!strncmp(p, "obj", 3)) {
 		  if (num >= size) {
 		    newSize = (num + 1 + 255) & ~255;
@@ -877,7 +877,7 @@ GBool XRef::constructXRef(GBool *wasReconstructed) {
             return gFalse;
           }
 	  streamEnds = (Guint *)greallocn(streamEnds,
-					streamEndsSize, sizeof(int));
+					streamEndsSize, sizeof(Guint));
         }
         streamEnds[streamEndsLen++] = pos;
       }
@@ -967,16 +967,14 @@ GBool XRef::okToAssemble(GBool ignoreOwnerPW) {
   return (!ignoreOwnerPW && ownerPasswordOk) || (permFlags & permAssemble);
 }
 
-Object *XRef::fetch(int num, int gen, Object *obj, std::set<int> *fetchOriginatorNums) {
+Object *XRef::fetch(int num, int gen, Object *obj, int recursion) {
   XRefEntry *e;
   Parser *parser;
   Object obj1, obj2, obj3;
-  bool deleteFetchOriginatorNums = false;
-  std::pair<std::set<int>::iterator, bool> fetchInsertResult;
 
   // check for bogus ref - this can happen in corrupted PDF files
-  if (num < 0 || num >= size || (fetchOriginatorNums != NULL && fetchOriginatorNums->find(num) != fetchOriginatorNums->end())) {
-    goto err2;
+  if (num < 0 || num >= size) {
+    goto err;
   }
 
   e = getEntry(num);
@@ -984,12 +982,6 @@ Object *XRef::fetch(int num, int gen, Object *obj, std::set<int> *fetchOriginato
     obj = e->obj.copy(obj);
     return obj;
   }
-
-  if (fetchOriginatorNums == NULL) {
-    fetchOriginatorNums = new std::set<int>();
-    deleteFetchOriginatorNums = true;
-  }
-  fetchInsertResult = fetchOriginatorNums->insert(num);
 
   switch (e->type) {
 
@@ -1002,9 +994,9 @@ Object *XRef::fetch(int num, int gen, Object *obj, std::set<int> *fetchOriginato
 	       new Lexer(this,
 		 str->makeSubStream(start + e->offset, gFalse, 0, &obj1)),
 	       gTrue);
-    parser->getObj(&obj1, fetchOriginatorNums);
-    parser->getObj(&obj2, fetchOriginatorNums);
-    parser->getObj(&obj3, fetchOriginatorNums);
+    parser->getObj(&obj1, recursion);
+    parser->getObj(&obj2, recursion);
+    parser->getObj(&obj3, recursion);
     if (!obj1.isInt() || obj1.getInt() != num ||
 	!obj2.isInt() || obj2.getInt() != gen ||
 	!obj3.isCmd("obj")) {
@@ -1039,7 +1031,7 @@ Object *XRef::fetch(int num, int gen, Object *obj, std::set<int> *fetchOriginato
       goto err;
     }
     parser->getObj(obj, encrypted ? fileKey : (Guchar *)NULL,
-		   encAlgorithm, keyLength, num, gen, fetchOriginatorNums);
+		   encAlgorithm, keyLength, num, gen, recursion);
     obj1.free();
     obj2.free();
     obj3.free();
@@ -1048,7 +1040,14 @@ Object *XRef::fetch(int num, int gen, Object *obj, std::set<int> *fetchOriginato
 
   case xrefEntryCompressed:
   {
+#if 0 // Adobe apparently ignores the generation number on compressed objects
     if (gen != 0) {
+      goto err;
+    }
+#endif
+    if (e->offset >= (Guint)size ||
+	entries[e->offset].type != xrefEntryUncompressed) {
+      error(errSyntaxError, -1, "Invalid object stream");
       goto err;
     }
 
@@ -1080,20 +1079,9 @@ Object *XRef::fetch(int num, int gen, Object *obj, std::set<int> *fetchOriginato
     goto err;
   }
   
-  if (deleteFetchOriginatorNums) {
-    delete fetchOriginatorNums;
-  } else {
-    fetchOriginatorNums->erase(fetchInsertResult.first);
-  }
   return obj;
 
  err:
-  if (deleteFetchOriginatorNums) {
-    delete fetchOriginatorNums;
-  } else {
-    fetchOriginatorNums->erase(fetchInsertResult.first);
-  }
- err2:
   return obj->initNull();
 }
 

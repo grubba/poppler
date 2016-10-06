@@ -431,7 +431,7 @@ SplashOutputDev * PdfEnginePoppler::outputDevice() {
         GBool bitmapTopDown = gTrue;
         _outputDev = new SplashOutputDev(gSplashColorMode, 4, gFalse, gBgColor, bitmapTopDown);
         if (_outputDev)
-            _outputDev->startDoc(_pdfDoc->getXRef());
+            _outputDev->startDoc(_pdfDoc);
     }
     return _outputDev;
 }
@@ -742,7 +742,7 @@ void OutputDebugString(const char *txt)
 #define _vsnprintf vsnprintf
 #endif
 
-void my_error(int pos, const char *msg, va_list args) {
+void my_error(void *, ErrorCategory, int pos, char *msg) {
 #if 0
     char        buf[4096], *p = buf;
 
@@ -1231,7 +1231,7 @@ static void RenderCmdLineArg(char *cmdLineArg)
 
 int main(int argc, char **argv)
 {
-    setErrorFunction(my_error);
+    setErrorCallback(my_error, NULL);
     ParseCommandLine(argc, argv);
     if (0 == StrList_Len(&gArgsListRoot))
         PrintUsageAndExit(argc, argv);

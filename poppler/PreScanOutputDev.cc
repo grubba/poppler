@@ -43,9 +43,9 @@
 // PreScanOutputDev
 //------------------------------------------------------------------------
 
-PreScanOutputDev::PreScanOutputDev(XRef *xrefA) {
+PreScanOutputDev::PreScanOutputDev(PDFDoc *docA) {
   level = globalParams->getPSLevel();
-  xref = xrefA;
+  doc = docA;
   clearStats();
 }
 
@@ -81,18 +81,17 @@ void PreScanOutputDev::eoFill(GfxState *state) {
 	state->getFillOpacity(), state->getBlendMode());
 }
 
-GBool PreScanOutputDev::tilingPatternFill(GfxState *state, Catalog *catalog, Object *str,
+GBool PreScanOutputDev::tilingPatternFill(GfxState *state, Gfx *gfx, Catalog *catalog, Object *str,
 					  double *pmat, int paintType, int /*tilingType*/, Dict *resDict,
 					double *mat, double *bbox,
 					int x0, int y0, int x1, int y1,
 					double xStep, double yStep) {
-  PDFRectangle box;
-  Gfx *gfx;
-  box.x1 = bbox[0]; box.y1 = bbox[1];
-  box.x2 = bbox[2]; box.y2 = bbox[3];
-  gfx = new Gfx(xref, this, resDict, catalog, &box, NULL);
-  gfx->display(str);
-  delete gfx;
+  if (paintType == 1) {
+    gfx->drawForm(str, resDict, mat, bbox);
+  } else {
+    check(state->getFillColorSpace(), state->getFillColor(),
+	  state->getFillOpacity(), state->getBlendMode());
+  }
   return gTrue;
 }
 
@@ -109,8 +108,6 @@ void PreScanOutputDev::beginStringOp(GfxState *state) {
   int render;
   GfxFont *font;
   double m11, m12, m21, m22;
-  Ref embRef;
-  DisplayFontParam *dfp;
   GBool simpleTTF;
 
   render = state->getRender();
@@ -125,18 +122,14 @@ void PreScanOutputDev::beginStringOp(GfxState *state) {
 
   font = state->getFont();
   state->getFontTransMat(&m11, &m12, &m21, &m22);
+  //~ this should check for external fonts that are non-TrueType
   simpleTTF = fabs(m11 + m22) < 0.01 &&
               m11 > 0 &&
               fabs(m12) < 0.01 &&
               fabs(m21) < 0.01 &&
               fabs(state->getHorizScaling() - 1) < 0.001 &&
               (font->getType() == fontTrueType ||
-	       font->getType() == fontTrueTypeOT) &&
-              (font->getEmbeddedFontID(&embRef) ||
-	       font->getExtFontFile() ||
-	       (font->getName() &&
-		(dfp = globalParams->getDisplayFont(font)) &&
-		dfp->kind == displayFontTT));
+	       font->getType() == fontTrueTypeOT);
   if (simpleTTF) {
     //~ need to create a FoFiTrueType object, and check for a Unicode cmap
   }

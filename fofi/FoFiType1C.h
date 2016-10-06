@@ -161,9 +161,16 @@ public:
   // be NULL).  This is only useful with 8-bit fonts.
   char **getEncoding();
 
+  // Get the glyph names.
+  int getNumGlyphs() { return nGlyphs; }
+  GooString *getGlyphName(int gid);
+
   // Return the mapping from CIDs to GIDs, and return the number of
   // CIDs in *<nCIDs>.  This is only useful for CID fonts.
-  Gushort *getCIDToGIDMap(int *nCIDs);
+  int *getCIDToGIDMap(int *nCIDs);
+
+  // Return the font matrix as an array of six numbers.
+  void getFontMatrix(double *mat);
 
   // Convert to a Type 1 font, suitable for embedding in a PostScript
   // file.  This is only useful with 8-bit fonts.  If <newEncoding> is
@@ -176,14 +183,25 @@ public:
 
   // Convert to a Type 0 CIDFont, suitable for embedding in a
   // PostScript file.  <psName> will be used as the PostScript font
-  // name.
-  void convertToCIDType0(char *psName,
+  // name.  There are three cases for the CID-to-GID mapping:
+  // (1) if <codeMap> is non-NULL, then it is the CID-to-GID mapping
+  // (2) if <codeMap> is NULL and this is a CID CFF font, then the
+  //     font's internal CID-to-GID mapping is used
+  // (3) is <codeMap> is NULL and this is an 8-bit CFF font, then
+  //     the identity CID-to-GID mapping is used
+  void convertToCIDType0(char *psName, int *codeMap, int nCodes,
 			 FoFiOutputFunc outputFunc, void *outputStream);
 
   // Convert to a Type 0 (but non-CID) composite font, suitable for
   // embedding in a PostScript file.  <psName> will be used as the
-  // PostScript font name.
-  void convertToType0(char *psName,
+  // PostScript font name.  There are three cases for the CID-to-GID
+  // mapping:
+  // (1) if <codeMap> is non-NULL, then it is the CID-to-GID mapping
+  // (2) if <codeMap> is NULL and this is a CID CFF font, then the
+  //     font's internal CID-to-GID mapping is used
+  // (3) is <codeMap> is NULL and this is an 8-bit CFF font, then
+  //     the identity CID-to-GID mapping is used
+  void convertToType0(char *psName, int *codeMap, int nCodes,
 		      FoFiOutputFunc outputFunc, void *outputStream);
 
 private:
@@ -201,6 +219,7 @@ private:
   void cvtNum(double x, GBool isFP, GooString *charBuf);
   void eexecWrite(Type1CEexecBuf *eb, const char *s);
   void eexecWriteCharstring(Type1CEexecBuf *eb, Guchar *s, int n);
+  void writePSString(char *s, FoFiOutputFunc outputFunc, void *outputStream);
   GBool parse();
   void readTopDict();
   void readFD(int offset, int length, Type1CPrivateDict *pDict);

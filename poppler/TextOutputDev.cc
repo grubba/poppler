@@ -205,9 +205,8 @@ TextFontInfo::TextFontInfo(GfxState *state) {
   if (gfxFont)
     gfxFont->incRefCnt();
 #if TEXTOUT_WORD_LIST
-  fontName = (gfxFont && gfxFont->getOrigName())
-                 ? gfxFont->getOrigName()->copy()
-                 : (GooString *)NULL;
+  fontName = (gfxFont && gfxFont->getName()) ? gfxFont->getName()->copy()
+                                             : (GooString *)NULL;
   flags = gfxFont ? gfxFont->getFlags() : 0;
 #endif
 }
@@ -235,74 +234,103 @@ GBool TextFontInfo::matches(TextFontInfo *fontInfo) {
 //------------------------------------------------------------------------
 
 TextWord::TextWord(GfxState *state, int rotA, double x0, double y0,
-		   int charPosA, TextFontInfo *fontA, double fontSizeA) {
+		   TextFontInfo *fontA, double fontSizeA) {
   GfxFont *gfxFont;
   double x, y, ascent, descent;
-
+  int wMode;
+  
   rot = rotA;
-  charPos = charPosA;
-  charLen = 0;
   font = fontA;
   fontSize = fontSizeA;
   state->transform(x0, y0, &x, &y);
   if ((gfxFont = font->gfxFont)) {
     ascent = gfxFont->getAscent() * fontSize;
     descent = gfxFont->getDescent() * fontSize;
+    wMode = gfxFont->getWMode();
   } else {
     // this means that the PDF file draws text without a current font,
     // which should never happen
     ascent = 0.95 * fontSize;
     descent = -0.35 * fontSize;
+    wMode = 0;
   }
-  switch (rot) {
-  case 0:
-    yMin = y - ascent;
-    yMax = y - descent;
-    if (yMin == yMax) {
-      // this is a sanity check for a case that shouldn't happen -- but
-      // if it does happen, we want to avoid dividing by zero later
-      yMin = y;
-      yMax = y + 1;
-    }
-    base = y;
-    break;
-  case 1:
-    xMin = x + descent;
-    xMax = x + ascent;
-    if (xMin == xMax) {
-      // this is a sanity check for a case that shouldn't happen -- but
-      // if it does happen, we want to avoid dividing by zero later
+  if (wMode) { // vertical writing mode
+    // NB: the rotation value has been incremented by 1 (in
+    // TextPage::beginWord()) for vertical writing mode
+    switch (rot) {
+    case 0:
+      yMin = y - fontSize;
+      yMax = y;
+      base = y;
+      break;
+    case 1:
       xMin = x;
-      xMax = x + 1;
-    }
-    base = x;
-    break;
-  case 2:
-    yMin = y + descent;
-    yMax = y + ascent;
-    if (yMin == yMax) {
-      // this is a sanity check for a case that shouldn't happen -- but
-      // if it does happen, we want to avoid dividing by zero later
+      xMax = x + fontSize;
+      base = x;
+      break;
+    case 2:
       yMin = y;
-      yMax = y + 1;
+      yMax = y + fontSize;
+      base = y;
+      break;
+    case 3:
+      xMin = x - fontSize;
+      xMax = x;
+      base = x;
+      break;
     }
-    base = y;
-    break;
-  case 3:
-    xMin = x - ascent;
-    xMax = x - descent;
-    if (xMin == xMax) {
-      // this is a sanity check for a case that shouldn't happen -- but
-      // if it does happen, we want to avoid dividing by zero later
-      xMin = x;
-      xMax = x + 1;
+  } else { // horizontal writing mode
+    switch (rot) {
+    case 0:
+      yMin = y - ascent;
+      yMax = y - descent;
+      if (yMin == yMax) {
+	// this is a sanity check for a case that shouldn't happen -- but
+	// if it does happen, we want to avoid dividing by zero later
+	yMin = y;
+	yMax = y + 1;
+      }
+      base = y;
+      break;
+    case 1:
+      xMin = x + descent;
+      xMax = x + ascent;
+      if (xMin == xMax) {
+	// this is a sanity check for a case that shouldn't happen -- but
+	// if it does happen, we want to avoid dividing by zero later
+	xMin = x;
+	xMax = x + 1;
+      }
+      base = x;
+      break;
+    case 2:
+      yMin = y + descent;
+      yMax = y + ascent;
+      if (yMin == yMax) {
+	// this is a sanity check for a case that shouldn't happen -- but
+	// if it does happen, we want to avoid dividing by zero later
+	yMin = y;
+	yMax = y + 1;
+      }
+      base = y;
+      break;
+    case 3:
+      xMin = x - ascent;
+      xMax = x - descent;
+      if (xMin == xMax) {
+	// this is a sanity check for a case that shouldn't happen -- but
+	// if it does happen, we want to avoid dividing by zero later
+	xMin = x;
+	xMax = x + 1;
+      }
+      base = x;
+      break;
     }
-    base = x;
-    break;
   }
   text = NULL;
   charcode = NULL;
   edge = NULL;
+  charPos = NULL;
   len = size = 0;
   spaceAfter = gFalse;
   next = NULL;
@@ -328,47 +356,90 @@ TextWord::~TextWord() {
   gfree(text);
   gfree(charcode);
   gfree(edge);
+  gfree(charPos);
 }
 
 void TextWord::addChar(GfxState *state, double x, double y,
-		       double dx, double dy, CharCode c, Unicode u) {
+		       double dx, double dy, int charPosA, int charLen,
+		       CharCode c, Unicode u) {
+  int wMode;
+
   if (len == size) {
     size += 16;
     text = (Unicode *)greallocn(text, size, sizeof(Unicode));
     charcode = (Unicode *)greallocn(charcode, size, sizeof(CharCode));
     edge = (double *)greallocn(edge, (size + 1), sizeof(double));
+    charPos = (int *)greallocn(charPos, size + 1, sizeof(int));
   }
   text[len] = u;
   charcode[len] = c;
-  switch (rot) {
-  case 0:
-    if (len == 0) {
-      xMin = x;
+  charPos[len] = charPosA;
+  charPos[len + 1] = charPosA + charLen;
+  wMode = font->gfxFont ? font->gfxFont->getWMode() : 0;
+  if (wMode) { // vertical writing mode
+    // NB: the rotation value has been incremented by 1 (in
+    // TextPage::beginWord()) for vertical writing mode
+    switch (rot) {
+    case 0:
+      if (len == 0) {
+	xMin = x - fontSize;
+      }
+      edge[len] = x - fontSize;
+      xMax = edge[len+1] = x;
+      break;
+    case 1:
+      if (len == 0) {
+	yMin = y - fontSize;
+      }
+      edge[len] = y - fontSize;
+      yMax = edge[len+1] = y;
+      break;
+    case 2:
+      if (len == 0) {
+	xMax = x + fontSize;
+      }
+      edge[len] = x + fontSize;
+      xMin = edge[len+1] = x;
+      break;
+    case 3:
+      if (len == 0) {
+	yMax = y + fontSize;
+      }
+      edge[len] = y + fontSize;
+      yMin = edge[len+1] = y;
+      break;
     }
-    edge[len] = x;
-    xMax = edge[len+1] = x + dx;
-    break;
-  case 1:
-    if (len == 0) {
-      yMin = y;
-    }
-    edge[len] = y;
-    yMax = edge[len+1] = y + dy;
-    break;
-  case 2:
-    if (len == 0) {
-      xMax = x;
-    }
-    edge[len] = x;
-    xMin = edge[len+1] = x + dx;
-    break;
-  case 3:
-    if (len == 0) {
-      yMax = y;
-    }
-    edge[len] = y;
-    yMin = edge[len+1] = y + dy;
-    break;
+  } else { // horizontal writing mode
+    switch (rot) {
+    case 0:
+      if (len == 0) {
+	xMin = x;
+      }
+      edge[len] = x;
+      xMax = edge[len+1] = x + dx;
+      break;
+    case 1:
+      if (len == 0) {
+	yMin = y;
+      }
+      edge[len] = y;
+      yMax = edge[len+1] = y + dy;
+      break;
+    case 2:
+      if (len == 0) {
+	xMax = x;
+      }
+      edge[len] = x;
+      xMin = edge[len+1] = x + dx;
+      break;
+    case 3:
+      if (len == 0) {
+	yMax = y;
+      }
+      edge[len] = y;
+      yMin = edge[len+1] = y + dy;
+      break;
+   }
   }
   ++len;
 }
@@ -393,15 +464,17 @@ void TextWord::merge(TextWord *word) {
     text = (Unicode *)greallocn(text, size, sizeof(Unicode));
     charcode = (CharCode *)greallocn(charcode, (size + 1), sizeof(CharCode));
     edge = (double *)greallocn(edge, (size + 1), sizeof(double));
+    charPos = (int *)greallocn(charPos, size + 1, sizeof(int));
   }
   for (i = 0; i < word->len; ++i) {
     text[len + i] = word->text[i];
     charcode[len + i] = word->charcode[i];
     edge[len + i] = word->edge[i];
+    charPos[len + i] = word->charPos[i];
   }
   edge[len + word->len] = word->edge[word->len];
+  charPos[len + word->len] = word->charPos[word->len];
   len += word->len;
-  charLen += word->charLen;
 }
 
 inline int TextWord::primaryCmp(TextWord *word) {
@@ -793,7 +866,7 @@ void TextLine::coalesce(UnicodeMap *uMap) {
 		 word0->underlined == word1->underlined &&
 		 fabs(word0->fontSize - word1->fontSize) <
 		   maxWordFontSizeDelta * words->fontSize &&
-		 word1->charPos == word0->charPos + word0->charLen) {
+		 word1->charPos[0] == word0->charPos[word0->len]) {
 	word0->merge(word1);
 	word0->next = word1->next;
 	delete word1;
@@ -2154,12 +2227,18 @@ void TextPage::beginWord(GfxState *state, double x0, double y0) {
     m[3] = m2[3];
   }
   if (fabs(m[0] * m[3]) > fabs(m[1] * m[2])) {
-    rot = (m[3] < 0) ? 0 : 2;
+    rot = (m[0] > 0 || m[3] < 0) ? 0 : 2;
   } else {
     rot = (m[2] > 0) ? 1 : 3;
   }
 
-  curWord = new TextWord(state, rot, x0, y0, charPos, curFont, curFontSize);
+  // for vertical writing mode, the lines are effectively rotated 90
+  // degrees
+  if (state->getFont()->getWMode()) {
+    rot = (rot + 1) & 3;
+  }
+
+  curWord = new TextWord(state, rot, x0, y0, curFont, curFontSize);
 }
 
 void TextPage::addChar(GfxState *state, double x, double y,
@@ -2200,9 +2279,6 @@ void TextPage::addChar(GfxState *state, double x, double y,
 
   // break words at space character
   if (uLen == 1 && u[0] == (Unicode)0x20) {
-    if (curWord) {
-      ++curWord->charLen;
-    }
     charPos += nBytes;
     endWord();
     return;
@@ -2285,25 +2361,26 @@ void TextPage::addChar(GfxState *state, double x, double y,
 	  /* next code is a low surrogate */
 	  Unicode uu = (((u[i] & 0x3ff) << 10) | (u[i+1] & 0x3ff)) + 0x10000;
 	  i++;
-	  curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, c, uu);
+	  curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, uu);
 	} else {
 	    /* missing low surrogate
 	     replace it with REPLACEMENT CHARACTER (U+FFFD) */
-	  curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, c, 0xfffd);
+	  curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, 0xfffd);
 	}
       } else if (u[i] >= 0xdc00 && u[i] < 0xe000) {
 	  /* invalid low surrogate
 	   replace it with REPLACEMENT CHARACTER (U+FFFD) */
-	curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, c, 0xfffd);
+	curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, 0xfffd);
       } else {
-	curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, c, u[i]);
+	curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, charPos, nBytes, c, u[i]);
       }
     }
   }
-  if (curWord) {
-    curWord->charLen += nBytes;
-  }
   charPos += nBytes;
+}
+
+void TextPage::incCharCount(int nChars) {
+  charPos += nChars;
 }
 
 void TextPage::endWord() {
@@ -4596,10 +4673,9 @@ GBool TextPage::findCharRange(int pos, int length,
     return gFalse;
   }
 
-  //~ this doesn't correctly handle:
-  //~ - ranges split across multiple lines (the highlighted region
-  //~   is the bounding box of all the parts of the range)
-  //~ - cases where characters don't convert one-to-one into Unicode
+  //~ this doesn't correctly handle ranges split across multiple lines
+  //~ (the highlighted region is the bounding box of all the parts of
+  //~ the range)
   first = gTrue;
   xMin0 = xMax0 = yMin0 = yMax0 = 0; // make gcc happy
   xMin1 = xMax1 = yMin1 = yMax1 = 0; // make gcc happy
@@ -4607,16 +4683,14 @@ GBool TextPage::findCharRange(int pos, int length,
     blk = blocks[i];
     for (line = blk->lines; line; line = line->next) {
       for (word = line->words; word; word = word->next) {
-	if (pos < word->charPos + word->charLen &&
-	    word->charPos < pos + length) {
-	  j0 = pos - word->charPos;
-	  if (j0 < 0) {
-	    j0 = 0;
-	  }
-	  j1 = pos + length - 1 - word->charPos;
-	  if (j1 >= word->len) {
-	    j1 = word->len - 1;
-	  }
+	if (pos < word->charPos[word->len] &&
+	    pos + length > word->charPos[0]) {
+	  for (j0 = 0;
+	       j0 < word->len && pos >= word->charPos[j0 + 1];
+	       ++j0) ;
+	  for (j1 = word->len - 1;
+	       j1 > j0 && pos + length <= word->charPos[j1];
+	       --j1) ;
 	  switch (line->rot) {
 	  case 0:
 	    xMin1 = word->edge[j0];
@@ -4720,7 +4794,9 @@ void TextPage::dump(void *outputStream, TextOutputFunc outputFunc,
       delete s;
       if (word->next &&
 	  fabs(word->next->base - word->base) <
-	    maxIntraLineDelta * word->fontSize) {
+	    maxIntraLineDelta * word->fontSize &&
+	  word->next->xMin >
+	    word->xMax - minDupBreakOverlap * word->fontSize) {
 	if (word->next->xMin > word->xMax + minWordSpacing * word->fontSize) {
 	  (*outputFunc)(outputStream, space, spaceLen);
 	}
@@ -4970,7 +5046,9 @@ int TextPage::dumpFragment(Unicode *text, int len, UnicodeMap *uMap,
 	}
 	i = j;
 	// output a right-to-left section
-	for (j = i; j < len && !unicodeTypeL(text[j]); ++j) ;
+	for (j = i;
+	     j < len && !(unicodeTypeL(text[j]) || unicodeTypeNum(text[j]));
+	     ++j) ;
 	if (j > i) {
 	  s->append(rle, rleLen);
 	  for (k = j - 1; k >= i; --k) {
@@ -4985,11 +5063,17 @@ int TextPage::dumpFragment(Unicode *text, int len, UnicodeMap *uMap,
 
     } else {
 
+      // Note: This code treats numeric characters (European and
+      // Arabic/Indic) as left-to-right, which isn't strictly correct
+      // (incurs extra LRE/POPDF pairs), but does produce correct
+      // visual formatting.
       s->append(rle, rleLen);
       i = len - 1;
       while (i >= 0) {
 	// output a right-to-left section
-	for (j = i; j >= 0 && !unicodeTypeL(text[j]); --j) ;
+	for (j = i;
+	     j >= 0 && !(unicodeTypeL(text[j]) || unicodeTypeNum(text[j]));
+	     --j) ;
 	for (k = i; k > j; --k) {
 	  n = uMap->mapUnicode(text[k], buf, sizeof(buf));
 	  s->append(buf, n);
@@ -5037,7 +5121,7 @@ ActualText::ActualText(TextPage *out) {
   out->incRefCnt();
   text = out;
   actualText = NULL;
-  actualTextBMCLevel = 0;
+  actualTextNBytes = 0;
 }
 
 ActualText::~ActualText() {
@@ -5049,98 +5133,73 @@ ActualText::~ActualText() {
 void ActualText::addChar(GfxState *state, double x, double y,
 			 double dx, double dy,
 			 CharCode c, int nBytes, Unicode *u, int uLen) {
-  if (actualTextBMCLevel == 0) {
+  if (!actualText) {
     text->addChar(state, x, y, dx, dy, c, nBytes, u, uLen);
-  } else {
-    // Inside ActualText span.
-    if (newActualTextSpan) {
-      actualText_x = x;
-      actualText_y = y;
-      actualText_dx = dx;
-      actualText_dy = dy;
-      newActualTextSpan = gFalse;
-    } else {
-      if (x < actualText_x)
-	actualText_x = x;
-      if (y < actualText_y)
-	actualText_y = y;
-      if (x + dx > actualText_x + actualText_dx)
-	actualText_dx = x + dx - actualText_x;
-      if (y + dy > actualText_y + actualText_dy)
-	actualText_dy = y + dy - actualText_y;
-    }
-  }
-}
-
-void ActualText::beginMC(Dict *properties) {
-  if (actualTextBMCLevel > 0) {
-    // Already inside a ActualText span.
-    actualTextBMCLevel++;
     return;
   }
 
-  Object obj;
-  if (properties && properties->lookup("ActualText", &obj)) {
-    if (obj.isString()) {
-      actualText = obj.getString();
-      actualTextBMCLevel = 1;
-      newActualTextSpan = gTrue;
-    }
+  // Inside ActualText span.
+  if (!actualTextNBytes) {
+    actualTextX0 = x;
+    actualTextY0 = y;
   }
+  actualTextX1 = x + dx;
+  actualTextY1 = y + dy;
+  actualTextNBytes += nBytes;
 }
 
-void ActualText::endMC(GfxState *state) {
-  char *uniString = NULL;
-  Unicode *uni;
-  int length, i;
+void ActualText::begin(GfxState *state, GooString *text) {
+  if (actualText)
+    delete actualText;
+  actualText = new GooString(text);
+  actualTextNBytes = 0;
+}
 
-  if (actualTextBMCLevel > 0) {
-    actualTextBMCLevel--;
-    if (actualTextBMCLevel == 0) {
-      // ActualText span closed. Output the span text and the
-      // extents of all the glyphs inside the span
+void ActualText::end(GfxState *state) {
+  // ActualText span closed. Output the span text and the
+  // extents of all the glyphs inside the span
 
-      if (newActualTextSpan) {
-	// No content inside span.
-	actualText_x = state->getCurX();
-	actualText_y = state->getCurY();
-	actualText_dx = 0;
-	actualText_dy = 0;
-      }
+  if (actualTextNBytes) {
+    char *uniString = NULL;
+    Unicode *uni;
+    int length, i;
 
-      if (!actualText->hasUnicodeMarker()) {
-	if (actualText->getLength() > 0) {
-	  //non-unicode string -- assume pdfDocEncoding and
-	  //try to convert to UTF16BE
-	  uniString = pdfDocEncodingToUTF16(actualText, &length);
-	} else {
-	  length = 0;
-	}
+    if (!actualText->hasUnicodeMarker()) {
+      if (actualText->getLength() > 0) {
+        //non-unicode string -- assume pdfDocEncoding and
+        //try to convert to UTF16BE
+        uniString = pdfDocEncodingToUTF16(actualText, &length);
       } else {
-	uniString = actualText->getCString();
-	length = actualText->getLength();
+        length = 0;
       }
-
-      if (length < 3)
-	length = 0;
-      else
-	length = length/2 - 1;
-      uni = new Unicode[length];
-      for (i = 0 ; i < length; i++)
-	uni[i] = ((uniString[2 + i*2] & 0xff)<<8)|(uniString[3 + i*2] & 0xff);
-
-      text->addChar(state,
-		    actualText_x, actualText_y,
-		    actualText_dx, actualText_dy,
-		    0, 1, uni, length);
-
-      delete [] uni;
-      if (!actualText->hasUnicodeMarker())
-	delete [] uniString;
-      delete actualText;
-      actualText = NULL;
+    } else {
+      uniString = actualText->getCString();
+      length = actualText->getLength();
     }
+
+    if (length < 3)
+      length = 0;
+    else
+      length = length/2 - 1;
+    uni = new Unicode[length];
+    for (i = 0 ; i < length; i++)
+      uni[i] = ((uniString[2 + i*2] & 0xff)<<8)|(uniString[3 + i*2] & 0xff);
+
+    // now that we have the position info for all of the text inside
+    // the marked content span, we feed the "ActualText" back through
+    // text->addChar()
+    text->addChar(state, actualTextX0, actualTextY0,
+                  actualTextX1 - actualTextX0, actualTextY1 - actualTextY0,
+                  0, actualTextNBytes, uni, length);
+
+    delete [] uni;
+    if (!actualText->hasUnicodeMarker())
+      delete [] uniString;
   }
+
+  delete actualText;
+  actualText = NULL;
+  actualTextNBytes = 0;
 }
 
 //------------------------------------------------------------------------
@@ -5241,14 +5300,18 @@ void TextOutputDev::drawChar(GfxState *state, double x, double y,
   actualText->addChar(state, x, y, dx, dy, c, nBytes, u, uLen);
 }
 
-void TextOutputDev::beginMarkedContent(char *name, Dict *properties)
-{
-  actualText->beginMC(properties);
+void TextOutputDev::incCharCount(int nChars) {
+  text->incCharCount(nChars);
 }
 
-void TextOutputDev::endMarkedContent(GfxState *state)
+void TextOutputDev::beginActualText(GfxState *state, GooString *text)
 {
-  actualText->endMC(state);
+  actualText->begin(state, text);
+}
+
+void TextOutputDev::endActualText(GfxState *state)
+{
+  actualText->end(state);
 }
 
 void TextOutputDev::stroke(GfxState *state) {
@@ -5351,7 +5414,7 @@ void TextOutputDev::eoFill(GfxState *state) {
   fill(state);
 }
 
-void TextOutputDev::processLink(AnnotLink *link, Catalog * /*catalog*/) {
+void TextOutputDev::processLink(AnnotLink *link) {
   double x1, y1, x2, y2;
   int xMin, yMin, xMax, yMax, x, y;
 

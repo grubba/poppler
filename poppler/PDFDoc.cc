@@ -119,11 +119,22 @@ PDFDoc::PDFDoc(GooString *fileNameA, GooString *ownerPassword,
 	       GooString *userPassword, void *guiDataA) {
   Object obj;
   int size = 0;
+#ifdef _WIN32
+  int n, i;
+#endif
 
   init();
 
   fileName = fileNameA;
   guiData = guiDataA;
+#ifdef _WIN32
+  n = fileName->getLength();
+  fileNameU = (wchar_t *)gmallocn(n + 1, sizeof(wchar_t));
+  for (i = 0; i < n; ++i) {
+    fileNameU[i] = (wchar_t)(fileName->getChar(i) & 0xff);
+  }
+  fileNameU[n] = L'\0';
+#endif
 
   struct stat buf;
   if (stat(fileName->getCString(), &buf) == 0) {
@@ -157,7 +168,6 @@ PDFDoc::PDFDoc(GooString *fileNameA, GooString *ownerPassword,
 PDFDoc::PDFDoc(wchar_t *fileNameA, int fileNameLen, GooString *ownerPassword,
 	       GooString *userPassword, void *guiDataA) {
   OSVERSIONINFO version;
-  wchar_t fileName2[MAX_PATH + 1];
   Object obj;
   int i;
 
@@ -165,17 +175,15 @@ PDFDoc::PDFDoc(wchar_t *fileNameA, int fileNameLen, GooString *ownerPassword,
 
   guiData = guiDataA;
 
-  //~ file name should be stored in Unicode (?)
+  // save both Unicode and 8-bit copies of the file name
   fileName = new GooString();
+  fileNameU = (wchar_t *)gmallocn(fileNameLen + 1, sizeof(wchar_t));
   for (i = 0; i < fileNameLen; ++i) {
     fileName->append((char)fileNameA[i]);
+    fileNameU[i] = fileNameA[i];
   }
+  fileNameU[fileNameLen] = L'\0';
 
-  // zero-terminate the file name string
-  for (i = 0; i < fileNameLen && i < MAX_PATH; ++i) {
-    fileName2[i] = fileNameA[i];
-  }
-  fileName2[i] = 0;
 
   // try to open file
   // NB: _wfopen is only available in NT
@@ -184,10 +192,10 @@ PDFDoc::PDFDoc(wchar_t *fileNameA, int fileNameLen, GooString *ownerPassword,
   version.dwOSVersionInfoSize = sizeof(version);
   GetVersionEx(&version);
   if (version.dwPlatformId == VER_PLATFORM_WIN32_NT) {
-    if (_wstat(fileName2, &buf) == 0) {
+    if (_wstat(fileNameU, &buf) == 0) {
       size = buf.st_size;
     }
-    file = _wfopen(fileName2, L"rb");
+    file = _wfopen(fileNameU, L"rb");
   } else {
     if (_stat(fileName->getCString(), &buf) == 0) {
       size = buf.st_size;
@@ -210,13 +218,27 @@ PDFDoc::PDFDoc(wchar_t *fileNameA, int fileNameLen, GooString *ownerPassword,
 
 PDFDoc::PDFDoc(BaseStream *strA, GooString *ownerPassword,
 	       GooString *userPassword, void *guiDataA) {
+#ifdef _WIN32
+  int n, i;
+#endif
 
   init();
   guiData = guiDataA;
   if (strA->getFileName()) {
     fileName = strA->getFileName()->copy();
+#ifdef _WIN32
+    n = fileName->getLength();
+    fileNameU = (wchar_t *)gmallocn(n + 1, sizeof(wchar_t));
+    for (i = 0; i < n; ++i) {
+      fileNameU[i] = (wchar_t)(fileName->getChar(i) & 0xff);
+    }
+    fileNameU[n] = L'\0';
+#endif
   } else {
     fileName = NULL;
+#ifdef _WIN32
+    fileNameU = NULL;
+#endif
   }
   str = strA;
   ok = setup(ownerPassword, userPassword);
@@ -256,7 +278,7 @@ GBool PDFDoc::setup(GooString *ownerPassword, GooString *userPassword) {
   }
 
   // read catalog
-  catalog = new Catalog(xref);
+  catalog = new Catalog(this);
   if (catalog && !catalog->isOk()) {
     if (!wasReconstructed)
     {
@@ -264,7 +286,7 @@ GBool PDFDoc::setup(GooString *ownerPassword, GooString *userPassword) {
       delete catalog;
       delete xref;
       xref = new XRef(str, 0, 0, NULL, true);
-      catalog = new Catalog(xref);
+      catalog = new Catalog(this);
     }
 
     if (catalog && !catalog->isOk()) {
@@ -314,6 +336,11 @@ PDFDoc::~PDFDoc() {
   if (fileName) {
     delete fileName;
   }
+#ifdef _WIN32
+  if (fileNameU) {
+    gfree(fileNameU);
+  }
+#endif
 }
 
 
@@ -431,7 +458,7 @@ void PDFDoc::displayPage(OutputDev *out, int page,
 
   if (getPage(page))
     getPage(page)->display(out, hDPI, vDPI,
-				    rotate, useMediaBox, crop, printing, catalog,
+				    rotate, useMediaBox, crop, printing,
 				    abortCheckCbk, abortCheckCbkData,
 				    annotDisplayDecideCbk, annotDisplayDecideCbkData);
 
@@ -465,7 +492,7 @@ void PDFDoc::displayPageSlice(OutputDev *out, int page,
     getPage(page)->displaySlice(out, hDPI, vDPI,
 					 rotate, useMediaBox, crop,
 					 sliceX, sliceY, sliceW, sliceH,
-					 printing, catalog,
+					 printing,
 					 abortCheckCbk, abortCheckCbkData,
 					 annotDisplayDecideCbk, annotDisplayDecideCbkData);
 }
@@ -475,12 +502,12 @@ Links *PDFDoc::getLinks(int page) {
   if (!p) {
     return new Links (NULL);
   }
-  return p->getLinks(catalog);
+  return p->getLinks();
 }
 
 void PDFDoc::processLinks(OutputDev *out, int page) {
   if (getPage(page))
-    getPage(page)->processLinks(out, catalog);
+    getPage(page)->processLinks(out);
 }
 
 Linearization *PDFDoc::getLinearization()
@@ -1365,13 +1392,16 @@ PDFDoc *PDFDoc::ErrorPDFDoc(int errorCode, GooString *fileNameA)
 }
 
 Guint PDFDoc::strToUnsigned(char *s) {
-  Guint x;
+  Guint x, d;
   char *p;
-  int i;
 
   x = 0;
-  for (p = s, i = 0; *p && isdigit(*p) && i < 10; ++p, ++i) {
-    x = 10 * x + (*p - '0');
+  for (p = s; *p && isdigit(*p & 0xff); ++p) {
+    d = *p - '0';
+    if (x > (UINT_MAX - d) / 10) {
+      break;
+    }
+    x = 10 * x + d;
   }
   return x;
 }
@@ -1490,7 +1520,7 @@ Page *PDFDoc::parsePage(int page)
   }
   pageDict = obj.getDict();
 
-  p = new Page(xref, page, pageDict, pageRef,
+  p = new Page(this, page, pageDict, pageRef,
                new PageAttrs(NULL, pageDict), catalog->getForm());
   obj.free();
 

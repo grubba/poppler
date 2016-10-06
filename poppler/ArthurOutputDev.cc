@@ -116,6 +116,7 @@ void ArthurOutputDev::startDoc(XRef *xrefA) {
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
   globalParams->getEnableFreeType(),
+  !globalParams->getDisableFreeTypeHinting(),
   isHintingEnabled,
   isSlightHinting,
 #endif
@@ -269,18 +270,17 @@ void ArthurOutputDev::updateFont(GfxState *state)
 {
 #ifdef HAVE_SPLASH
   GfxFont *gfxFont;
+  GfxFontLoc *fontLoc;
   GfxFontType fontType;
   SplashOutFontFileID *id;
   SplashFontFile *fontFile;
   SplashFontSrc *fontsrc = NULL;
   FoFiTrueType *ff;
-  Ref embRef;
   Object refObj, strObj;
   GooString *fileName;
   char *tmpBuf;
   int tmpBufLen;
-  Gushort *codeToGID;
-  DisplayFontParam *dfp;
+  int *codeToGID;
   double *textMat;
   double m11, m12, m21, m22, fontSize;
   SplashCoord mat[4];
@@ -308,36 +308,24 @@ void ArthurOutputDev::updateFont(GfxState *state)
 
   } else {
 
-    // if there is an embedded font, write it to disk
-    if (gfxFont->getEmbeddedFontID(&embRef)) {
+    if (!(fontLoc = gfxFont->locateFont(xref, gFalse))) {
+      error(errSyntaxError, -1, "Couldn't find a font for '{0:s}'",
+	    gfxFont->getName() ? gfxFont->getName()->getCString()
+	                       : "(unnamed)");
+      goto err2;
+    }
+
+    // embedded font
+    if (fontLoc->locType == gfxFontLocEmbedded) {
+      // if there is an embedded font, read it to memory
       tmpBuf = gfxFont->readEmbFontFile(xref, &tmpBufLen);
       if (! tmpBuf)
 	goto err2;
-    // if there is an external font file, use it
-    } else if (!(fileName = gfxFont->getExtFontFile())) {
 
-      // look for a display font mapping or a substitute font
-      dfp = NULL;
-      if (gfxFont->getName()) {
-        dfp = globalParams->getDisplayFont(gfxFont);
-      }
-      if (!dfp) {
-	error(errSyntaxError, -1, "Couldn't find a font for '{0:s}'",
-	      gfxFont->getName() ? gfxFont->getName()->getCString()
-	                         : "(unnamed)");
-	goto err2;
-      }
-      switch (dfp->kind) {
-      case displayFontT1:
-	fileName = dfp->t1.fileName;
-	fontType = gfxFont->isCIDFont() ? fontCIDType0 : fontType1;
-	break;
-      case displayFontTT:
-	fileName = dfp->tt.fileName;
-	fontType = gfxFont->isCIDFont() ? fontCIDType2 : fontTrueType;
-	faceIndex = dfp->tt.faceIndex;
-	break;
-      }
+    // external font
+    } else { // gfxFontLocExternal
+      fileName = fontLoc->path;
+      fontType = fontLoc->fontType;
     }
 
     fontsrc = new SplashFontSrc;
@@ -345,7 +333,7 @@ void ArthurOutputDev::updateFont(GfxState *state)
       fontsrc->setFile(fileName, gFalse);
     else
       fontsrc->setBuf(tmpBuf, tmpBufLen, gTrue);
-
+    
     // load the font file
     switch (fontType) {
     case fontType1:
@@ -417,9 +405,19 @@ void ArthurOutputDev::updateFont(GfxState *state)
       }
       break;
     case fontCIDType0COT:
+      if (((GfxCIDFont *)gfxFont)->getCIDToGID()) {
+	n = ((GfxCIDFont *)gfxFont)->getCIDToGIDLen();
+	codeToGID = (int *)gmallocn(n, sizeof(int));
+	memcpy(codeToGID, ((GfxCIDFont *)gfxFont)->getCIDToGID(),
+	       n * sizeof(int));
+      } else {
+	codeToGID = NULL;
+	n = 0;
+      }      
       if (!(fontFile = m_fontEngine->loadOpenTypeCFFFont(
 			   id,
-			   fontsrc))) {
+			   fontsrc,
+			   codeToGID, n))) {
 	error(errSyntaxError, -1, "Couldn't create a font for '{0:s}'",
 	      gfxFont->getName() ? gfxFont->getName()->getCString()
 	                         : "(unnamed)");
@@ -433,7 +431,7 @@ void ArthurOutputDev::updateFont(GfxState *state)
       if (((GfxCIDFont *)gfxFont)->getCIDToGID()) {
 	n = ((GfxCIDFont *)gfxFont)->getCIDToGIDLen();
 	if (n) {
-	  codeToGID = (Gushort *)gmallocn(n, sizeof(Gushort));
+	  codeToGID = (int *)gmallocn(n, sizeof(int));
 	  memcpy(codeToGID, ((GfxCIDFont *)gfxFont)->getCIDToGID(),
 		  n * sizeof(Gushort));
 	}
@@ -486,12 +484,14 @@ void ArthurOutputDev::updateFont(GfxState *state)
   mat[2] = m21;  mat[3] = -m22;
   m_font = m_fontEngine->getFont(fontFile, mat, matrix);
 
+  delete fontLoc;
   if (fontsrc && !fontsrc->isFile)
       fontsrc->unref();
   return;
 
  err2:
   delete id;
+  delete fontLoc;
  err1:
   if (fontsrc && !fontsrc->isFile)
       fontsrc->unref();

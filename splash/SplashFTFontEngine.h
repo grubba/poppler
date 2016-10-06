@@ -45,7 +45,7 @@ class SplashFontSrc;
 class SplashFTFontEngine {
 public:
 
-  static SplashFTFontEngine *init(GBool aaA, GBool enableFreeTypeHintingA, GBool enableSlightHinting);
+  static SplashFTFontEngine *init(GBool aaA, GBool enableAutoHintingA, GBool enableFreeTypeHintingA, GBool enableSlightHinting);
 
   ~SplashFTFontEngine();
 
@@ -54,15 +54,17 @@ public:
   SplashFontFile *loadType1CFont(SplashFontFileID *idA, SplashFontSrc *src,  const char **enc);
   SplashFontFile *loadOpenTypeT1CFont(SplashFontFileID *idA, SplashFontSrc *src,  const char **enc);
   SplashFontFile *loadCIDFont(SplashFontFileID *idA, SplashFontSrc *src);
-  SplashFontFile *loadOpenTypeCFFFont(SplashFontFileID *idA, SplashFontSrc *src);
+  SplashFontFile *loadOpenTypeCFFFont(SplashFontFileID *idA, SplashFontSrc *src,
+                                      int *codeToGID, int codeToGIDLen);
   SplashFontFile *loadTrueTypeFont(SplashFontFileID *idA, SplashFontSrc *src,
-				   Gushort *codeToGID, int codeToGIDLen, int faceIndex = 0);
+				   int *codeToGID, int codeToGIDLen, int faceIndex = 0);
 
 private:
 
-  SplashFTFontEngine(GBool aaA, GBool enableFreeTypeHintingA, GBool enableSlightHintingA, FT_Library libA);
+  SplashFTFontEngine(GBool aaA, GBool enableAutoHintingA, GBool enableFreeTypeHintingA, GBool enableSlightHintingA, FT_Library libA);
 
   GBool aa;
+  GBool enableAutoHinting;
   GBool enableFreeTypeHinting;
   GBool enableSlightHinting;
   FT_Library lib;

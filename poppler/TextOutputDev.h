@@ -114,14 +114,15 @@ public:
 
   // Constructor.
   TextWord(GfxState *state, int rotA, double x0, double y0,
-	   int charPosA, TextFontInfo *fontA, double fontSize);
+	   TextFontInfo *fontA, double fontSize);
 
   // Destructor.
   ~TextWord();
 
   // Add a character to the word.
   void addChar(GfxState *state, double x, double y,
-	       double dx, double dy, CharCode c, Unicode u);
+	       double dx, double dy, int charPosA, int charLen,
+	       CharCode c, Unicode u);
 
   // Merge <word> onto the end of <this>.
   void merge(TextWord *word);
@@ -159,8 +160,8 @@ public:
 		   double *xMaxA, double *yMaxA);
   double getFontSize() { return fontSize; }
   int getRotation() { return rot; }
-  int getCharPos() { return charPos; }
-  int getCharLen() { return charLen; }
+  int getCharPos() { return charPos[0]; }
+  int getCharLen() { return charPos[len] - charPos[0]; }
   GBool getSpaceAfter() { return spaceAfter; }
 #endif
   GBool isUnderlined() { return underlined; }
@@ -180,11 +181,11 @@ private:
   CharCode *charcode;		// glyph indices
   double *edge;			// "near" edge x or y coord of each char
 				//   (plus one extra entry for the last char)
-  int len;			// length of text and edge arrays
-  int size;			// size of text and edge arrays
-  int charPos;                  // character position (within content stream)
-  int charLen;                  // number of content stream characters in
-                                //   this word
+  int *charPos;			// character position (within content stream)
+				//   of each char (plus one extra entry for
+				//   the last char)
+  int len;			// length of text/edge/charPos arrays
+  int size;			// size of text/edge/charPos arrays
   TextFontInfo *font;		// font information
   double fontSize;		// font size
   GBool spaceAfter;		// set if there is a space between this
@@ -504,6 +505,9 @@ public:
 	       double dx, double dy,
 	       CharCode c, int nBytes, Unicode *u, int uLen);
 
+  // Add <nChars> invisible characters.
+  void incCharCount(int nChars);
+
   // End the current word, sorting it into the list of words.
   void endWord();
 
@@ -644,17 +648,18 @@ public:
   void addChar(GfxState *state, double x, double y,
 	       double dx, double dy,
 	       CharCode c, int nBytes, Unicode *u, int uLen);
-  void beginMC(Dict *properties);
-  void endMC(GfxState *state);
+  void begin(GfxState *state, GooString *text);
+  void end(GfxState *state);
 
 private:
   TextPage *text;
-  int actualTextBMCLevel;       // > 0 when inside ActualText span. Incremented
-                                // for each nested BMC inside the span.
+
   GooString *actualText;        // replacement text for the span
-  GBool newActualTextSpan;      // true at start of span. used to init the extent
-  double actualText_x, actualText_y; // extent of the text inside the span
-  double actualText_dx, actualText_dy;
+  double actualTextX0;
+  double actualTextY0;
+  double actualTextX1;
+  double actualTextY1;
+  int actualTextNBytes;
 };
   
 
@@ -702,6 +707,10 @@ public:
   // Does this device need non-text content?
   virtual GBool needNonText() { return gFalse; }
 
+  // Does this device require incCharCount to be called for text on
+  // non-shown layers?
+  virtual GBool needCharCount() { return gTrue; }
+
   //----- initialization and control
 
   // Start a page.
@@ -720,10 +729,9 @@ public:
 			double dx, double dy,
 			double originX, double originY,
 			CharCode c, int nBytes, Unicode *u, int uLen);
-
-  //----- grouping operators
-  virtual void beginMarkedContent(char *name, Dict *properties);
-  virtual void endMarkedContent(GfxState *state);
+  virtual void incCharCount(int nChars);
+  virtual void beginActualText(GfxState *state, GooString *text);
+  virtual void endActualText(GfxState *state);
 
   //----- path painting
   virtual void stroke(GfxState *state);
@@ -731,7 +739,7 @@ public:
   virtual void eoFill(GfxState *state);
 
   //----- link borders
-  virtual void processLink(AnnotLink *link, Catalog *catalog);
+  virtual void processLink(AnnotLink *link);
 
   //----- special access
 

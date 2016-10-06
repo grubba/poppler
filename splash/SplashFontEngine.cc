@@ -69,6 +69,7 @@ SplashFontEngine::SplashFontEngine(
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
 				   GBool enableFreeType,
+				   GBool enableAutoHinting,
 				   GBool enableFreeTypeHinting,
 				   GBool enableSlightHinting,
 #endif
@@ -88,7 +89,7 @@ SplashFontEngine::SplashFontEngine(
 #endif
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
   if (enableFreeType) {
-    ftEngine = SplashFTFontEngine::init(aa, enableFreeTypeHinting, enableSlightHinting);
+    ftEngine = SplashFTFontEngine::init(aa, enableAutoHinting, enableFreeTypeHinting, enableSlightHinting);
   } else {
     ftEngine = NULL;
   }
@@ -235,13 +236,15 @@ SplashFontFile *SplashFontEngine::loadCIDFont(SplashFontFileID *idA,
 }
 
 SplashFontFile *SplashFontEngine::loadOpenTypeCFFFont(SplashFontFileID *idA,
-						      SplashFontSrc *src) {
+						      SplashFontSrc *src,
+                                                      int *codeToGID,
+                                                      int codeToGIDLen) {
   SplashFontFile *fontFile;
 
   fontFile = NULL;
 #if HAVE_FREETYPE_FREETYPE_H || HAVE_FREETYPE_H
   if (!fontFile && ftEngine) {
-    fontFile = ftEngine->loadOpenTypeCFFFont(idA, src);
+    fontFile = ftEngine->loadOpenTypeCFFFont(idA, src, codeToGID, codeToGIDLen);
   }
 #endif
 
@@ -257,7 +260,7 @@ SplashFontFile *SplashFontEngine::loadOpenTypeCFFFont(SplashFontFileID *idA,
 
 SplashFontFile *SplashFontEngine::loadTrueTypeFont(SplashFontFileID *idA,
 						   SplashFontSrc *src,
-						   Gushort *codeToGID,
+						   int *codeToGID,
 						   int codeToGIDLen,
 						   int faceIndex) {
   SplashFontFile *fontFile;
@@ -297,7 +300,7 @@ SplashFont *SplashFontEngine::getFont(SplashFontFile *fontFile,
   mat[1] = -(textMat[0] * ctm[1] + textMat[1] * ctm[3]);
   mat[2] = textMat[2] * ctm[0] + textMat[3] * ctm[2];
   mat[3] = -(textMat[2] * ctm[1] + textMat[3] * ctm[3]);
-  if (splashAbs(mat[0] * mat[3] - mat[1] * mat[2]) < 0.01) {
+  if (!splashCheckDet(mat[0], mat[1], mat[2], mat[3], 0.01)) {
     // avoid a singular (or close-to-singular) matrix
     mat[0] = 0.01;  mat[1] = 0;
     mat[2] = 0;     mat[3] = 0.01;

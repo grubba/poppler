@@ -59,11 +59,12 @@ static void fileWrite(void *stream, const char *data, int len) {
 // SplashFTFontEngine
 //------------------------------------------------------------------------
 
-SplashFTFontEngine::SplashFTFontEngine(GBool aaA, GBool enableFreeTypeHintingA,
+SplashFTFontEngine::SplashFTFontEngine(GBool aaA, GBool enableAutoHintingA, GBool enableFreeTypeHintingA,
 				       GBool enableSlightHintingA, FT_Library libA) {
   FT_Int major, minor, patch;
 
   aa = aaA;
+  enableAutoHinting = enableAutoHintingA;
   enableFreeTypeHinting = enableFreeTypeHintingA;
   enableSlightHinting = enableSlightHintingA;
   lib = libA;
@@ -74,14 +75,14 @@ SplashFTFontEngine::SplashFTFontEngine(GBool aaA, GBool enableFreeTypeHintingA,
             (major == 2 && (minor > 1 || (minor == 1 && patch > 7)));
 }
 
-SplashFTFontEngine *SplashFTFontEngine::init(GBool aaA, GBool enableFreeTypeHintingA,
+SplashFTFontEngine *SplashFTFontEngine::init(GBool aaA, GBool enableAutoHintingA, GBool enableFreeTypeHintingA,
 					     GBool enableSlightHintingA) {
   FT_Library libA;
 
   if (FT_Init_FreeType(&libA)) {
     return NULL;
   }
-  return new SplashFTFontEngine(aaA, enableFreeTypeHintingA, enableSlightHintingA, libA);
+  return new SplashFTFontEngine(aaA, enableAutoHintingA, enableFreeTypeHintingA, enableSlightHintingA, libA);
 }
 
 SplashFTFontEngine::~SplashFTFontEngine() {
@@ -109,7 +110,7 @@ SplashFontFile *SplashFTFontEngine::loadOpenTypeT1CFont(SplashFontFileID *idA,
 SplashFontFile *SplashFTFontEngine::loadCIDFont(SplashFontFileID *idA,
 						SplashFontSrc *src) {
   FoFiType1C *ff;
-  Gushort *cidToGIDMap;
+  int *cidToGIDMap;
   int nCIDs;
   SplashFontFile *ret;
 
@@ -139,29 +140,34 @@ SplashFontFile *SplashFTFontEngine::loadCIDFont(SplashFontFileID *idA,
 }
 
 SplashFontFile *SplashFTFontEngine::loadOpenTypeCFFFont(SplashFontFileID *idA,
-							SplashFontSrc *src) {
+							SplashFontSrc *src,
+                                                        int *codeToGID,
+                                                        int codeToGIDLen) {
   FoFiTrueType *ff;
-  Gushort *cidToGIDMap;
+  int *cidToGIDMap;
   int nCIDs;
   SplashFontFile *ret;
 
   cidToGIDMap = NULL;
   nCIDs = 0;
-  if (!useCIDs) {
-    if (src->isFile) {
-      ff = FoFiTrueType::load(src->fileName->getCString());
-    } else {
-      ff = FoFiTrueType::make(src->buf, src->bufLen);
-    }
-    if (ff) {
-      if (ff->isOpenTypeCFF()) {
-	cidToGIDMap = ff->getCIDToGIDMap(&nCIDs);
+  if (!codeToGID) {
+    if (!useCIDs) {
+      if (src->isFile) {
+        ff = FoFiTrueType::load(src->fileName->getCString());
+      } else {
+        ff = FoFiTrueType::make(src->buf, src->bufLen);
       }
-      delete ff;
+      if (ff) {
+        if (ff->isOpenTypeCFF()) {
+          cidToGIDMap = ff->getCIDToGIDMap(&nCIDs);
+        }
+        delete ff;
+      }
     }
   }
   ret = SplashFTFontFile::loadCIDFont(this, idA, src,
-				      cidToGIDMap, nCIDs);
+                                      codeToGID ? codeToGID : cidToGIDMap,
+                                      codeToGID ? codeToGIDLen : nCIDs);
   if (!ret) {
     gfree(cidToGIDMap);
   }
@@ -170,7 +176,7 @@ SplashFontFile *SplashFTFontEngine::loadOpenTypeCFFFont(SplashFontFileID *idA,
 
 SplashFontFile *SplashFTFontEngine::loadTrueTypeFont(SplashFontFileID *idA,
 						     SplashFontSrc *src,
-						     Gushort *codeToGID,
+						     int *codeToGID,
 						     int codeToGIDLen,
 						     int faceIndex) {
 #if 0

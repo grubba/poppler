@@ -385,6 +385,8 @@ private:
   int nComps;			// components per pixel
   int nBits;			// bits per component
   int nVals;			// components per line
+  int inputLineSize;		// input line buffer size
+  Guchar *inputLine;		// input line buffer
   Guchar *imgLine;		// line buffer
   int imgIdx;			// current index in imgLine
 };
@@ -412,15 +414,6 @@ public:
 private:
 
   GBool getNextLine();
-
-  inline int doGetChar() {
-    if (predIdx >= rowBytes) {
-      if (!getNextLine()) {
-        return EOF;
-      }
-    }
-    return predLine[predIdx++];
-  }
 
   Stream *str;			// base stream
   int predictor;		// predictor
@@ -453,7 +446,7 @@ public:
   virtual void reset();
   virtual void close();
   virtual int getChar()
-    { return doGetChar(); }
+    { return (bufPtr >= bufEnd && !fillBuf()) ? EOF : (*bufPtr++ & 0xff); }
   virtual int lookChar()
     { return (bufPtr >= bufEnd && !fillBuf()) ? EOF : (*bufPtr & 0xff); }
   virtual int getPos() { return bufPos + (bufPtr - buf); }
@@ -468,18 +461,27 @@ private:
 
   GBool fillBuf();
   
-  inline int doGetChar()
-    { return (bufPtr >= bufEnd && !fillBuf()) ? EOF : (*bufPtr++ & 0xff); }
-
   virtual GBool hasGetChars() { return true; }
   virtual int getChars(int nChars, Guchar *buffer)
     {
-      for (int i = 0; i < nChars; ++i) {
-        const int c = doGetChar();
-        if (likely(c != EOF)) buffer[i] = c;
-        else return i;
+      int n, m;
+
+      n = 0;
+      while (n < nChars) {
+        if (bufPtr >= bufEnd) {
+          if (!fillBuf()) {
+            break;
+          }
+        }
+        m = (int)(bufEnd - bufPtr);
+        if (m > nChars - n) {
+          m = nChars - n;
+        }
+        memcpy(buffer + n, bufPtr, m);
+        bufPtr += m;
+        n += m;
       }
-      return nChars;
+      return n;
     }
 
   FILE *f;
@@ -570,6 +572,9 @@ public:
 
 private:
 
+  virtual GBool hasGetChars() { return true; }
+  virtual int getChars(int nChars, Guchar *buffer);
+
   char *buf;
   Guint start;
   char *bufEnd;
@@ -608,6 +613,9 @@ public:
 
 
 private:
+
+  virtual GBool hasGetChars() { return true; }
+  virtual int getChars(int nChars, Guchar *buffer);
 
   Stream *str;
   GBool limited;
@@ -682,6 +690,9 @@ public:
 
 private:
 
+  virtual GBool hasGetChars() { return true; }
+  virtual int getChars(int nChars, Guchar *buffer);
+
   inline int doGetRawChar() {
     if (eof) {
       return EOF;
@@ -738,6 +749,9 @@ public:
 
 private:
 
+  virtual GBool hasGetChars() { return true; }
+  virtual int getChars(int nChars, Guchar *buffer);
+
   char buf[128];		// buffer
   char *bufPtr;			// next char to read
   char *bufEnd;			// end of buffer
@@ -781,7 +795,7 @@ private:
   GBool eof;			// true if at eof
   GBool nextLine2D;		// true if next line uses 2D encoding
   int row;			// current row
-  int inputBuf;			// input buffer
+  Guint inputBuf;		// input buffer
   int inputBits;		// number of bits in input buffer
   int *codingLine;		// coding line changing elements
   int *refLine;			// reference line changing elements
@@ -790,8 +804,8 @@ private:
   int outputBits;		// remaining ouput bits
   int buf;			// character buffer
 
-  void addPixels(int a1, int black);
-  void addPixelsNeg(int a1, int black);
+  void addPixels(int a1, int blackPixels);
+  void addPixelsNeg(int a1, int blackPixels);
   short getTwoDimCode();
   short getWhiteCode();
   short getBlackCode();
@@ -968,13 +982,6 @@ private:
     return c;
   }
 
-  inline int doGetChar() {
-    if (pred) {
-      return pred->getChar();
-    }
-    return doGetRawChar();
-  }
-
   virtual GBool hasGetChars() { return true; }
   virtual int getChars(int nChars, Guchar *buffer);
 
@@ -1029,6 +1036,31 @@ public:
   virtual int lookChar() { return EOF; }
   virtual GooString *getPSFilter(int /*psLevel*/, const char * /*indent*/)  { return NULL; }
   virtual GBool isBinary(GBool /*last = gTrue*/) { return gFalse; }
+};
+
+//------------------------------------------------------------------------
+// BufStream
+//------------------------------------------------------------------------
+
+class BufStream: public FilterStream {
+public:
+
+  BufStream(Stream *strA, int bufSizeA);
+  virtual ~BufStream();
+  virtual StreamKind getKind() { return strWeird; }
+  virtual void reset();
+  virtual int getChar();
+  virtual int lookChar();
+  virtual GooString *getPSFilter(int psLevel, const char *indent)
+    { return NULL; }
+  virtual GBool isBinary(GBool last = gTrue);
+
+  int lookChar(int idx);
+
+private:
+
+  int *buf;
+  int bufSize;
 };
 
 //------------------------------------------------------------------------

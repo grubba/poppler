@@ -42,6 +42,7 @@
 #include "Object.h"
 #include "Array.h"
 #include "Dict.h"
+#include "PDFDoc.h"
 #include "XRef.h"
 #include "Link.h"
 #include "OutputDev.h"
@@ -148,14 +149,6 @@ PageAttrs::PageAttrs(PageAttrs *attrs, Dict *dict) {
   artBox = cropBox;
   readBox(dict, "ArtBox", &artBox);
 
-  if (isPage) {
-    // clip all other boxes to the media box
-    cropBox.clipTo(&mediaBox);
-    bleedBox.clipTo(&mediaBox);
-    trimBox.clipTo(&mediaBox);
-    artBox.clipTo(&mediaBox);
-  }
-
   // rotate
   dict->lookup("Rotate", &obj1);
   if (obj1.isInt()) {
@@ -194,6 +187,13 @@ PageAttrs::~PageAttrs() {
   pieceInfo.free();
   separationInfo.free();
   resources.free();
+}
+
+void PageAttrs::clipBoxes() {
+  cropBox.clipTo(&mediaBox);
+  bleedBox.clipTo(&mediaBox);
+  trimBox.clipTo(&mediaBox);
+  artBox.clipTo(&mediaBox);
 }
 
 GBool PageAttrs::readBox(Dict *dict, const char *key, PDFRectangle *box) {
@@ -255,11 +255,12 @@ GBool PageAttrs::readBox(Dict *dict, const char *key, PDFRectangle *box) {
 // Page
 //------------------------------------------------------------------------
 
-Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrsA, Form *form) {
+Page::Page(PDFDoc *docA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrsA, Form *form) {
   Object tmp;
 	
   ok = gTrue;
-  xref = xrefA;
+  doc = docA;
+  xref = doc->getXRef();
   num = numA;
   duration = -1;
   annots = NULL;
@@ -269,6 +270,7 @@ Page::Page(XRef *xrefA, int numA, Dict *pageDict, Ref pageRefA, PageAttrs *attrs
 
   // get attributes
   attrs = attrsA;
+  attrs->clipBoxes();
 
   // transtion
   pageDict->lookupNF("Trans", &trans);
@@ -344,17 +346,17 @@ Page::~Page() {
   actions.free();
 }
 
-Annots *Page::getAnnots(Catalog *catalog) {
+Annots *Page::getAnnots() {
   if (!annots) {
     Object obj;
-    annots = new Annots(xref, catalog, getAnnots(&obj));
+    annots = new Annots(doc, getAnnots(&obj));
     obj.free();
   }
 
   return annots;
 }
 
-void Page::addAnnot(Annot *annot, Catalog *catalog) {
+void Page::addAnnot(Annot *annot) {
   Object obj1;
   Object tmp;
   Ref annotRef = annot->getRef ();
@@ -362,7 +364,7 @@ void Page::addAnnot(Annot *annot, Catalog *catalog) {
   // Make sure we have annots before adding the new one
   // even if it's an empty list so that we can safely
   // call annots->appendAnnot(annot)
-  getAnnots(catalog);
+  getAnnots();
 
   if (annotsObj.isNull()) {
     Ref annotsRef;
@@ -394,22 +396,22 @@ void Page::addAnnot(Annot *annot, Catalog *catalog) {
   annot->setPage(&pageRef, num);
 }
 
-Links *Page::getLinks(Catalog *catalog) {
-  return new Links(getAnnots(catalog));
+Links *Page::getLinks() {
+  return new Links(getAnnots());
 }
 
-FormPageWidgets *Page::getFormWidgets(Catalog *catalog) {
-  return new FormPageWidgets(getAnnots(catalog), num, catalog->getForm());
+FormPageWidgets *Page::getFormWidgets() {
+  return new FormPageWidgets(getAnnots(), num, doc->getCatalog()->getForm());
 }
 
 void Page::display(OutputDev *out, double hDPI, double vDPI,
 		   int rotate, GBool useMediaBox, GBool crop,
-		   GBool printing, Catalog *catalog,
+		   GBool printing,
 		   GBool (*abortCheckCbk)(void *data),
 		   void *abortCheckCbkData,
                    GBool (*annotDisplayDecideCbk)(Annot *annot, void *user_data),
                    void *annotDisplayDecideCbkData) {
-  displaySlice(out, hDPI, vDPI, rotate, useMediaBox, crop, -1, -1, -1, -1, printing, catalog,
+  displaySlice(out, hDPI, vDPI, rotate, useMediaBox, crop, -1, -1, -1, -1, printing,
 	       abortCheckCbk, abortCheckCbkData,
                annotDisplayDecideCbk, annotDisplayDecideCbkData);
 }
@@ -417,7 +419,7 @@ void Page::display(OutputDev *out, double hDPI, double vDPI,
 Gfx *Page::createGfx(OutputDev *out, double hDPI, double vDPI,
 		     int rotate, GBool useMediaBox, GBool crop,
 		     int sliceX, int sliceY, int sliceW, int sliceH,
-		     GBool printing, Catalog *catalog,
+		     GBool printing,
 		     GBool (*abortCheckCbk)(void *data),
 		     void *abortCheckCbkData,
 		     GBool (*annotDisplayDecideCbk)(Annot *annot, void *user_data),
@@ -446,7 +448,7 @@ Gfx *Page::createGfx(OutputDev *out, double hDPI, double vDPI,
     printf("***** Rotate = %d\n", attrs->getRotate());
   }
 
-  gfx = new Gfx(xref, out, num, attrs->getResourceDict(), catalog,
+  gfx = new Gfx(doc, out, num, attrs->getResourceDict(),
 		hDPI, vDPI, &box, crop ? cropBox : (PDFRectangle *)NULL,
 		rotate, abortCheckCbk, abortCheckCbkData);
 
@@ -456,7 +458,7 @@ Gfx *Page::createGfx(OutputDev *out, double hDPI, double vDPI,
 void Page::displaySlice(OutputDev *out, double hDPI, double vDPI,
 			int rotate, GBool useMediaBox, GBool crop,
 			int sliceX, int sliceY, int sliceW, int sliceH,
-			GBool printing, Catalog *catalog,
+			GBool printing,
 			GBool (*abortCheckCbk)(void *data),
 			void *abortCheckCbkData,
                         GBool (*annotDisplayDecideCbk)(Annot *annot, void *user_data),
@@ -468,14 +470,14 @@ void Page::displaySlice(OutputDev *out, double hDPI, double vDPI,
   
   if (!out->checkPageSlice(this, hDPI, vDPI, rotate, useMediaBox, crop,
 			   sliceX, sliceY, sliceW, sliceH,
-			   printing, catalog,
+			   printing,
 			   abortCheckCbk, abortCheckCbkData)) {
     return;
   }
 
   gfx = createGfx(out, hDPI, vDPI, rotate, useMediaBox, crop,
 		  sliceX, sliceY, sliceW, sliceH,
-		  printing, catalog,
+		  printing,
 		  abortCheckCbk, abortCheckCbkData,
 		  annotDisplayDecideCbk, annotDisplayDecideCbkData);
 
@@ -484,11 +486,15 @@ void Page::displaySlice(OutputDev *out, double hDPI, double vDPI,
     gfx->saveState();
     gfx->display(&obj);
     gfx->restoreState();
+  } else {
+    // empty pages need to call dump to do any setup required by the
+    // OutputDev
+    out->dump();
   }
   obj.free();
 
   // draw annotations
-  annotList = getAnnots(catalog);
+  annotList = getAnnots();
 
   if (annotList->getNumAnnots() > 0) {
     if (globalParams->getPrintCommands()) {
@@ -686,13 +692,13 @@ void Page::makeBox(double hDPI, double vDPI, int rotate,
   }
 }
 
-void Page::processLinks(OutputDev *out, Catalog *catalog) {
+void Page::processLinks(OutputDev *out) {
   Links *links;
   int i;
 
-  links = getLinks(catalog);
+  links = getLinks();
   for (i = 0; i < links->getNumLinks(); ++i) {
-    out->processLink(links->getLink(i), catalog);
+    out->processLink(links->getLink(i));
   }
   delete links;
 }

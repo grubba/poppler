@@ -70,6 +70,15 @@ void ImageOutputDev::setFilename(const char *fileExt) {
   }
 }
 
+GBool ImageOutputDev::tilingPatternFill(GfxState *state, Gfx *gfx, Catalog *cat, Object *str,
+				  double *pmat, int paintType, int tilingType, Dict *resDict,
+				  double *mat, double *bbox,
+				  int x0, int y0, int x1, int y1,
+				  double xStep, double yStep) {
+  return gTrue;
+  // do nothing -- this avoids the potentially slow loop in Gfx.cc
+}
+
 void ImageOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
 				   int width, int height, GBool invert,
 				   GBool interpolate, GBool inlineImg) {
@@ -221,13 +230,20 @@ void ImageOutputDev::drawImage(GfxState *state, Object *ref, Stream *str,
     for (y = 0; y < height; ++y) {
 
       // write the line
-      p = imgStr->getLine();
-      for (x = 0; x < width; ++x) {
-	colorMap->getRGB(p, &rgb);
-	fputc(colToByte(rgb.r), f);
-	fputc(colToByte(rgb.g), f);
-	fputc(colToByte(rgb.b), f);
-	p += colorMap->getNumPixelComps();
+      if ((p = imgStr->getLine())) {
+	for (x = 0; x < width; ++x) {
+	  colorMap->getRGB(p, &rgb);
+	  fputc(colToByte(rgb.r), f);
+	  fputc(colToByte(rgb.g), f);
+	  fputc(colToByte(rgb.b), f);
+	  p += colorMap->getNumPixelComps();
+	}
+      } else {
+	for (x = 0; x < width; ++x) {
+	  fputc(0, f);
+	  fputc(0, f);
+	  fputc(0, f);
+	}
       }
     }
     imgStr->close();

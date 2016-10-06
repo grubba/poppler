@@ -370,7 +370,7 @@ int main(int argc, char *argv[]) {
       rawOrder = singleHtml;
 
   // write text file
-  htmlOut = new HtmlOutputDev(htmlFileName->getCString(), 
+  htmlOut = new HtmlOutputDev(doc->getCatalog(), htmlFileName->getCString(), 
 	  docTitle->getCString(), 
 	  author ? author->getCString() : NULL,
 	  keywords ? keywords->getCString() : NULL, 
@@ -420,7 +420,7 @@ int main(int argc, char *argv[]) {
           splashFormatPng : splashFormatJpeg;
 
       splashOut = new SplashOutputDevNoText(splashModeRGB8, 4, gFalse, color);
-      splashOut->startDoc(doc->getXRef());
+      splashOut->startDoc(doc);
 
       for (int pg = firstPage; pg <= lastPage; ++pg) {
         doc->displayPage(splashOut, pg,
@@ -448,8 +448,8 @@ int main(int argc, char *argv[]) {
       psFileName = new GooString(htmlFileName->getCString());
       psFileName->append(".ps");
 
-      psOut = new PSOutputDev(psFileName->getCString(), doc, doc->getXRef(),
-          doc->getCatalog(), NULL, firstPage, lastPage, psModePS, w, h);
+      psOut = new PSOutputDev(psFileName->getCString(), doc,
+          NULL, firstPage, lastPage, psModePS, w, h);
       psOut->setDisplayText(gFalse);
       doc->displayPages(psOut, firstPage, lastPage, 72, 72, 0,
           gTrue, gFalse, gFalse);

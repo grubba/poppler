@@ -281,11 +281,12 @@ LinkDest::LinkDest(Array *a) {
       goto err2;
     }
     kind = destFitR;
-    if (!a->get(2, &obj2)->isNum()) {
+    if (a->get(2, &obj2)->isNum()) {
+      left = obj2.getNum();
+    } else {
       error(errSyntaxWarning, -1, "Bad annotation destination position");
       kind = destFit;
     }
-    left = obj2.getNum();
     obj2.free();
     if (!a->get(3, &obj2)->isNum()) {
       error(errSyntaxWarning, -1, "Bad annotation destination position");
@@ -541,28 +542,31 @@ LinkURI::LinkURI(Object *uriObj, GooString *baseURI) {
 
   uri = NULL;
   if (uriObj->isString()) {
-    uri2 = uriObj->getString()->copy();
-    if (baseURI && baseURI->getLength() > 0) {
-      n = strcspn(uri2->getCString(), "/:");
-      if (n == uri2->getLength() || uri2->getChar(n) == '/') {
+    uri2 = uriObj->getString();
+    n = (int)strcspn(uri2->getCString(), "/:");
+    if (n < uri2->getLength() && uri2->getChar(n) == ':') {
+      // "http:..." etc.
+      uri = uri2->copy();
+    } else if (!uri2->cmpN("www.", 4)) {
+      // "www.[...]" without the leading "http://"
+      uri = new GooString("http://");
+      uri->append(uri2);
+    } else {
+      // relative URI
+      if (baseURI) {
 	uri = baseURI->copy();
 	c = uri->getChar(uri->getLength() - 1);
-	if (c == '/' || c == '?') {
-	  if (uri2->getChar(0) == '/') {
-	    uri2->del(0);
-	  }
-	} else {
-	  if (uri2->getChar(0) != '/') {
-	    uri->append('/');
-	  }
+	if (c != '/' && c != '?') {
+	  uri->append('/');
 	}
-	uri->append(uri2);
-	delete uri2;
+	if (uri2->getChar(0) == '/') {
+	  uri->append(uri2->getCString() + 1, uri2->getLength() - 1);
+	} else {
+	  uri->append(uri2);
+	}
       } else {
-	uri = uri2;
+	uri = uri2->copy();
       }
-    } else {
-      uri = uri2;
     }
   } else {
     error(errSyntaxWarning, -1, "Illegal URI-type link");

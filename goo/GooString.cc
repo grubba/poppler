@@ -49,6 +49,12 @@ union GooStringFormatArg {
   Guint ui;
   long l;
   Gulong ul;
+#ifdef LLONG_MAX
+  long long ll;
+#endif
+#ifdef ULLONG_MAX
+  unsigned long long ull;
+#endif
   double f;
   char c;
   char *s;
@@ -72,6 +78,18 @@ enum GooStringFormatType {
   fmtULongHex,
   fmtULongOctal,
   fmtULongBinary,
+#ifdef LLONG_MAX
+  fmtLongLongDecimal,
+  fmtLongLongHex,
+  fmtLongLongOctal,
+  fmtLongLongBinary,
+#endif
+#ifdef ULLONG_MAX
+  fmtULongLongDecimal,
+  fmtULongLongHex,
+  fmtULongLongOctal,
+  fmtULongLongBinary,
+#endif
   fmtDouble,
   fmtDoubleTrimSmallAware,
   fmtDoubleTrim,
@@ -84,6 +102,12 @@ enum GooStringFormatType {
 static const char *formatStrings[] = {
   "d", "x", "o", "b", "ud", "ux", "uo", "ub",
   "ld", "lx", "lo", "lb", "uld", "ulx", "ulo", "ulb",
+#ifdef LLONG_MAX
+  "lld", "llx", "llo", "llb",
+#endif
+#ifdef ULLONG_MAX
+  "ulld", "ullx", "ullo", "ullb",
+#endif
   "f", "gs", "g",
   "c",
   "s",
@@ -211,7 +235,7 @@ GooString::GooString(GooString *str1, GooString *str2) {
 
 GooString *GooString::fromInt(int x) {
   char buf[24]; // enough space for 64-bit ints plus a little extra
-  const char *p;
+  char *p;
   int len;
   formatInt(x, buf, sizeof(buf), gFalse, 0, 10, &p, &len);
   return new GooString(p, len);
@@ -281,7 +305,8 @@ GooString *GooString::appendfv(const char *fmt, va_list argList) {
   GooStringFormatType ft;
   char buf[65];
   int len, i;
-  const char *p0, *p1, *str;
+  const char *p0, *p1;
+  char *str;
 
   argsLen = 0;
   argsSize = 8;
@@ -318,6 +343,9 @@ GooString *GooString::appendfv(const char *fmt, va_list argList) {
 	zeroFill = *p0 == '0';
 	for (; *p0 >= '0' && *p0 <= '9'; ++p0) {
 	  width = 10 * width + (*p0 - '0');
+	}
+	if (width < 0) {
+	  width = 0;
 	}
 	if (*p0 == '.') {
 	  ++p0;
@@ -380,6 +408,22 @@ GooString *GooString::appendfv(const char *fmt, va_list argList) {
 	  case fmtULongBinary:
 	    args[argsLen].ul = va_arg(argList, Gulong);
 	    break;
+#ifdef LLONG_MAX
+	  case fmtLongLongDecimal:
+	  case fmtLongLongHex:
+	  case fmtLongLongOctal:
+	  case fmtLongLongBinary:
+	    args[argsLen].ll = va_arg(argList, long long);
+	    break;
+#endif
+#ifdef ULLONG_MAX
+	  case fmtULongLongDecimal:
+	  case fmtULongLongHex:
+	  case fmtULongLongOctal:
+	  case fmtULongLongBinary:
+	    args[argsLen].ull = va_arg(argList, unsigned long long);
+	    break;
+#endif
 	  case fmtDouble:
 	  case fmtDoubleTrim:
 	  case fmtDoubleTrimSmallAware:
@@ -453,6 +497,38 @@ GooString *GooString::appendfv(const char *fmt, va_list argList) {
 	case fmtULongBinary:
 	  formatUInt(arg.ul, buf, sizeof(buf), zeroFill, width, 2, &str, &len);
 	  break;
+#ifdef LLONG_MAX
+	case fmtLongLongDecimal:
+	  formatInt(arg.ll, buf, sizeof(buf), zeroFill, width, 10, &str, &len);
+	  break;
+	case fmtLongLongHex:
+	  formatInt(arg.ll, buf, sizeof(buf), zeroFill, width, 16, &str, &len);
+	  break;
+	case fmtLongLongOctal:
+	  formatInt(arg.ll, buf, sizeof(buf), zeroFill, width, 8, &str, &len);
+	  break;
+	case fmtLongLongBinary:
+	  formatInt(arg.ll, buf, sizeof(buf), zeroFill, width, 2, &str, &len);
+	  break;
+#endif
+#ifdef ULLONG_MAX
+	case fmtULongLongDecimal:
+	  formatUInt(arg.ull, buf, sizeof(buf), zeroFill, width, 10,
+		     &str, &len);
+	  break;
+	case fmtULongLongHex:
+	  formatUInt(arg.ull, buf, sizeof(buf), zeroFill, width, 16,
+		     &str, &len);
+	  break;
+	case fmtULongLongOctal:
+	  formatUInt(arg.ull, buf, sizeof(buf), zeroFill, width, 8,
+		     &str, &len);
+	  break;
+	case fmtULongLongBinary:
+	  formatUInt(arg.ull, buf, sizeof(buf), zeroFill, width, 2,
+		     &str, &len);
+	  break;
+#endif
 	case fmtDouble:
 	  formatDouble(arg.f, buf, sizeof(buf), prec, gFalse, &str, &len);
 	  break;
@@ -516,10 +592,15 @@ GooString *GooString::appendfv(const char *fmt, va_list argList) {
   gfree(args);
   return this;
 }
-
+#ifdef LLONG_MAX
+void GooString::formatInt(long long x, char *buf, int bufSize,
+                          GBool zeroFill, int width, int base,
+                          char **p, int *len) {
+#else
 void GooString::formatInt(long x, char *buf, int bufSize,
-			GBool zeroFill, int width, int base,
-			const char **p, int *len) {
+                          GBool zeroFill, int width, int base,
+                          char **p, int *len) {
+#endif
   static char vals[17] = "0123456789abcdef";
   GBool neg;
   int start, i, j;
@@ -549,9 +630,15 @@ void GooString::formatInt(long x, char *buf, int bufSize,
   *len = bufSize - i;
 }
 
+#ifdef ULLONG_MAX
+void GooString::formatUInt(unsigned long long x, char *buf, int bufSize,
+                           GBool zeroFill, int width, int base,
+                           char **p, int *len) {
+#else
 void GooString::formatUInt(Gulong x, char *buf, int bufSize,
-			 GBool zeroFill, int width, int base,
-			 const char **p, int *len) {
+                           GBool zeroFill, int width, int base,
+                           char **p, int *len) {
+#endif
   static char vals[17] = "0123456789abcdef";
   int i, j;
 
@@ -574,7 +661,7 @@ void GooString::formatUInt(Gulong x, char *buf, int bufSize,
 }
 
 void GooString::formatDouble(double x, char *buf, int bufSize, int prec,
-			   GBool trim, const char **p, int *len) {
+			   GBool trim, char **p, int *len) {
   GBool neg, started;
   double x2;
   int d, i, j;
@@ -582,7 +669,7 @@ void GooString::formatDouble(double x, char *buf, int bufSize, int prec,
   if ((neg = x < 0)) {
     x = -x;
   }
-  x = floor(x * pow((double)10, prec) + 0.5);
+  x = floor(x * pow(10.0, prec) + 0.5);
   i = bufSize;
   started = !trim;
   for (j = 0; j < prec && i > 1; ++j) {
@@ -613,7 +700,7 @@ void GooString::formatDouble(double x, char *buf, int bufSize, int prec,
 }
 
 void GooString::formatDoubleSmallAware(double x, char *buf, int bufSize, int prec,
-				      GBool trim, const char **p, int *len)
+				      GBool trim, char **p, int *len)
 {
   double absX = fabs(x);
   if (absX >= 0.1) {
@@ -652,7 +739,7 @@ GooString *GooString::insert(int i, const char *str, int lengthA) {
 GooString *GooString::del(int i, int n) {
   int j;
 
-  if (n > 0) {
+  if (i >= 0 && n > 0 && i + n > 0) {
     if (i + n > length) {
       n = length - i;
     }
