@@ -2,7 +2,7 @@
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, 2008, Brad Hards <bradh@frogmouth.net>
  * Copyright (C) 2005-2009, Albert Astals Cid <aacid@kde.org>
- * Copyright (C) 2006-2009, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2006-2010, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -574,6 +574,22 @@ namespace Poppler {
             }
         }
         return scripts;
+    }
+
+    bool Document::getPdfId(QByteArray *permanentId, QByteArray *updateId) const
+    {
+        GooString gooPermanentId;
+        GooString gooUpdateId;
+
+        if (!m_doc->doc->getID(permanentId ? &gooPermanentId : 0, updateId ? &gooUpdateId : 0))
+            return false;
+
+        if (permanentId)
+            *permanentId = gooPermanentId.getCString();
+        if (updateId)
+            *updateId = gooUpdateId.getCString();
+
+        return true;
     }
 
     QDateTime convertDate( char *dateString )

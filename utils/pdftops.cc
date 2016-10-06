@@ -16,7 +16,7 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2006 Kristian Høgsberg <krh@redhat.com>
-// Copyright (C) 2007-2008 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2007-2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009 Till Kamppeter <till.kamppeter@gmail.com>
 // Copyright (C) 2009 Sanjoy Mahajan <sanjoy@mit.edu>
 // Copyright (C) 2009 William Bader <williambader@hotmail.com>
@@ -44,6 +44,7 @@
 #include "Catalog.h"
 #include "Page.h"
 #include "PDFDoc.h"
+#include "PDFDocFactory.h"
 #include "PSOutputDev.h"
 #include "Error.h"
 
@@ -299,7 +300,13 @@ int main(int argc, char *argv[]) {
   } else {
     userPW = NULL;
   }
-  doc = new PDFDoc(fileName, ownerPW, userPW);
+  if (fileName->cmp("-") == 0) {
+      delete fileName;
+      fileName = new GooString("fd://0");
+  }
+
+  doc = PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW);
+
   if (userPW) {
     delete userPW;
   }
@@ -323,6 +330,9 @@ int main(int argc, char *argv[]) {
   // construct PostScript file name
   if (argc == 3) {
     psFileName = new GooString(argv[2]);
+  } else if (fileName->cmp("fd://0") == 0) {
+    error(-1, "You have to provide an output filename when reading form stdin.");
+    goto err1;
   } else {
     p = fileName->getCString() + fileName->getLength() - 4;
     if (!strcmp(p, ".pdf") || !strcmp(p, ".PDF")) {
@@ -371,6 +381,7 @@ int main(int argc, char *argv[]) {
   delete psFileName;
  err1:
   delete doc;
+  delete fileName;
  err0:
   delete globalParams;
 

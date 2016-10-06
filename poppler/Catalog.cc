@@ -14,7 +14,7 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
-// Copyright (C) 2005-2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005-2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2005 Jeff Muizelaar <jrmuizel@nit.ca>
 // Copyright (C) 2005 Jonathan Blandford <jrb@redhat.com>
 // Copyright (C) 2005 Marco Pesenti Gritti <mpg@redhat.com>
@@ -23,6 +23,7 @@
 // Copyright (C) 2007 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright (C) 2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2009 Ilya Gorenbein <igorenbein@finjan.com>
+// Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -71,6 +72,11 @@ Catalog::Catalog(XRef *xrefA) {
   pageLabelInfo = NULL;
   form = NULL;
   optContent = NULL;
+  pageMode = pageModeNull;
+  pageLayout = pageLayoutNull;
+  destNameTree = NULL;
+  embeddedFileNameTree = NULL;
+  jsNameTree = NULL;
 
   xref->getCatalog(&catDict);
   if (!catDict.isDict()) {
@@ -79,12 +85,6 @@ Catalog::Catalog(XRef *xrefA) {
   }
   // get the AcroForm dictionary
   catDict.dictLookup("AcroForm", &acroForm);
-
-  // load Forms
-  if (acroForm.isDict()) {
-    form = new Form(xref,&acroForm);
-  }
-
 
   // read page tree
   catDict.dictLookup("Pages", &pagesDict);
@@ -127,62 +127,6 @@ Catalog::Catalog(XRef *xrefA) {
   }
   pagesDict.free();
 
-  // read named destination dictionary
-  catDict.dictLookup("Dests", &dests);
-
-  // read root of named destination tree - PDF1.6 table 3.28
-  if (catDict.dictLookup("Names", &obj)->isDict()) {
-    obj.dictLookup("Dests", &obj2);
-    destNameTree.init(xref, &obj2);
-    obj2.free();
-    obj.dictLookup("EmbeddedFiles", &obj2);
-    embeddedFileNameTree.init(xref, &obj2);
-    obj2.free();
-    obj.dictLookup("JavaScript", &obj2);
-    jsNameTree.init(xref, &obj2);
-    obj2.free();
-  }
-  obj.free();
-
-  if (catDict.dictLookup("PageLabels", &obj)->isDict())
-    pageLabelInfo = new PageLabelInfo(&obj, numPages);
-  obj.free();
-
-  // read page mode
-  pageMode = pageModeNone;
-  if (catDict.dictLookup("PageMode", &obj)->isName()) {
-    if (obj.isName("UseNone"))
-      pageMode = pageModeNone;
-    else if (obj.isName("UseOutlines"))
-      pageMode = pageModeOutlines;
-    else if (obj.isName("UseThumbs"))
-      pageMode = pageModeThumbs;
-    else if (obj.isName("FullScreen"))
-      pageMode = pageModeFullScreen;
-    else if (obj.isName("UseOC"))
-      pageMode = pageModeOC;
-    else if (obj.isName("UseAttachments"))
-      pageMode = pageModeAttach;
-  }
-  obj.free();
-
-  pageLayout = pageLayoutNone;
-  if (catDict.dictLookup("PageLayout", &obj)->isName()) {
-    if (obj.isName("SinglePage"))
-      pageLayout = pageLayoutSinglePage;
-    if (obj.isName("OneColumn"))
-      pageLayout = pageLayoutOneColumn;
-    if (obj.isName("TwoColumnLeft"))
-      pageLayout = pageLayoutTwoColumnLeft;
-    if (obj.isName("TwoColumnRight"))
-      pageLayout = pageLayoutTwoColumnRight;
-    if (obj.isName("TwoPageLeft"))
-      pageLayout = pageLayoutTwoPageLeft;
-    if (obj.isName("TwoPageRight"))
-      pageLayout = pageLayoutTwoPageRight;
-  }
-  obj.free();
-
   // read base URI
   if (catDict.dictLookup("URI", &obj)->isDict()) {
     if (obj.dictLookup("Base", &obj2)->isString()) {
@@ -191,15 +135,6 @@ Catalog::Catalog(XRef *xrefA) {
     obj2.free();
   }
   obj.free();
-
-  // get the metadata stream
-  catDict.dictLookup("Metadata", &metadata);
-
-  // get the structure tree root
-  catDict.dictLookup("StructTreeRoot", &structTreeRoot);
-
-  // get the outline dictionary
-  catDict.dictLookup("Outlines", &outline);
 
   // get the Optional Content dictionary
   if (catDict.dictLookup("OCProperties", &optContentProps)->isDict()) {
@@ -212,8 +147,8 @@ Catalog::Catalog(XRef *xrefA) {
   optContentProps.free();
 
   // perform form-related loading after all widgets have been loaded
-  if (form) 
-    form->postWidgetsLoad();
+  if (getForm())
+    getForm()->postWidgetsLoad();
 
   catDict.free();
   return;
@@ -222,7 +157,6 @@ Catalog::Catalog(XRef *xrefA) {
   pagesDict.free();
  err1:
   catDict.free();
-  dests.initNull();
   ok = gFalse;
 }
 
@@ -238,10 +172,11 @@ Catalog::~Catalog() {
     gfree(pages);
     gfree(pageRefs);
   }
+  names.free();
   dests.free();
-  destNameTree.free();
-  embeddedFileNameTree.free();
-  jsNameTree.free();
+  delete destNameTree;
+  delete embeddedFileNameTree;
+  delete jsNameTree;
   if (baseURI) {
     delete baseURI;
   }
@@ -258,7 +193,19 @@ GooString *Catalog::readMetadata() {
   GooString *s;
   Dict *dict;
   Object obj;
-  int c;
+
+  if (metadata.isNone()) {
+    Object catDict;
+
+    xref->getCatalog(&catDict);
+    if (catDict.isDict()) {
+      catDict.dictLookup("Metadata", &metadata);
+    } else {
+      error(-1, "Catalog object is wrong type (%s)", catDict.getTypeName());
+      metadata.initNull();
+    }
+    catDict.free();
+  }
 
   if (!metadata.isStream()) {
     return NULL;
@@ -270,10 +217,7 @@ GooString *Catalog::readMetadata() {
   }
   obj.free();
   s = new GooString();
-  metadata.streamReset();
-  while ((c = metadata.streamGetChar()) != EOF) {
-    s->append(c);
-  }
+  metadata.getStream()->fillGooString(s);
   metadata.streamClose();
   return s;
 }
@@ -309,7 +253,7 @@ int Catalog::readPageTree(Dict *pagesDict, PageAttrs *attrs, int start,
     kids.arrayGet(i, &kid);
     if (kid.isDict("Page")) {
       attrs2 = new PageAttrs(attrs1, kid.getDict());
-      page = new Page(xref, start+1, kid.getDict(), kidRef.getRef(), attrs2, form);
+      page = new Page(xref, start+1, kid.getDict(), kidRef.getRef(), attrs2, getForm());
       if (!page->isOk()) {
 	++start;
 	goto err3;
@@ -375,14 +319,14 @@ LinkDest *Catalog::findDest(GooString *name) {
 
   // try named destination dictionary then name tree
   found = gFalse;
-  if (dests.isDict()) {
-    if (!dests.dictLookup(name->getCString(), &obj1)->isNull())
+  if (getDests()->isDict()) {
+    if (!getDests()->dictLookup(name->getCString(), &obj1)->isNull())
       found = gTrue;
     else
       obj1.free();
   }
   if (!found) {
-    if (destNameTree.lookup(name, &obj1))
+    if (getDestNameTree()->lookup(name, &obj1))
       found = gTrue;
     else
       obj1.free();
@@ -416,10 +360,10 @@ EmbFile *Catalog::embeddedFile(int i)
 {
     Object efDict;
     Object obj;
-    obj = embeddedFileNameTree.getValue(i);
+    obj = getEmbeddedFileNameTree()->getValue(i);
     EmbFile *embeddedFile = 0;
     if (obj.isRef()) {
-        GooString desc(embeddedFileNameTree.getName(i));
+        GooString desc(getEmbeddedFileNameTree()->getName(i));
         embeddedFile = new EmbFile(obj.fetch(xref, &efDict), &desc);
         efDict.free();
     } else {
@@ -431,7 +375,7 @@ EmbFile *Catalog::embeddedFile(int i)
 
 GooString *Catalog::getJS(int i)
 {
-  Object obj = jsNameTree.getValue(i);
+  Object obj = getJSNameTree()->getValue(i);
   if (obj.isRef()) {
     Ref r = obj.getRef();
     obj.free();
@@ -462,15 +406,82 @@ GooString *Catalog::getJS(int i)
   else if (obj2.isStream()) {
     Stream *stream = obj2.getStream();
     js = new GooString();
-    stream->reset();
-    int j;
-    while ((j = stream->getChar()) != EOF) {
-      js->append((char)j);
-    }
+    stream->fillGooString(js);
   }
   obj2.free();
   obj.free();
   return js;
+}
+
+Catalog::PageMode Catalog::getPageMode() {
+
+  if (pageMode == pageModeNull) {
+
+    Object catDict, obj;
+
+    pageMode = pageModeNone;
+
+    xref->getCatalog(&catDict);
+    if (!catDict.isDict()) {
+      error(-1, "Catalog object is wrong type (%s)", catDict.getTypeName());
+      catDict.free();
+      return pageMode;
+    }
+
+    if (catDict.dictLookup("PageMode", &obj)->isName()) {
+      if (obj.isName("UseNone"))
+        pageMode = pageModeNone;
+      else if (obj.isName("UseOutlines"))
+        pageMode = pageModeOutlines;
+      else if (obj.isName("UseThumbs"))
+        pageMode = pageModeThumbs;
+      else if (obj.isName("FullScreen"))
+        pageMode = pageModeFullScreen;
+      else if (obj.isName("UseOC"))
+        pageMode = pageModeOC;
+      else if (obj.isName("UseAttachments"))
+        pageMode = pageModeAttach;
+    }
+    obj.free();
+    catDict.free();
+  }
+  return pageMode;
+}
+
+Catalog::PageLayout Catalog::getPageLayout() {
+
+  if (pageLayout == pageLayoutNull) {
+
+    Object catDict, obj;
+
+    pageLayout = pageLayoutNone;
+
+    xref->getCatalog(&catDict);
+    if (!catDict.isDict()) {
+      error(-1, "Catalog object is wrong type (%s)", catDict.getTypeName());
+      catDict.free();
+      return pageLayout;
+    }
+
+    pageLayout = pageLayoutNone;
+    if (catDict.dictLookup("PageLayout", &obj)->isName()) {
+      if (obj.isName("SinglePage"))
+        pageLayout = pageLayoutSinglePage;
+      if (obj.isName("OneColumn"))
+        pageLayout = pageLayoutOneColumn;
+      if (obj.isName("TwoColumnLeft"))
+        pageLayout = pageLayoutTwoColumnLeft;
+      if (obj.isName("TwoColumnRight"))
+        pageLayout = pageLayoutTwoColumnRight;
+      if (obj.isName("TwoPageLeft"))
+        pageLayout = pageLayoutTwoPageLeft;
+      if (obj.isName("TwoPageRight"))
+        pageLayout = pageLayoutTwoPageRight;
+    }
+    obj.free();
+    catDict.free();
+  }
+  return pageLayout;
 }
 
 NameTree::NameTree()
@@ -478,6 +489,16 @@ NameTree::NameTree()
   size = 0;
   length = 0;
   entries = NULL;
+}
+
+NameTree::~NameTree()
+{
+  int i;
+
+  for (i = 0; i < length; i++)
+    delete entries[i];
+
+  gfree(entries);
 }
 
 NameTree::Entry::Entry(Array *array, int index) {
@@ -589,22 +610,13 @@ GooString *NameTree::getName(int index)
     }
 }
 
-void NameTree::free()
-{
-  int i;
-
-  for (i = 0; i < length; i++)
-    delete entries[i];
-
-  gfree(entries);
-}
-
 GBool Catalog::labelToIndex(GooString *label, int *index)
 {
   char *end;
 
-  if (pageLabelInfo != NULL) {
-    if (!pageLabelInfo->labelToIndex(label, index))
+  PageLabelInfo *pli = getPageLabelInfo();
+  if (pli != NULL) {
+    if (!pli->labelToIndex(label, index))
       return gFalse;
   } else {
     *index = strtol(label->getCString(), &end, 10) - 1;
@@ -625,8 +637,9 @@ GBool Catalog::indexToLabel(int index, GooString *label)
   if (index < 0 || index >= numPages)
     return gFalse;
 
-  if (pageLabelInfo != NULL) {
-    return pageLabelInfo->indexToLabel(index, label);
+  PageLabelInfo *pli = getPageLabelInfo();
+  if (pli != NULL) {
+    return pli->indexToLabel(index, label);
   } else {
     snprintf(buffer, sizeof (buffer), "%d", index + 1);
     label->append(buffer);	      
@@ -736,3 +749,171 @@ EmbFile::EmbFile(Object *efDict, GooString *description)
   if (!m_mimetype)
     m_mimetype = new GooString();
 }
+
+PageLabelInfo *Catalog::getPageLabelInfo()
+{
+  if (!pageLabelInfo) {
+    Object catDict;
+    Object obj;
+
+    xref->getCatalog(&catDict);
+    if (!catDict.isDict()) {
+      error(-1, "Catalog object is wrong type (%s)", catDict.getTypeName());
+      catDict.free();
+      return NULL;
+    }
+
+    if (catDict.dictLookup("PageLabels", &obj)->isDict()) {
+      pageLabelInfo = new PageLabelInfo(&obj, getNumPages());
+    }
+    obj.free();
+    catDict.free();
+  }
+
+  return pageLabelInfo;
+}
+
+Object *Catalog::getStructTreeRoot()
+{
+  if (structTreeRoot.isNone())
+  {
+     Object catDict;
+
+     xref->getCatalog(&catDict);
+     if (catDict.isDict()) {
+       catDict.dictLookup("StructTreeRoot", &structTreeRoot);
+     } else {
+       error(-1, "Catalog object is wrong type (%s)", catDict.getTypeName());
+       structTreeRoot.initNull();
+     }
+     catDict.free();
+  }
+
+  return &structTreeRoot;
+}
+
+Object *Catalog::getOutline()
+{
+  if (outline.isNone())
+  {
+     Object catDict;
+
+     xref->getCatalog(&catDict);
+     if (catDict.isDict()) {
+       catDict.dictLookup("Outlines", &outline);
+     } else {
+       error(-1, "Catalog object is wrong type (%s)", catDict.getTypeName());
+       outline.initNull();
+     }
+     catDict.free();
+  }
+
+  return &outline;
+}
+
+Object *Catalog::getDests()
+{
+  if (dests.isNone())
+  {
+     Object catDict;
+
+     xref->getCatalog(&catDict);
+     if (catDict.isDict()) {
+       catDict.dictLookup("Dests", &dests);
+     } else {
+       error(-1, "Catalog object is wrong type (%s)", catDict.getTypeName());
+       dests.initNull();
+     }
+     catDict.free();
+  }
+
+  return &dests;
+}
+
+Form *Catalog::getForm()
+{
+  if (!form) {
+    if (acroForm.isDict()) {
+      form = new Form(xref,&acroForm);
+    }
+  }
+
+  return form;
+}
+
+Object *Catalog::getNames()
+{
+  if (names.isNone())
+  {
+     Object catDict;
+
+     xref->getCatalog(&catDict);
+     if (catDict.isDict()) {
+       catDict.dictLookup("Names", &names);
+     } else {
+       error(-1, "Catalog object is wrong type (%s)", catDict.getTypeName());
+       names.initNull();
+     }
+     catDict.free();
+  }
+
+  return &names;
+}
+
+NameTree *Catalog::getDestNameTree()
+{
+  if (!destNameTree) {
+
+    destNameTree = new NameTree();
+
+    if (getNames()->isDict()) {
+       Object obj;
+
+       getNames()->dictLookup("Dests", &obj);
+       destNameTree->init(xref, &obj);
+       obj.free();
+    }
+
+  }
+
+  return destNameTree;
+}
+
+NameTree *Catalog::getEmbeddedFileNameTree()
+{
+  if (!embeddedFileNameTree) {
+
+    embeddedFileNameTree = new NameTree();
+
+    if (getNames()->isDict()) {
+       Object obj;
+
+       getNames()->dictLookup("EmbeddedFiles", &obj);
+       embeddedFileNameTree->init(xref, &obj);
+       obj.free();
+    }
+
+  }
+
+  return embeddedFileNameTree;
+}
+
+NameTree *Catalog::getJSNameTree()
+{
+  if (!jsNameTree) {
+
+    jsNameTree = new NameTree();
+
+    if (getNames()->isDict()) {
+       Object obj;
+
+       getNames()->dictLookup("JavaScript", &obj);
+       jsNameTree->init(xref, &obj);
+       obj.free();
+    }
+
+  }
+
+  return jsNameTree;
+}
+

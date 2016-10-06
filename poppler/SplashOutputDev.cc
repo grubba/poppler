@@ -20,10 +20,12 @@
 // Copyright (C) 2006 Scott Turner <scotty1024@mac.com>
 // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2009 Petr Gajdos <pgajdos@novell.com>
-// Copyright (C) 2009 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009, 2010 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 William Bader <williambader@hotmail.com>
 // Copyright (C) 2010 Patrick Spendrin <ps_ml@gmx.de>
+// Copyright (C) 2010 Brian Cameron <brian.cameron@oracle.com>
+// Copyright (C) 2010 Paweł Wiejacha <pawel.wiejacha@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -70,6 +72,11 @@ extern "C" int unlink(char *filename);
 #ifdef _MSC_VER
 #include <float.h>
 #define isfinite(x) _finite(x)
+#endif
+
+#ifdef __sun
+#include <ieeefp.h>
+#define isfinite(x) finite(x)
 #endif
 
 //------------------------------------------------------------------------
@@ -1218,15 +1225,6 @@ void SplashOutputDev::updateFont(GfxState * /*state*/) {
   needFontUpdate = gTrue;
 }
 
-void SplashOutputDev::updateRender(GfxState *state) {
-  int rm;
-  rm = state->getRender();
-  if (rm == 7 && haveCSPattern) {
-    haveCSPattern = gFalse;
-    restoreState(state);
-  }
-}
-
 void SplashOutputDev::doUpdateFont(GfxState *state) {
   GfxFont *gfxFont;
   GfxFontType fontType;
@@ -1614,7 +1612,7 @@ void SplashOutputDev::drawChar(GfxState *state, double x, double y,
 
   // fill
   if (!(render & 1)) {
-    if (!state->getFillColorSpace()->isNonMarking()) {
+    if (!haveCSPattern && !state->getFillColorSpace()->isNonMarking()) {
       splash->fillChar((SplashCoord)x, (SplashCoord)y, code, font);
     }
   }
@@ -1631,7 +1629,7 @@ void SplashOutputDev::drawChar(GfxState *state, double x, double y,
   }
 
   // clip
-  if (render & 4) {
+  if (haveCSPattern || (render & 4)) {
     if ((path = font->getGlyphPath(code))) {
       path->offset((SplashCoord)x, (SplashCoord)y);
       if (textClipPath) {
@@ -1920,17 +1918,14 @@ void SplashOutputDev::drawType3Glyph(T3FontCache *t3Font,
 }
 
 void SplashOutputDev::beginTextObject(GfxState *state) {
-  if (state->getFillColorSpace()->getMode() == csPattern) {
+  if (!(state->getRender() & 4) && state->getFillColorSpace()->getMode() == csPattern) {
     haveCSPattern = gTrue;
     saveState(state);
-    savedRender = state->getRender();
-    state->setRender(7);
   }
 }
 
 void SplashOutputDev::endTextObject(GfxState *state) {
   if (haveCSPattern) {
-    state->setRender(savedRender);
     haveCSPattern = gFalse;
     if (state->getFillColorSpace()->getMode() != csPattern) {
       if (textClipPath) {
@@ -1974,7 +1969,20 @@ GBool SplashOutputDev::imageMaskSrc(void *data, SplashColorPtr line) {
 }
 
 void SplashOutputDev::endMaskClip(GfxState * state) {
-	splash->setSoftMask(NULL);
+  double bbox[4] = {0,0,1,1}; // dummy
+  /* transfer mask to alpha channel! */
+  // memcpy(maskBitmap->getAlphaPtr(), maskBitmap->getDataPtr(), bitmap->getRowSize() * bitmap->getHeight());
+  // memset(maskBitmap->getDataPtr(), 0, bitmap->getRowSize() * bitmap->getHeight());
+  int c;
+  Guchar *dest = bitmap->getAlphaPtr();
+  Guchar *src = maskBitmap->getDataPtr();
+  for (c= 0; c < maskBitmap->getRowSize() * maskBitmap->getHeight(); c++) {
+    dest[c] = src[c];
+  }
+  delete maskBitmap;
+  maskBitmap = NULL;
+  endTransparencyGroup(state);
+  paintTransparencyGroup(state, bbox);
 }
 
 void SplashOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
@@ -2007,10 +2015,31 @@ void SplashOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
   imgMaskData.y = 0;
 
   if (state->getFillColorSpace()->getMode() == csPattern) {
-    SplashBitmap *maskBitmap;
     Splash *maskSplash;
     SplashColor maskColor;
-    
+
+    /* from beginTransparencyGroup: */
+    // push a new stack entry
+    SplashTransparencyGroup *transpGroup = new SplashTransparencyGroup();
+    transpGroup->tx = 0;
+    transpGroup->ty = 0;
+    transpGroup->blendingColorSpace = NULL;
+    transpGroup->isolated = gFalse;
+    transpGroup->next = transpGroupStack;
+    transpGroupStack = transpGroup;
+    // save state
+    transpGroup->origBitmap = bitmap;
+    transpGroup->origSplash = splash;
+    //~ this ignores the blendingColorSpace arg
+    // create the temporary bitmap
+    bitmap = new SplashBitmap(bitmap->getWidth(), bitmap->getHeight(), bitmapRowPad, colorMode, gTrue,
+                              bitmapTopDown); 
+    splash = new Splash(bitmap, vectorAntialias,
+                        transpGroup->origSplash->getScreen());
+    splash->blitTransparent(transpGroup->origBitmap, 0, 0, 0, 0, bitmap->getWidth(), bitmap->getHeight());
+    splash->setInNonIsolatedGroup(transpGroup->origBitmap, 0, 0);
+    transpGroup->tBitmap = bitmap;
+
     maskBitmap = new SplashBitmap(bitmap->getWidth(), bitmap->getHeight(), 1, splashModeMono8, gFalse);
     maskSplash = new Splash(maskBitmap, vectorAntialias);
     maskColor[0] = 0;
@@ -2019,7 +2048,6 @@ void SplashOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str,
     maskSplash->setFillPattern(new SplashSolidColor(maskColor));
     maskSplash->fillImageMask(&imageMaskSrc, &imgMaskData,  width, height, mat, t3GlyphStack != NULL);
     delete maskSplash;
-    splash->setSoftMask(maskBitmap);
   } else {
     splash->fillImageMask(&imageMaskSrc, &imgMaskData, width, height, mat, t3GlyphStack != NULL);
     if (inlineImg) {
@@ -2048,7 +2076,6 @@ GBool SplashOutputDev::imageSrc(void *data, SplashColorPtr colorLine,
   SplashOutImageData *imgData = (SplashOutImageData *)data;
   Guchar *p;
   SplashColorPtr q, col;
-  GfxRGB rgb;
   GfxGray gray;
 #if SPLASH_CMYK
   GfxCMYK cmyk;
@@ -2121,14 +2148,35 @@ GBool SplashOutputDev::imageSrc(void *data, SplashColorPtr colorLine,
 	case splashModeXBGR8:
     case splashModeRGB8:
     case splashModeBGR8:
-      for (x = 0, p = imgData->imgStr->getLine(), q = colorLine;
-	   x < imgData->width;
-	   ++x, p += nComps) {
-	imgData->colorMap->getRGB(p, &rgb);
-	*q++ = colToByte(rgb.r);
-	*q++ = colToByte(rgb.g);
-	*q++ = colToByte(rgb.b);
-	if (imgData->colorMode == splashModeXBGR8) *q++ = 255;
+      if (!imgData->colorMap->useRGBLine())
+      {
+        GfxRGB rgb;
+        for (x = 0, p = imgData->imgStr->getLine(), q = colorLine;
+           x < imgData->width;
+           ++x, p += nComps) {
+          imgData->colorMap->getRGB(p, &rgb);
+          *q++ = colToByte(rgb.r);
+          *q++ = colToByte(rgb.g);
+          *q++ = colToByte(rgb.b);
+          if (imgData->colorMode == splashModeXBGR8) *q++ = 255;
+        }
+      }
+      else
+      {
+        p = imgData->imgStr->getLine();
+        q = colorLine;
+        unsigned int* line = (unsigned int *)gmallocn(imgData->width, sizeof(unsigned int));
+
+        imgData->colorMap->getRGBLine(p, line, imgData->width);
+        for (x = 0; x < imgData->width; ++x) {
+            *q++ = (line[x] >> 16) & 255;
+            *q++ = (line[x] >> 8) & 255;
+            *q++ = (line[x]) & 255;
+            if (imgData->colorMode == splashModeXBGR8) {
+                *q++ = 255;
+            }
+        }
+        gfree(line);
       }
       break;
 #if SPLASH_CMYK
@@ -3002,7 +3050,12 @@ void SplashOutputDev::setSoftMask(GfxState * /*state*/, double * /*bbox*/,
 
   softMask = new SplashBitmap(bitmap->getWidth(), bitmap->getHeight(),
 			      1, splashModeMono8, gFalse);
-  memset(softMask->getDataPtr(), 0,
+  unsigned char fill = 0;
+  if (transpGroupStack->blendingColorSpace) {
+	transpGroupStack->blendingColorSpace->getGray(backdropColor, &gray);
+	fill = colToByte(gray);
+  }
+  memset(softMask->getDataPtr(), fill,
 	 softMask->getRowSize() * softMask->getHeight());
   p = softMask->getDataPtr() + ty * softMask->getRowSize() + tx;
   int xMax = tBitmap->getWidth();

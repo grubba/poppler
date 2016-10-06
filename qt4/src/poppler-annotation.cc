@@ -1,6 +1,6 @@
 /* poppler-annotation.cc: qt interface to poppler
  * Copyright (C) 2006, 2009 Albert Astals Cid <aacid@kde.org>
- * Copyright (C) 2006, 2008 Pino Toscano <pino@kde.org>
+ * Copyright (C) 2006, 2008, 2010 Pino Toscano <pino@kde.org>
  * Adapting code from
  *   Copyright (C) 2004 by Enrico Ros <eros.kde@email.it>
  *
@@ -1477,6 +1477,8 @@ LinkAnnotation::LinkAnnotation( const QDomNode & node )
                         act = Poppler::LinkAction::GoToPage;
                     else if ( actString == "Close" )
                         act = Poppler::LinkAction::Close;
+                    else if ( actString == "Print" )
+                        act = Poppler::LinkAction::Print;
                     else
                         found = false;
                     if (found)
@@ -1602,6 +1604,9 @@ void LinkAnnotation::store( QDomNode & node, QDomDocument & document ) const
                         break;
                     case Poppler::LinkAction::Close:
                         hyperlinkElement.setAttribute( "action", "Close" );
+                        break;
+                    case Poppler::LinkAction::Print:
+                        hyperlinkElement.setAttribute( "action", "Print" );
                         break;
                 }
                 break;

@@ -62,7 +62,7 @@ public:
     font_iterator_private(int start_page, document_private *dd)
         : font_info_scanner(dd->doc, start_page)
         , total_pages(dd->doc->getNumPages())
-        , current_page((std::max)(start_page, 0) - 1)
+        , current_page((std::max)(start_page, 0))
     {
     }
     ~font_iterator_private()
@@ -74,7 +74,22 @@ public:
     int current_page;
 };
 
+/**
+ \class poppler::font_info poppler-font.h "poppler/cpp/poppler-font.h"
 
+ The information about a font used in a PDF %document.
+ */
+
+/**
+ \enum poppler::font_info::type_enum
+
+ The various types of fonts available in a PDF %document.
+*/
+
+
+/**
+ Constructs an invalid font information.
+ */
 font_info::font_info()
     : d(new font_info_private())
 {
@@ -85,41 +100,65 @@ font_info::font_info(font_info_private &dd)
 {
 }
 
+/**
+ Copy constructor.
+ */
 font_info::font_info(const font_info &fi)
     : d(new font_info_private(*fi.d))
 {
 }
 
+/**
+ Destructor.
+ */
 font_info::~font_info()
 {
     delete d;
 }
 
+/**
+ \returns the name of the font
+ */
 std::string font_info::name() const
 {
     return d->font_name;
 }
 
+/**
+ \returns the file name of the font, in case the font is not embedded nor subset
+ */
 std::string font_info::file() const
 {
     return d->font_file;
 }
 
+/**
+ \returns whether the font is totally embedded in the %document
+ */
 bool font_info::is_embedded() const
 {
     return d->is_embedded;
 }
 
+/**
+ \returns whether there is a subset of the font embedded in the %document
+ */
 bool font_info::is_subset() const
 {
     return d->is_subset;
 }
 
+/**
+ \returns the type of the font
+ */
 font_info::type_enum font_info::type() const
 {
     return d->type;
 }
 
+/**
+ Assignment operator.
+ */
 font_info& font_info::operator=(const font_info &fi)
 {
     if (this != &fi) {
@@ -128,19 +167,49 @@ font_info& font_info::operator=(const font_info &fi)
     return *this;
 }
 
+/**
+ \class poppler::font_iterator poppler-font.h "poppler/cpp/poppler-font.h"
+
+ Reads the fonts in the PDF %document page by page.
+
+ font_iterator is the way to collect the list of the fonts used in a PDF
+ %document, reading them incrementally page by page.
+
+ A typical usage of this might look like:
+ \code
+poppler::font_iterator *it = doc->create_font_iterator();
+while (it->has_next()) {
+    std::vector<poppler::font_info> fonts = it->next();
+    // do domething with the fonts
+}
+// after we are done with the iterator, it must be deleted
+delete it;
+\endcode
+ */
+
 
 font_iterator::font_iterator(int start_page, document_private *dd)
     : d(new font_iterator_private(start_page, dd))
 {
 }
 
+/**
+ Destructor.
+ */
 font_iterator::~font_iterator()
 {
     delete d;
 }
 
+/**
+ Returns the fonts of the current page and advances to the next one.
+ */
 std::vector<font_info> font_iterator::next()
 {
+    if (!has_next()) {
+        return std::vector<font_info>();
+    }
+
     ++d->current_page;
 
     GooList *items = d->font_info_scanner.scan(1);
@@ -155,11 +224,17 @@ std::vector<font_info> font_iterator::next()
     return fonts;
 }
 
+/**
+ \returns whether the iterator has more pages to advance to
+*/
 bool font_iterator::has_next() const
 {
-    return (d->current_page + 1) < d->total_pages;
+    return d->current_page < d->total_pages;
 }
 
+/**
+ \returns the current page
+*/
 int font_iterator::current_page() const
 {
     return d->current_page;

@@ -7,6 +7,7 @@
 // Copyright 2006 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright 2007, 2008 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright 2007-2009 Albert Astals Cid <aacid@kde.org>
+// Copyright 2010 Mark Riedesel <mark@klowner.com>
 //
 //========================================================================
 
@@ -83,6 +84,10 @@ public:
   void setFontSize(double f) { fontSize = f; }
   double getFontSize () { return fontSize; }
 
+  GooString *getPartialName() const { return partialName; }
+  GooString *getMappingName() const { return mappingName; }
+  GooString *getFullyQualifiedName();
+
   GBool isModified () { return modified; }
 
   bool isReadOnly() const;
@@ -104,6 +109,10 @@ protected:
   XRef *xref;
   GBool defaultsLoaded;
   GBool modified;
+  GooString *partialName; // T field
+  GooString *mappingName; // TM field
+  GooString *fullyQualifiedName;
+
   //index of this field in the parent's child list
   unsigned childNum;
 

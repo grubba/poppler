@@ -1,7 +1,7 @@
 /* poppler-private.cc: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2006 by Albert Astals Cid <aacid@kde.org>
- * Copyright (C) 2008 by Pino Toscano <pino@kde.org>
+ * Copyright (C) 2008, 2010 by Pino Toscano <pino@kde.org>
  * Inspired on code by
  * Copyright (C) 2004 by Albert Astals Cid <tsdgeos@terra.es>
  * Copyright (C) 2004 by Enrico Ros <eros.kde@email.it>
@@ -71,11 +71,13 @@ namespace Poppler {
         {
             isUnicode = gTrue;
             i = 2;
+            result.reserve( ( s1->getLength() - 2 ) / 2 );
         }
         else
         {
             isUnicode = gFalse;
             i = 0;
+            result.reserve( s1->getLength() );
         }
         while ( i < s1->getLength() )
         {
@@ -89,7 +91,7 @@ namespace Poppler {
                 u = s1->getChar(i) & 0xff;
                 ++i;
             }
-            result += unicodeToQString( &u, 1 );
+            result += QChar( u );
         }
         return result;
     }

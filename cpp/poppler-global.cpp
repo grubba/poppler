@@ -19,10 +19,9 @@
 
 #include "poppler-global.h"
 
-#include "DateInfo.h"
+#include "poppler-private.h"
 
 #include <cerrno>
-#include <ctime>
 #include <cstring>
 #include <iostream>
 
@@ -63,6 +62,130 @@ using namespace poppler;
  A class that cannot be copied.
  */
 
+/**
+ \enum poppler::rotation_enum
+
+ The case sensitivity.
+*/
+/**
+ \var poppler::rotation_enum poppler::rotate_0
+
+ A rotation of 0 degrees clockwise.
+*/
+/**
+ \var poppler::rotation_enum poppler::rotate_90
+
+ A rotation of 90 degrees clockwise.
+*/
+/**
+ \var poppler::rotation_enum poppler::rotate_180
+
+ A rotation of 180 degrees clockwise.
+*/
+/**
+ \var poppler::rotation_enum poppler::rotate_270
+
+ A rotation of 270 degrees clockwise.
+*/
+
+/**
+ \enum poppler::page_box_enum
+
+ A possible box of a page in a PDF %document.
+*/
+/**
+ \var poppler::page_box_enum poppler::media_box
+
+ The "media" box.
+*/
+/**
+ \var poppler::page_box_enum poppler::crop_box
+
+ The "crop" box.
+*/
+/**
+ \var poppler::page_box_enum poppler::bleed_box
+
+ The "bleed" box.
+*/
+/**
+ \var poppler::page_box_enum poppler::trim_box
+
+ The "trim" box.
+*/
+/**
+ \var poppler::page_box_enum poppler::art_box
+
+ The "art" box.
+*/
+
+/**
+ \enum poppler::permission_enum
+
+ A possible permission in a PDF %document.
+*/
+/**
+ \var poppler::permission_enum poppler::perm_print
+
+ The permission to allow the print of a %document.
+*/
+/**
+ \var poppler::permission_enum poppler::perm_change
+
+ The permission to change a %document.
+
+ This is a generic "change" permission, so other permissions could affect
+ some types of changes.
+*/
+/**
+ \var poppler::permission_enum poppler::perm_copy
+
+ The permission to allow the copy or extraction of the text in a %document.
+*/
+/**
+ \var poppler::permission_enum poppler::perm_add_notes
+
+ The permission to allow the addition or editing of annotations,
+ and the filling of interactive form fields (including signature fields).
+*/
+/**
+ \var poppler::permission_enum poppler::perm_fill_forms
+
+ The permission to allow the the filling of interactive form fields
+ (including signature fields).
+
+ \note this permission can be set even when the \ref poppler::perm_add_notes "perm_add_notes"
+       is not: this means that only the filling of forms is allowed.
+*/
+/**
+ \var poppler::permission_enum poppler::perm_accessibility
+
+ The permission to allow the extracting of content (for example, text) for
+ accessibility usage (e.g. for a screen reader).
+*/
+/**
+ \var poppler::permission_enum poppler::perm_assemble
+
+ The permission to allow to "assemble" a %document.
+
+ This implies operations such as the insertion, the rotation and the deletion
+ of pages; the creation of bookmarks and thumbnail images.
+
+ \note this permission can be set even when the \ref poppler::perm_change "perm_change"
+       is not
+*/
+/**
+ \var poppler::permission_enum poppler::perm_print_high_resolution
+
+ The permission to allow the high resolution print of a %document.
+*/
+
+/**
+ \enum poppler::case_sensitivity_enum
+
+ The case sensitivity.
+*/
+
 
 noncopyable::noncopyable()
 {
@@ -99,7 +222,7 @@ byte_array ustring::to_utf8() const
     const value_type *me_data = data();
     byte_array str(size());
     char *str_data = &str[0];
-    size_t me_len_char = size() * 2;
+    size_t me_len_char = size();
     size_t str_len_left = str.size();
     size_t ir = iconv(ic, (ICONV_CONST char **)&me_data, &me_len_char, &str_data, &str_len_left);
     if ((ir == (size_t)-1) && (errno == E2BIG)) {
@@ -147,7 +270,7 @@ ustring ustring::from_utf8(const char *str, int len)
         return ustring();
     }
 
-    ustring ret(len, 0);
+    ustring ret(len * 2, 0);
     char *ret_data = reinterpret_cast<char *>(&ret[0]);
     char *str_data = const_cast<char *>(str);
     size_t str_len_char = len;
@@ -188,27 +311,9 @@ ustring ustring::from_latin1(const std::string &str)
 /**
  Converts a string representing a PDF date to a value compatible with time_t.
  */
-unsigned int poppler::convert_date(const std::string &date)
+time_type poppler::convert_date(const std::string &date)
 {
-    int year, mon, day, hour, min, sec, tzHours, tzMins;
-    char tz;
-
-    if (!parseDateString(date.c_str(), &year, &mon, &day, &hour, &min, &sec,
-                                       &tz, &tzHours, &tzMins)) {
-        return (unsigned int)(-1);
-    }
-
-    struct tm time;
-    time.tm_sec = sec;
-    time.tm_min = min;
-    time.tm_hour = hour;
-    time.tm_mday = day;
-    time.tm_mon = mon - 1;
-    time.tm_year = year - 1900;
-    time.tm_wday = -1;
-    time.tm_yday = -1;
-    time.tm_isdst = -1;
-    return mktime(&time);
+    return detail::convert_date(date.c_str());
 }
 
 std::ostream& poppler::operator<<(std::ostream& stream, const byte_array &array)

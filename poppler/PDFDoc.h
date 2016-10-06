@@ -20,6 +20,8 @@
 // Copyright (C) 2008 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2009 Eric Toombs <ewtoombs@uwaterloo.ca>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
+// Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+// Copyright (C) 2010 Srinivas Adicherla <srinivas.adicherla@geodesic.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -72,6 +74,8 @@ public:
   PDFDoc(BaseStream *strA, GooString *ownerPassword = NULL,
 	 GooString *userPassword = NULL, void *guiDataA = NULL);
   ~PDFDoc();
+
+  static PDFDoc *ErrorPDFDoc(int errorCode, GooString *fileNameA = NULL);
 
   // Was PDF document successfully opened?
   GBool isOk() { return ok; }
@@ -167,7 +171,7 @@ public:
 
 #ifndef DISABLE_OUTLINE
   // Return the outline object.
-  Outline *getOutline() { return outline; }
+  Outline *getOutline();
 #endif
 
   // Is the file encrypted?
@@ -203,6 +207,9 @@ public:
   int getPDFMajorVersion() { return pdfMajorVersion; }
   int getPDFMinorVersion() { return pdfMinorVersion; }
 
+  //Return the PDF ID in the trailer dictionary (if any).
+  GBool getID(GooString *permanent_id, GooString *update_id);
+
   // Save this file with another name.
   int saveAs(GooString *name, PDFWriteMode mode=writeStandard);
   // Save this file in the given output stream.
@@ -226,7 +233,8 @@ private:
   void saveIncrementalUpdate (OutStream* outStr);
   void saveCompleteRewrite (OutStream* outStr);
 
-
+  PDFDoc();
+  void init();
   GBool setup(GooString *ownerPassword, GooString *userPassword);
   GBool checkFooter();
   void checkHeader();

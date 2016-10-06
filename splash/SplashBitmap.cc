@@ -16,6 +16,7 @@
 // Copyright (C) 2009 Shen Liang <shenzhuxi@gmail.com>
 // Copyright (C) 2009 Stefan Thomas <thomas@eload24.com>
 // Copyright (C) 2010 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2010 Harry Roberts <harry.roberts@midnight-labs.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -37,6 +38,7 @@
 #include "poppler/Error.h"
 #include "goo/JpegWriter.h"
 #include "goo/PNGWriter.h"
+#include "goo/ImgWriter.h"
 
 //------------------------------------------------------------------------
 // SplashBitmap
@@ -286,6 +288,7 @@ SplashError SplashBitmap::writeImgFile(SplashImageFileFormat format, char *fileN
 
 SplashError SplashBitmap::writeImgFile(SplashImageFileFormat format, FILE *f, int hDPI, int vDPI) {
   ImgWriter *writer;
+	SplashError e;
   
   switch (format) {
     #ifdef ENABLE_LIBPNG
@@ -306,14 +309,19 @@ SplashError SplashBitmap::writeImgFile(SplashImageFileFormat format, FILE *f, in
       error(-1, "Support for this image type not compiled in");
       return splashErrGeneric;
   }
-  
+
+	e = writeImgFile(writer, f, hDPI, vDPI);
+	delete writer;
+	return e;
+}
+
+SplashError SplashBitmap::writeImgFile(ImgWriter *writer, FILE *f, int hDPI, int vDPI) {
   if (mode != splashModeRGB8 && mode != splashModeMono8 && mode != splashModeMono1 && mode != splashModeXBGR8) {
     error(-1, "unsupported SplashBitmap mode");
     return splashErrGeneric;
   }
 
   if (!writer->init(f, width, height, hDPI, vDPI)) {
-    delete writer;
     return splashErrGeneric;
   }
 
@@ -330,7 +338,6 @@ SplashError SplashBitmap::writeImgFile(SplashImageFileFormat format, FILE *f, in
       }
       if (!writer->writePointers(row_pointers, height)) {
         delete[] row_pointers;
-        delete writer;
         return splashErrGeneric;
       }
       delete[] row_pointers;
@@ -350,7 +357,6 @@ SplashError SplashBitmap::writeImgFile(SplashImageFileFormat format, FILE *f, in
 
         if (!writer->writeRow(&row)) {
           delete[] row;
-          delete writer;
           return splashErrGeneric;
         }
       }
@@ -371,7 +377,6 @@ SplashError SplashBitmap::writeImgFile(SplashImageFileFormat format, FILE *f, in
 
         if (!writer->writeRow(&row)) {
           delete[] row;
-          delete writer;
           return splashErrGeneric;
         }
       }
@@ -392,7 +397,6 @@ SplashError SplashBitmap::writeImgFile(SplashImageFileFormat format, FILE *f, in
 
         if (!writer->writeRow(&row)) {
           delete[] row;
-          delete writer;
           return splashErrGeneric;
         }
       }
@@ -406,11 +410,8 @@ SplashError SplashBitmap::writeImgFile(SplashImageFileFormat format, FILE *f, in
   }
   
   if (writer->close()) {
-    delete writer;
     return splashErrGeneric;
   }
-
-  delete writer;
 
   return splashOk;
 }

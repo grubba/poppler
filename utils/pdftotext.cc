@@ -16,8 +16,9 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2006 Dominic Lachowicz <cinamod@hotmail.com>
-// Copyright (C) 2007-2008 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2007-2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009 Jan Jockusch <jan@jockusch.de>
+// Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -43,6 +44,7 @@
 #include "Catalog.h"
 #include "Page.h"
 #include "PDFDoc.h"
+#include "PDFDocFactory.h"
 #include "TextOutputDev.h"
 #include "CharTypes.h"
 #include "UnicodeMap.h"
@@ -192,14 +194,12 @@ int main(int argc, char *argv[]) {
     userPW = NULL;
   }
 
-  if(fileName->cmp("-") != 0) {
-      doc = new PDFDoc(fileName, ownerPW, userPW);
-  } else {
-      Object obj;
-
-      obj.initNull();
-      doc = new PDFDoc(new FileStream(stdin, 0, gFalse, 0, &obj), ownerPW, userPW);
+  if (fileName->cmp("-") == 0) {
+      delete fileName;
+      fileName = new GooString("fd://0");
   }
+
+  doc = PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW);
 
   if (userPW) {
     delete userPW;
@@ -224,6 +224,9 @@ int main(int argc, char *argv[]) {
   // construct text file name
   if (argc == 3) {
     textFileName = new GooString(argv[2]);
+  } else if (fileName->cmp("fd://0") == 0) {
+     error(-1, "You have to provide an output filename when reading form stdin.");
+     goto err2;
   } else {
     p = fileName->getCString() + fileName->getLength() - 4;
     if (!strcmp(p, ".pdf") || !strcmp(p, ".PDF")) {
@@ -334,6 +337,7 @@ int main(int argc, char *argv[]) {
   delete textFileName;
  err2:
   delete doc;
+  delete fileName;
   uMap->decRefCnt();
  err1:
   delete globalParams;

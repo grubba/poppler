@@ -15,7 +15,7 @@
 //
 // Copyright (C) 2007 Julien Rebetez <julienr@svn.gnome.org>
 // Copyright (C) 2008 Kees Cook <kees@outflux.net>
-// Copyright (C) 2008 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009 Jakub Wilk <ubanus@users.sf.net>
 //
 // To see a description of the changes please see the Changelog file that
@@ -35,15 +35,8 @@
 #include "goo/gtypes.h"
 #include "goo/gmem.h"
 #include "goo/GooString.h"
+#include "goo/GooLikely.h"
 #include "Error.h"
-
-#if defined(__GNUC__) && (__GNUC__ > 2) && defined(__OPTIMIZE__)
-# define likely(x)      __builtin_expect((x), 1)
-# define unlikely(x)    __builtin_expect((x), 0)
-#else
-# define likely(x)      (x)
-# define unlikely(x)    (x)
-#endif
 
 #define OBJECT_TYPE_CHECK(wanted_type) \
     if (unlikely(type != wanted_type)) { \
@@ -96,10 +89,13 @@ enum ObjType {
   objCmd,			// command name
   objError,			// error return from Lexer
   objEOF,			// end of file return from Lexer
-  objNone			// uninitialized object
+  objNone,			// uninitialized object
+
+  // poppler-only objects
+  objUint			// overflown integer that still fits in a unsigned integer
 };
 
-#define numObjTypes 14		// total number of object types
+#define numObjTypes 15		// total number of object types
 
 //------------------------------------------------------------------------
 // Object
@@ -145,6 +141,8 @@ public:
     { initObj(objError); return this; }
   Object *initEOF()
     { initObj(objEOF); return this; }
+  Object *initUint(unsigned int uintgA)
+    { initObj(objUint); uintg = uintgA; return this; }
 
   // Copy an object.
   Object *copy(Object *obj);
@@ -177,6 +175,7 @@ public:
   GBool isError() { return type == objError; }
   GBool isEOF() { return type == objEOF; }
   GBool isNone() { return type == objNone; }
+  GBool isUint() { return type == objUint; }
 
   // Special type checking.
   GBool isName(char *nameA)
@@ -200,6 +199,7 @@ public:
   int getRefNum() { OBJECT_TYPE_CHECK(objRef); return ref.num; }
   int getRefGen() { OBJECT_TYPE_CHECK(objRef); return ref.gen; }
   char *getCmd() { OBJECT_TYPE_CHECK(objCmd); return cmd; }
+  unsigned int getUint() { OBJECT_TYPE_CHECK(objUint); return uintg; }
 
   // Array accessors.
   int arrayGetLength();
@@ -223,6 +223,7 @@ public:
   void streamReset();
   void streamClose();
   int streamGetChar();
+  int streamGetChars(int nChars, Guchar *buffer);
   int streamLookChar();
   char *streamGetLine(char *buf, int size);
   Guint streamGetPos();
@@ -242,6 +243,7 @@ private:
   union {			// value for each type:
     GBool booln;		//   boolean
     int intg;			//   integer
+    unsigned int uintg;		//   unsigned integer
     double real;		//   real
     GooString *string;		//   string
     char *name;			//   name
@@ -332,6 +334,9 @@ inline void Object::streamClose()
 
 inline int Object::streamGetChar()
   { OBJECT_TYPE_CHECK(objStream); return stream->getChar(); }
+
+inline int Object::streamGetChars(int nChars, Guchar *buffer)
+  { OBJECT_TYPE_CHECK(objStream); return stream->doGetChars(nChars, buffer); }
 
 inline int Object::streamLookChar()
   { OBJECT_TYPE_CHECK(objStream); return stream->lookChar(); }

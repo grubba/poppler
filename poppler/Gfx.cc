@@ -32,6 +32,7 @@
 // Copyright (C) 2009 William Bader <williambader@hotmail.com>
 // Copyright (C) 2009, 2010 David Benjamin <davidben@mit.edu>
 // Copyright (C) 2010 Nils Höglund <nils.hoglund@gmail.com>
+// Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -99,18 +100,26 @@
 #define radialColorDelta (dblToCol(1 / 256.0))
 
 // Max recursive depth for a Gouraud triangle shading fill.
+//
+// Triangles will be split at most gouraudMaxDepth times (each time into 4
+// smaller ones). That makes pow(4,gouraudMaxDepth) many triangles for
+// every triangle.
 #define gouraudMaxDepth 6
 
 // Max delta allowed in any color component for a Gouraud triangle
 // shading fill.
-#define gouraudColorDelta (dblToCol(1 / 256.0))
+#define gouraudColorDelta (dblToCol(3. / 256.0))
+
+// Gouraud triangle: if the three color parameters differ by at more than this percend of 
+// the total color parameter range, the triangle will be refined
+#define gouraudParameterizedColorDelta 5e-3
 
 // Max recursive depth for a patch mesh shading fill.
 #define patchMaxDepth 6
 
 // Max delta allowed in any color component for a patch mesh shading
 // fill.
-#define patchColorDelta (dblToCol(1 / 256.0))
+#define patchColorDelta (dblToCol((3. / 256.0)))
 
 //------------------------------------------------------------------------
 // Operator table
@@ -536,6 +545,7 @@ Gfx::Gfx(XRef *xrefA, OutputDev *outA, int pageNum, Dict *resDict, Catalog *cata
   drawText = gFalse;
   maskHaveCSPattern = gFalse;
   mcStack = NULL;
+  parser = NULL;
 
   // start the resource stack
   res = new GfxResources(xref, resDict, NULL);
@@ -590,6 +600,7 @@ Gfx::Gfx(XRef *xrefA, OutputDev *outA, Dict *resDict, Catalog *catalogA,
   drawText = gFalse;
   maskHaveCSPattern = gFalse;
   mcStack = NULL;
+  parser = NULL;
 
   // start the resource stack
   res = new GfxResources(xref, resDict, NULL);
@@ -1260,7 +1271,8 @@ void Gfx::doSoftMask(Object *str, GBool alpha,
   if (obj1.isArray()) {
     for (i = 0; i < 6; ++i) {
       obj1.arrayGet(i, &obj2);
-      m[i] = obj2.getNum();
+      if (likely(obj2.isNum())) m[i] = obj2.getNum();
+      else m[i] = 0;
       obj2.free();
     }
   } else {
@@ -1297,31 +1309,26 @@ void Gfx::opSetRenderingIntent(Object args[], int numArgs) {
 void Gfx::opSetFillGray(Object args[], int numArgs) {
   GfxColor color;
 
-  if (textHaveCSPattern) {
+  if (textHaveCSPattern && drawText) {
     GBool needFill = out->deviceHasTextClip(state);
     out->endTextObject(state);
     if (needFill) {
       doPatternFill(gTrue);
     }
     out->restoreState(state);
-    state->setFillPattern(NULL);
-    state->setFillColorSpace(new GfxDeviceGrayColorSpace());
-    out->updateFillColorSpace(state);
-    color.c[0] = dblToCol(args[0].getNum());
-    state->setFillColor(&color);
-    out->updateFillColor(state);
+  }
+  state->setFillPattern(NULL);
+  state->setFillColorSpace(new GfxDeviceGrayColorSpace());
+  out->updateFillColorSpace(state);
+  color.c[0] = dblToCol(args[0].getNum());
+  state->setFillColor(&color);
+  out->updateFillColor(state);
+  if (textHaveCSPattern) {
     out->beginTextObject(state);
     out->updateRender(state);
     out->updateTextMat(state);
     out->updateTextPos(state);
     textHaveCSPattern = gFalse;
-  } else {
-    state->setFillPattern(NULL);
-    state->setFillColorSpace(new GfxDeviceGrayColorSpace());
-    out->updateFillColorSpace(state);
-    color.c[0] = dblToCol(args[0].getNum());
-    state->setFillColor(&color);
-    out->updateFillColor(state);
   }
 }
 
@@ -1340,20 +1347,28 @@ void Gfx::opSetFillCMYKColor(Object args[], int numArgs) {
   GfxColor color;
   int i;
 
+  if (textHaveCSPattern && drawText) {
+    GBool needFill = out->deviceHasTextClip(state);
+    out->endTextObject(state);
+    if (needFill) {
+      doPatternFill(gTrue);
+    }
+    out->restoreState(state);
+  }
+  state->setFillPattern(NULL);
+  state->setFillColorSpace(new GfxDeviceCMYKColorSpace());
+  out->updateFillColorSpace(state);
+  for (i = 0; i < 4; ++i) {
+    color.c[i] = dblToCol(args[i].getNum());
+  }
+  state->setFillColor(&color);
+  out->updateFillColor(state);
   if (textHaveCSPattern) {
-    colorSpaceText = new GfxDeviceCMYKColorSpace();
-    for (i = 0; i < 4; ++i) {
-      colorText.c[i] = dblToCol(args[i].getNum());
-    }
-  } else {
-    state->setFillPattern(NULL);
-    state->setFillColorSpace(new GfxDeviceCMYKColorSpace());
-    out->updateFillColorSpace(state);
-    for (i = 0; i < 4; ++i) {
-      color.c[i] = dblToCol(args[i].getNum());
-    }
-    state->setFillColor(&color);
-    out->updateFillColor(state);
+    out->beginTextObject(state);
+    out->updateRender(state);
+    out->updateTextMat(state);
+    out->updateTextPos(state);
+    textHaveCSPattern = gFalse;
   }
 }
 
@@ -1375,20 +1390,28 @@ void Gfx::opSetFillRGBColor(Object args[], int numArgs) {
   GfxColor color;
   int i;
 
+  if (textHaveCSPattern && drawText) {
+    GBool needFill = out->deviceHasTextClip(state);
+    out->endTextObject(state);
+    if (needFill) {
+      doPatternFill(gTrue);
+    }
+    out->restoreState(state);
+  }
+  state->setFillPattern(NULL);
+  state->setFillColorSpace(new GfxDeviceRGBColorSpace());
+  out->updateFillColorSpace(state);
+  for (i = 0; i < 3; ++i) {
+    color.c[i] = dblToCol(args[i].getNum());
+  }
+  state->setFillColor(&color);
+  out->updateFillColor(state);
   if (textHaveCSPattern) {
-    colorSpaceText = new GfxDeviceRGBColorSpace();
-    for (i = 0; i < 3; ++i) {
-      colorText.c[i] = dblToCol(args[i].getNum());
-    }
-  } else {
-    state->setFillPattern(NULL);
-    state->setFillColorSpace(new GfxDeviceRGBColorSpace());
-    out->updateFillColorSpace(state);
-    for (i = 0; i < 3; ++i) {
-      color.c[i] = dblToCol(args[i].getNum());
-    }
-    state->setFillColor(&color);
-    out->updateFillColor(state);
+    out->beginTextObject(state);
+    out->updateRender(state);
+    out->updateTextMat(state);
+    out->updateTextPos(state);
+    textHaveCSPattern = gFalse;
   }
 }
 
@@ -1411,7 +1434,6 @@ void Gfx::opSetFillColorSpace(Object args[], int numArgs) {
   GfxColorSpace *colorSpace;
   GfxColor color;
 
-  state->setFillPattern(NULL);
   res->lookupColorSpace(args[0].getName(), &obj);
   if (obj.isNull()) {
     colorSpace = GfxColorSpace::parse(&args[0], this);
@@ -1420,35 +1442,29 @@ void Gfx::opSetFillColorSpace(Object args[], int numArgs) {
   }
   obj.free();
   if (colorSpace) {
+    if (textHaveCSPattern && drawText) {
+      GBool needFill = out->deviceHasTextClip(state);
+      out->endTextObject(state);
+      if (needFill) {
+        doPatternFill(gTrue);
+      }
+      out->restoreState(state);
+    }
+    state->setFillPattern(NULL);
     state->setFillColorSpace(colorSpace);
     out->updateFillColorSpace(state);
     colorSpace->getDefaultColor(&color);
     state->setFillColor(&color);
     out->updateFillColor(state);
-    if (drawText) {
-      if (colorSpace->getMode() == csPattern) {
-        if (out->supportTextCSPattern(state) && textHaveCSPattern) {
-          GBool needFill = out->deviceHasTextClip(state);
-          out->endTextObject(state);
-          if (needFill)
-            doPatternFill(gTrue);
-          out->restoreState(state);
-        }
-        colorSpaceText = NULL;
-        textHaveCSPattern = gTrue;
-        out->beginTextObject(state);
-      } else if (textHaveCSPattern) {
-        GBool needFill = out->deviceHasTextClip(state);
-        out->endTextObject(state);
-        if (needFill) {
-          doPatternFill(gTrue);
-        }
-        out->beginTextObject(state);
-        out->updateRender(state);
-        out->updateTextMat(state);
-        out->updateTextPos(state);
-        textHaveCSPattern = gFalse;
-      }
+    if (textHaveCSPattern) {
+      out->beginTextObject(state);
+      out->updateRender(state);
+      out->updateTextMat(state);
+      out->updateTextPos(state);
+      textHaveCSPattern = colorSpace->getMode() == csPattern;
+    } else if (drawText && out->supportTextCSPattern(state)) {
+      out->beginTextObject(state);
+      textHaveCSPattern = gTrue;
     }
   } else {
     error(getPos(), "Bad color space (fill)");
@@ -1527,6 +1543,8 @@ void Gfx::opSetFillColorN(Object args[], int numArgs) {
       for (i = 0; i < numArgs - 1 && i < gfxColorMaxComps; ++i) {
 	if (args[i].isNum()) {
 	  color.c[i] = dblToCol(args[i].getNum());
+	} else {
+	  color.c[i] = 0; // TODO Investigate if this is what Adobe does
 	}
       }
       state->setFillColor(&color);
@@ -1546,6 +1564,8 @@ void Gfx::opSetFillColorN(Object args[], int numArgs) {
     for (i = 0; i < numArgs && i < gfxColorMaxComps; ++i) {
       if (args[i].isNum()) {
 	color.c[i] = dblToCol(args[i].getNum());
+      } else {
+        color.c[i] = 0; // TODO Investigate if this is what Adobe does
       }
     }
     state->setFillColor(&color);
@@ -1570,6 +1590,8 @@ void Gfx::opSetStrokeColorN(Object args[], int numArgs) {
       for (i = 0; i < numArgs - 1 && i < gfxColorMaxComps; ++i) {
 	if (args[i].isNum()) {
 	  color.c[i] = dblToCol(args[i].getNum());
+	} else {
+	  color.c[i] = 0; // TODO Investigate if this is what Adobe does
 	}
       }
       state->setStrokeColor(&color);
@@ -1589,6 +1611,8 @@ void Gfx::opSetStrokeColorN(Object args[], int numArgs) {
     for (i = 0; i < numArgs && i < gfxColorMaxComps; ++i) {
       if (args[i].isNum()) {
 	color.c[i] = dblToCol(args[i].getNum());
+      } else {
+        color.c[i] = 0; // TODO Investigate if this is what Adobe does
       }
     }
     state->setStrokeColor(&color);
@@ -2520,7 +2544,7 @@ void Gfx::doAxialShFill(GfxAxialShading *shading) {
   if (out->useFillColorStop()) {
     // make sure we add stop color when t = tMin
     state->setFillColor(&color0);
-    out->updateFillColorStop(state, (tt - tMin)/(tMax - tMin));
+    out->updateFillColorStop(state, 0);
   }
 
   // compute the coordinates of the point on the t axis at t = tMin;
@@ -3083,22 +3107,52 @@ void Gfx::doRadialShFill(GfxRadialShading *shading) {
 
 void Gfx::doGouraudTriangleShFill(GfxGouraudTriangleShading *shading) {
   double x0, y0, x1, y1, x2, y2;
-  GfxColor color0, color1, color2;
   int i;
 
-  for (i = 0; i < shading->getNTriangles(); ++i) {
-    shading->getTriangle(i, &x0, &y0, &color0,
-			 &x1, &y1, &color1,
-			 &x2, &y2, &color2);
-    gouraudFillTriangle(x0, y0, &color0, x1, y1, &color1, x2, y2, &color2,
-			shading->getColorSpace()->getNComps(), 0);
+  // preallocate a path (speed improvements)
+  state->moveTo(0., 0.);
+  state->lineTo(1., 0.);
+  state->lineTo(0., 1.);
+  state->closePath();
+
+  GfxState::ReusablePathIterator *reusablePath = state->getReusablePath();
+
+  if (shading->isParameterized()) {
+    // work with parameterized values:
+    double color0, color1, color2;
+    // a relative threshold:
+    const double refineColorThreshold = gouraudParameterizedColorDelta *
+                                        (shading->getParameterDomainMax() - shading->getParameterDomainMin());
+    for (i = 0; i < shading->getNTriangles(); ++i) {
+      shading->getTriangle(i, &x0, &y0, &color0,
+                              &x1, &y1, &color1,
+                              &x2, &y2, &color2);
+      gouraudFillTriangle(x0, y0, color0, x1, y1, color1, x2, y2, color2, refineColorThreshold, 0, shading, reusablePath);
+    }
+
+  } else {
+    // this always produces output -- even for parameterized ranges.
+    // But it ignores the parameterized color map (the function). 
+    //
+    // Note that using this code in for parameterized shadings might be
+    // correct in circumstances (namely if the function is linear in the actual
+    // triangle), but in general, it will simply be wrong.
+    GfxColor color0, color1, color2;
+    for (i = 0; i < shading->getNTriangles(); ++i) {
+      shading->getTriangle(i, &x0, &y0, &color0,
+                              &x1, &y1, &color1,
+                              &x2, &y2, &color2);
+      gouraudFillTriangle(x0, y0, &color0, x1, y1, &color1, x2, y2, &color2, shading->getColorSpace()->getNComps(), 0, reusablePath);
+    }
   }
+
+  delete reusablePath;
 }
 
 void Gfx::gouraudFillTriangle(double x0, double y0, GfxColor *color0,
 			      double x1, double y1, GfxColor *color1,
 			      double x2, double y2, GfxColor *color2,
-			      int nComps, int depth) {
+			      int nComps, int depth, GfxState::ReusablePathIterator *path) {
   double x01, y01, x12, y12, x20, y20;
   GfxColor color01, color12, color20;
   int i;
@@ -3112,13 +3166,15 @@ void Gfx::gouraudFillTriangle(double x0, double y0, GfxColor *color0,
   if (i == nComps || depth == gouraudMaxDepth) {
     state->setFillColor(color0);
     out->updateFillColor(state);
-    state->moveTo(x0, y0);
-    state->lineTo(x1, y1);
-    state->lineTo(x2, y2);
-    state->closePath();
+
+    path->reset();                         assert(!path->isEnd()); 
+    path->setCoord(x0,y0);  path->next();  assert(!path->isEnd()); 
+    path->setCoord(x1,y1);  path->next();  assert(!path->isEnd()); 
+    path->setCoord(x2,y2);  path->next();  assert(!path->isEnd()); 
+    path->setCoord(x0,y0);  path->next();  assert( path->isEnd()); 
+
     if (!contentIsHidden())
       out->fill(state);
-    state->clearPath();
   } else {
     x01 = 0.5 * (x0 + x1);
     y01 = 0.5 * (y0 + y1);
@@ -3126,21 +3182,74 @@ void Gfx::gouraudFillTriangle(double x0, double y0, GfxColor *color0,
     y12 = 0.5 * (y1 + y2);
     x20 = 0.5 * (x2 + x0);
     y20 = 0.5 * (y2 + y0);
-    //~ if the shading has a Function, this should interpolate on the
-    //~ function parameter, not on the color components
     for (i = 0; i < nComps; ++i) {
       color01.c[i] = (color0->c[i] + color1->c[i]) / 2;
       color12.c[i] = (color1->c[i] + color2->c[i]) / 2;
       color20.c[i] = (color2->c[i] + color0->c[i]) / 2;
     }
     gouraudFillTriangle(x0, y0, color0, x01, y01, &color01,
-			x20, y20, &color20, nComps, depth + 1);
+			x20, y20, &color20, nComps, depth + 1, path);
     gouraudFillTriangle(x01, y01, &color01, x1, y1, color1,
-			x12, y12, &color12, nComps, depth + 1);
+			x12, y12, &color12, nComps, depth + 1, path);
     gouraudFillTriangle(x01, y01, &color01, x12, y12, &color12,
-			x20, y20, &color20, nComps, depth + 1);
+			x20, y20, &color20, nComps, depth + 1, path);
     gouraudFillTriangle(x20, y20, &color20, x12, y12, &color12,
-			x2, y2, color2, nComps, depth + 1);
+			x2, y2, color2, nComps, depth + 1, path);
+  }
+}
+void Gfx::gouraudFillTriangle(double x0, double y0, double color0,
+                              double x1, double y1, double color1,
+                              double x2, double y2, double color2,
+                              double refineColorThreshold, int depth, GfxGouraudTriangleShading *shading, GfxState::ReusablePathIterator *path) {
+  const double meanColor = (color0 + color1 + color2) / 3;
+
+  const bool isFineEnough = 
+       fabs(color0 - meanColor) < refineColorThreshold &&
+       fabs(color1 - meanColor) < refineColorThreshold &&
+       fabs(color2 - meanColor) < refineColorThreshold;
+
+  if (isFineEnough || depth == gouraudMaxDepth) {
+    GfxColor color;
+
+    shading->getParameterizedColor(meanColor, &color);
+    state->setFillColor(&color);
+    out->updateFillColor(state);
+
+    path->reset();                         assert(!path->isEnd()); 
+    path->setCoord(x0,y0);  path->next();  assert(!path->isEnd()); 
+    path->setCoord(x1,y1);  path->next();  assert(!path->isEnd()); 
+    path->setCoord(x2,y2);  path->next();  assert(!path->isEnd()); 
+    path->setCoord(x0,y0);  path->next();  assert( path->isEnd()); 
+
+    if (!contentIsHidden())
+      out->fill(state);
+  } else {
+    const double x01 = 0.5 * (x0 + x1);
+    const double y01 = 0.5 * (y0 + y1);
+    const double x12 = 0.5 * (x1 + x2);
+    const double y12 = 0.5 * (y1 + y2);
+    const double x20 = 0.5 * (x2 + x0);
+    const double y20 = 0.5 * (y2 + y0);
+    const double color01 = (color0 + color1) / 2.;
+    const double color12 = (color1 + color2) / 2.; 
+    const double color20 = (color2 + color0) / 2.;
+    ++depth;
+    gouraudFillTriangle(x0, y0, color0, 
+                        x01, y01, color01,
+                        x20, y20, color20, 
+                        refineColorThreshold, depth, shading, path);
+    gouraudFillTriangle(x01, y01, color01, 
+                        x1, y1, color1,
+                        x12, y12, color12, 
+                        refineColorThreshold, depth, shading, path);
+    gouraudFillTriangle(x01, y01, color01, 
+                        x12, y12, color12,
+                        x20, y20, color20, 
+                        refineColorThreshold, depth, shading, path);
+    gouraudFillTriangle(x20, y20, color20, 
+                        x12, y12, color12,
+                        x2, y2, color2, 
+                        refineColorThreshold, depth, shading, path);
   }
 }
 
@@ -3156,32 +3265,68 @@ void Gfx::doPatchMeshShFill(GfxPatchMeshShading *shading) {
   } else {
     start = 0;
   }
+  /*
+   * Parameterized shadings take one parameter [t_0,t_e]
+   * and map it into the color space.
+   *
+   * Consequently, all color values are stored as doubles.
+   *
+   * These color values are interpreted as parameters for parameterized
+   * shadings and as colorspace entities otherwise.
+   *
+   * The only difference is that color space entities are stored into
+   * DOUBLE arrays, not into arrays of type GfxColorComp.
+   */
+  const int colorComps = shading->getColorSpace()->getNComps();
+  double refineColorThreshold;
+  if( shading->isParameterized() ) {
+	  refineColorThreshold = gouraudParameterizedColorDelta *
+		  (shading->getParameterDomainMax() - shading->getParameterDomainMin());
+
+  } else {
+	  refineColorThreshold = patchColorDelta;
+  }
+
   for (i = 0; i < shading->getNPatches(); ++i) {
-    fillPatch(shading->getPatch(i), shading->getColorSpace()->getNComps(),
-	      start);
+    fillPatch(shading->getPatch(i),
+             colorComps, 
+             shading->isParameterized() ? 1 : colorComps,
+             refineColorThreshold,
+             start,
+             shading);
   }
 }
 
-void Gfx::fillPatch(GfxPatch *patch, int nComps, int depth) {
+
+void Gfx::fillPatch(GfxPatch *patch, int colorComps, int patchColorComps, double refineColorThreshold, int depth, GfxPatchMeshShading *shading) {
   GfxPatch patch00, patch01, patch10, patch11;
   double xx[4][8], yy[4][8];
   double xxm, yym;
   int i;
 
-  for (i = 0; i < nComps; ++i) {
-    if (abs(patch->color[0][0].c[i] - patch->color[0][1].c[i])
-	  > patchColorDelta ||
-	abs(patch->color[0][1].c[i] - patch->color[1][1].c[i])
-	  > patchColorDelta ||
-	abs(patch->color[1][1].c[i] - patch->color[1][0].c[i])
-	  > patchColorDelta ||
-	abs(patch->color[1][0].c[i] - patch->color[0][0].c[i])
-	  > patchColorDelta) {
+  for (i = 0; i < patchColorComps; ++i) {
+    // these comparisons are done in double arithmetics.
+    //
+    // For non-parameterized shadings, they are done in color space
+    // components.
+    if (fabs(patch->color[0][0].c[i] - patch->color[0][1].c[i]) > refineColorThreshold ||
+        fabs(patch->color[0][1].c[i] - patch->color[1][1].c[i]) > refineColorThreshold ||
+        fabs(patch->color[1][1].c[i] - patch->color[1][0].c[i]) > refineColorThreshold ||
+        fabs(patch->color[1][0].c[i] - patch->color[0][0].c[i]) > refineColorThreshold) {
       break;
     }
   }
-  if (i == nComps || depth == patchMaxDepth) {
-    state->setFillColor(&patch->color[0][0]);
+  if (i == patchColorComps || depth == patchMaxDepth) {
+    GfxColor flatColor;
+    if( shading->isParameterized() ) {
+      shading->getParameterizedColor( patch->color[0][0].c[0], &flatColor );
+    } else {
+      for( i = 0; i<colorComps; ++i ) {
+        // simply cast to the desired type; that's all what is needed.
+        flatColor.c[i] = GfxColorComp(patch->color[0][0].c[i]);
+      }
+    }
+    state->setFillColor(&flatColor);
     out->updateFillColor(state);
     state->moveTo(patch->x[0][0], patch->y[0][0]);
     state->curveTo(patch->x[0][1], patch->y[0][1],
@@ -3259,9 +3404,7 @@ void Gfx::fillPatch(GfxPatch *patch, int nComps, int depth) {
       patch11.x[3][i-4] = xx[3][i];
       patch11.y[3][i-4] = yy[3][i];
     }
-    //~ if the shading has a Function, this should interpolate on the
-    //~ function parameter, not on the color components
-    for (i = 0; i < nComps; ++i) {
+    for (i = 0; i < patchColorComps; ++i) {
       patch00.color[0][0].c[i] = patch->color[0][0].c[i];
       patch00.color[0][1].c[i] = (patch->color[0][0].c[i] +
 				  patch->color[0][1].c[i]) / 2;
@@ -3284,10 +3427,10 @@ void Gfx::fillPatch(GfxPatch *patch, int nComps, int depth) {
       patch11.color[0][0].c[i] = patch00.color[1][1].c[i];
       patch10.color[0][1].c[i] = patch00.color[1][1].c[i];
     }
-    fillPatch(&patch00, nComps, depth + 1);
-    fillPatch(&patch10, nComps, depth + 1);
-    fillPatch(&patch01, nComps, depth + 1);
-    fillPatch(&patch11, nComps, depth + 1);
+    fillPatch(&patch00, colorComps, patchColorComps, refineColorThreshold, depth + 1, shading);
+    fillPatch(&patch10, colorComps, patchColorComps, refineColorThreshold, depth + 1, shading);
+    fillPatch(&patch01, colorComps, patchColorComps, refineColorThreshold, depth + 1, shading);
+    fillPatch(&patch11, colorComps, patchColorComps, refineColorThreshold, depth + 1, shading);
   }
 }
 
@@ -3328,8 +3471,7 @@ void Gfx::opBeginText(Object args[], int numArgs) {
   out->updateTextMat(state);
   out->updateTextPos(state);
   fontChanged = gTrue;
-  if (out->supportTextCSPattern(state)) {
-    colorSpaceText = NULL;
+  if (!(state->getRender() & 4) && out->supportTextCSPattern(state)) {
     textHaveCSPattern = gTrue;
   }
 }
@@ -3338,19 +3480,11 @@ void Gfx::opEndText(Object args[], int numArgs) {
   GBool needFill = out->deviceHasTextClip(state);
   out->endTextObject(state);
   drawText = gFalse;
-  if (out->supportTextCSPattern(state) && textHaveCSPattern) {
+  if (textHaveCSPattern) {
     if (needFill) {
       doPatternFill(gTrue);
     }
     out->restoreState(state);
-    if (colorSpaceText != NULL) {
-      state->setFillPattern(NULL);
-      state->setFillColorSpace(colorSpaceText);
-      out->updateFillColorSpace(state);
-      state->setFillColor(&colorText);
-      out->updateFillColor(state);
-      colorSpaceText = NULL;
-    }
   }
   textHaveCSPattern = gFalse;
 }
@@ -3392,9 +3526,22 @@ void Gfx::opSetTextLeading(Object args[], int numArgs) {
 }
 
 void Gfx::opSetTextRender(Object args[], int numArgs) {
+  int rm = state->getRender();
   state->setRender(args[0].getInt());
-  if (args[0].getInt() == 7) {
+  if ((args[0].getInt() & 4) && textHaveCSPattern && drawText) {
+    GBool needFill = out->deviceHasTextClip(state);
+    out->endTextObject(state);
+    if (needFill) {
+      doPatternFill(gTrue);
+    }
+    out->restoreState(state);
+    out->beginTextObject(state);
+    out->updateTextMat(state);
+    out->updateTextPos(state);
     textHaveCSPattern = gFalse;
+  } else if ((rm & 4) && !(args[0].getInt() & 4) && out->supportTextCSPattern(state) && drawText) {
+	out->beginTextObject(state);
+    textHaveCSPattern = gTrue;
   }
   out->updateRender(state);
 }
@@ -4230,8 +4377,14 @@ void Gfx::doForm(Object *str) {
   }
   for (i = 0; i < 4; ++i) {
     bboxObj.arrayGet(i, &obj1);
-    bbox[i] = obj1.getNum();
-    obj1.free();
+    if (likely(obj1.isNum())) {
+      bbox[i] = obj1.getNum();
+      obj1.free();
+    } else {
+      obj1.free();
+      error(getPos(), "Bad form bounding box value");
+      return;
+    }
   }
   bboxObj.free();
 
@@ -4240,7 +4393,8 @@ void Gfx::doForm(Object *str) {
   if (matrixObj.isArray()) {
     for (i = 0; i < 6; ++i) {
       matrixObj.arrayGet(i, &obj1);
-      m[i] = obj1.getNum();
+      if (likely(obj1.isNum())) m[i] = obj1.getNum();
+      else m[i] = 0;
       obj1.free();
     }
   } else {
@@ -4454,8 +4608,13 @@ Stream *Gfx::buildImageStream() {
   obj.free();
 
   // make stream
-  str = new EmbedStream(parser->getStream(), &dict, gFalse, 0);
-  str = str->addFilters(&dict);
+  if (parser->getStream()) {
+    str = new EmbedStream(parser->getStream(), &dict, gFalse, 0);
+    str = str->addFilters(&dict);
+  } else {
+    str = NULL;
+    dict.free();
+  }
 
   return str;
 }
@@ -4597,7 +4756,7 @@ void Gfx::opMarkPoint(Object args[], int numArgs) {
 // misc
 //------------------------------------------------------------------------
 
-void Gfx::drawAnnot(Object *str, AnnotBorder *border, AnnotColor *aColor, double opacity,
+void Gfx::drawAnnot(Object *str, AnnotBorder *border, AnnotColor *aColor,
 		    double xMin, double yMin, double xMax, double yMax) {
   Dict *dict, *resDict;
   Object matrixObj, bboxObj, resObj;
@@ -4612,13 +4771,6 @@ void Gfx::drawAnnot(Object *str, AnnotBorder *border, AnnotColor *aColor, double
   double *dash, *dash2;
   int dashLength;
   int i;
-
-  if (opacity != 1) {
-    state->setFillOpacity(opacity);
-    out->updateFillOpacity(state);
-    state->setStrokeOpacity(opacity);
-    out->updateStrokeOpacity(state);
-  }
 
   //~ can we assume that we're in default user space?
   //~ (i.e., baseMatrix = ctm)
@@ -4663,8 +4815,14 @@ void Gfx::drawAnnot(Object *str, AnnotBorder *border, AnnotColor *aColor, double
     }
     for (i = 0; i < 4; ++i) {
       bboxObj.arrayGet(i, &obj1);
-      bbox[i] = obj1.getNum();
-      obj1.free();
+      if (likely(obj1.isNum())) {
+        bbox[i] = obj1.getNum();
+        obj1.free();
+      } else {
+        obj1.free();
+        error(getPos(), "Bad form bounding box value");
+        return;
+      }
     }
     bboxObj.free();
 

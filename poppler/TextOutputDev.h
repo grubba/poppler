@@ -14,7 +14,8 @@
 // Copyright (C) 2006 Ed Catmur <ed@catmur.co.uk>
 // Copyright (C) 2007-2008 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2007 Adrian Johnson <ajohnson@redneon.com>
-// Copyright (C) 2008 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2008, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2010 Brian Ewins <brian.ewins@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -361,11 +362,23 @@ public:
 
 private:
 
+  GBool isBeforeByRule1(TextBlock *blk1);
+  GBool isBeforeByRepeatedRule1(TextBlock *blkList, TextBlock *blk1);
+  GBool isBeforeByRule2(TextBlock *blk1);
+
+  int visitDepthFirst(TextBlock *blkList, int pos1,
+		      TextBlock **sorted, int sortPos,
+		      GBool* visited);
+
   TextPage *page;		// the parent page
   int rot;			// text rotation
   double xMin, xMax;		// bounding box x coordinates
   double yMin, yMax;		// bounding box y coordinates
   double priMin, priMax;	// whitespace bounding box along primary axis
+  double ExMin, ExMax;		// extended bounding box x coordinates
+  double EyMin, EyMax;		// extended bounding box y coordinates
+  int tableId;			// id of table to which this block belongs
+  GBool tableEnd;		// is this block at end of line of actual table
 
   TextPool *pool;		// pool of words (used only until lines
 				//   are built)
@@ -385,6 +398,7 @@ private:
   friend class TextWordList;
   friend class TextPage;
   friend class TextSelectionPainter;
+  friend class TextSelectionDumper;
 };
 
 //------------------------------------------------------------------------
@@ -565,7 +579,7 @@ private:
   ~TextPage();
   
   void clear();
-  void assignColumns(TextLineFrag *frags, int nFrags, int rot);
+  void assignColumns(TextLineFrag *frags, int nFrags, GBool rot);
   int dumpFragment(Unicode *text, int len, UnicodeMap *uMap, GooString *s);
 
   GBool rawOrder;		// keep text in content stream order

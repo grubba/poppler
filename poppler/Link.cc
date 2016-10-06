@@ -14,9 +14,9 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2006, 2008 Pino Toscano <pino@kde.org>
-// Copyright (C) 2007 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2007,2010 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2008 Hugo Mercier <hmercier31@gmail.com>
-// Copyright (C) 2008, 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2008-2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
 // Copyright (C) 2009 Ilya Gorenbein <igorenbein@finjan.com>
 //
@@ -35,14 +35,15 @@
 #include <string.h>
 #include "goo/gmem.h"
 #include "goo/GooString.h"
+#include "goo/GooList.h"
 #include "Error.h"
 #include "Object.h"
 #include "Array.h"
 #include "Dict.h"
 #include "Link.h"
 #include "Sound.h"
-#include "Movie.h"
 #include "FileSpec.h"
+#include "Rendition.h"
 
 //------------------------------------------------------------------------
 // LinkAction
@@ -118,6 +119,10 @@ LinkAction *LinkAction::parseAction(Object *obj, GooString *baseURI) {
     obj->dictLookup("JS", &obj3);
     action = new LinkJavaScript(&obj3);
     obj3.free();
+
+  // Set-OCG-State action
+  } else if (obj2.isName("SetOCGState")) {
+    action = new LinkOCGState(obj);
 
   // unknown action
   } else if (obj2.isName()) {
@@ -685,52 +690,62 @@ LinkSound::~LinkSound() {
 // LinkRendition
 //------------------------------------------------------------------------
 
-LinkRendition::LinkRendition(Object *Obj) {
+LinkRendition::LinkRendition(Object *obj) {
   operation = -1;
-  movie = NULL;
-  screenRef.num = -1;
+  media = NULL;
+  js = NULL;
 
-  if (Obj->isDict())
-  {
+  if (obj->isDict()) {
     Object tmp;
 
-    if (Obj->dictLookup("OP", &tmp)->isNull()) {
-      error(-1, "Rendition action : no /OP field defined");
-      tmp.free();
-    } else {
-    
-      operation = tmp.getInt();
-      tmp.free();
-
-      // screen annotation reference
-      Obj->dictLookupNF("AN", &tmp);
-      if (tmp.isRef()) {
-	screenRef = tmp.getRef();
+    if (!obj->dictLookup("JS", &tmp)->isNull()) {
+      if (tmp.isString()) {
+        js = new GooString(tmp.getString());
+      } else if (tmp.isStream()) {
+        Stream *stream = tmp.getStream();
+	js = new GooString();
+	stream->fillGooString(js);
+      } else {
+        error(-1, "Invalid Rendition Action: JS not string or stream");
       }
-      tmp.free();
-
-      // retrieve rendition object
-      Obj->dictLookup("R", &renditionObj);
-      if (renditionObj.isDict()) {
-
-	movie = new Movie();
-	movie->parseMediaRendition(&renditionObj);
-	
-	if (screenRef.num == -1) {
-	  error(-1, "Action Rendition : Rendition without Screen Annotation !");
-	}
-      }      
-
     }
-  }
+    tmp.free();
 
+    if (obj->dictLookup("OP", &tmp)->isInt()) {
+      operation = tmp.getInt();
+      if (!js && (operation < 0 || operation > 4)) {
+        error (-1, "Invalid Rendition Action: unrecognized operation valued: %d", operation);
+      } else {
+        Object obj1;
+
+        // retrieve rendition object
+        if (obj->dictLookup("R", &renditionObj)->isDict()) {
+          media = new MediaRendition(&renditionObj);
+	} else if (operation == 0 || operation == 4) {
+          error (-1, "Invalid Rendition Action: no R field with op = %d", operation);
+	  renditionObj.free();
+	}
+
+	if (!obj->dictLookupNF("AN", &screenRef)->isRef() && operation >= 0 && operation <= 4) {
+	  error (-1, "Invalid Rendition Action: no AN field with op = %d", operation);
+	  screenRef.free();
+	}
+      }
+    } else if (!js) {
+      error(-1, "Invalid Rendition action: no OP or JS field defined");
+    }
+    tmp.free();
+  }
 }
 
 LinkRendition::~LinkRendition() {
   renditionObj.free();
+  screenRef.free();
 
-  if (movie)
-    delete movie;
+  if (js)
+    delete js;
+  if (media)
+    delete media;
 }
 
 
@@ -747,11 +762,7 @@ LinkJavaScript::LinkJavaScript(Object *jsObj) {
   else if (jsObj->isStream()) {
     Stream *stream = jsObj->getStream();
     js = new GooString();
-    stream->reset();
-    int i;
-    while ((i = stream->getChar()) != EOF) {
-      js->append((char)i);
-    }
+    stream->fillGooString(js);
   }
 }
 
@@ -759,6 +770,81 @@ LinkJavaScript::~LinkJavaScript() {
   if (js) {
     delete js;
   }
+}
+
+//------------------------------------------------------------------------
+// LinkOCGState
+//------------------------------------------------------------------------
+LinkOCGState::LinkOCGState(Object *obj) {
+  Object obj1;
+
+  stateList = new GooList();
+  preserveRB = gTrue;
+
+  if (obj->dictLookup("State", &obj1)->isArray()) {
+    StateList *stList = NULL;
+
+    for (int i = 0; i < obj1.arrayGetLength(); ++i) {
+      Object obj2;
+
+      obj1.arrayGetNF(i, &obj2);
+      if (obj2.isName()) {
+        if (stList)
+	  stateList->append(stList);
+
+	char *name = obj2.getName();
+	stList = new StateList();
+	stList->list = new GooList();
+	if (!strcmp (name, "ON")) {
+	  stList->st = On;
+	} else if (!strcmp (name, "OFF")) {
+	  stList->st = Off;
+	} else if (!strcmp (name, "Toggle")) {
+	  stList->st = Toggle;
+	} else {
+	  error (-1, "Invalid name '%s' in OCG Action state array", name);
+	  delete stList;
+	  stList = NULL;
+	}
+      } else if (obj2.isRef()) {
+        if (stList) {
+	  Ref ocgRef = obj2.getRef();
+	  Ref *item = new Ref();
+	  item->num = ocgRef.num;
+	  item->gen = ocgRef.gen;
+	  stList->list->append(item);
+	} else {
+	  error (-1, "Invalid OCG Action State array, expected name instead of ref");
+	}
+      } else {
+        error (-1, "Invalid item in OCG Action State array");
+      }
+      obj2.free();
+    }
+    // Add the last group
+    if (stList)
+      stateList->append(stList);
+  } else {
+    error (-1, "Invalid OCGState action");
+    delete stateList;
+    stateList = NULL;
+  }
+  obj1.free();
+
+  if (obj->dictLookup("PreserveRB", &obj1)->isBool()) {
+    preserveRB = obj1.getBool();
+  }
+  obj1.free();
+}
+
+LinkOCGState::~LinkOCGState() {
+  if (stateList)
+    deleteGooList(stateList, StateList);
+}
+
+LinkOCGState::StateList::~StateList() {
+  if (list)
+    deleteGooList(list, Ref);
 }
 
 //------------------------------------------------------------------------

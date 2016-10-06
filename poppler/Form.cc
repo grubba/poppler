@@ -5,7 +5,7 @@
 // This file is licensed under the GPLv2 or later
 //
 // Copyright 2006-2008 Julien Rebetez <julienr@svn.gnome.org>
-// Copyright 2007-2009 Albert Astals Cid <aacid@kde.org>
+// Copyright 2007-2010 Albert Astals Cid <aacid@kde.org>
 // Copyright 2007-2008 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright 2007 Adrian Johnson <ajohnson@redneon.com>
 // Copyright 2007 Iñigo Martínez <inigomartinez@gmail.com>
@@ -13,6 +13,7 @@
 // Copyright 2008 Michael Vrable <mvrable@cs.ucsd.edu>
 // Copyright 2009 Matthias Drochner <M.Drochner@fz-juelich.de>
 // Copyright 2009 KDAB via Guillermo Amaral <gamaral@amaral.com.mx>
+// Copyright 2010 Mark Riedesel <mark@klowner.com>
 // 
 //========================================================================
 
@@ -22,6 +23,7 @@
 #pragma implementation
 #endif
 
+#include <set>
 #include <stddef.h>
 #include <string.h>
 #include "goo/gmem.h"
@@ -72,6 +74,21 @@ FormWidget::FormWidget(XRef *xrefA, Object *aobj, unsigned num, Ref aref, FormFi
   type = formUndef;
   field = fieldA;
   Dict *dict = obj.getDict();
+  fullyQualifiedName = NULL;
+
+  if (dict->lookup("T", &obj1)->isString()) {
+    partialName = obj1.getString()->copy();
+  } else {
+    partialName = NULL;
+  }
+  obj1.free();
+
+  if(dict->lookup("TM", &obj1)->isString()) {
+    mappingName = obj1.getString()->copy();
+  } else {
+    mappingName = NULL;
+  }
+  obj1.free();
 
   if (!dict->lookup("Rect", &obj1)->isArray()) {
     error(-1, "Annotation rectangle is wrong type");
@@ -122,6 +139,9 @@ FormWidget::FormWidget(XRef *xrefA, Object *aobj, unsigned num, Ref aref, FormFi
 
 FormWidget::~FormWidget()
 {
+  delete partialName;
+  delete mappingName;
+  delete fullyQualifiedName;
   obj.free ();
 }
 
@@ -161,6 +181,52 @@ void FormWidget::updateField (const char *key, Object *value)
   obj1->getDict ()->set (const_cast<char*>(key), value);
   //notify the xref about the update
   xref->setModifiedObject(obj1, ref1);
+}
+
+GooString* FormWidget::getFullyQualifiedName() {
+  Object obj1, obj2;
+  Object parent;
+  GooString *parent_name;
+  GooString *full_name;
+
+  if (fullyQualifiedName)
+    return fullyQualifiedName;
+
+  full_name = new GooString();
+
+  obj.copy(&obj1);
+  while (obj1.dictLookup("Parent", &parent)->isDict()) {
+    if (parent.dictLookup("T", &obj2)->isString()) {
+      parent_name = obj2.getString();
+
+      if (parent_name->hasUnicodeMarker()) {
+        parent_name->del(0, 2); // Remove the unicode BOM
+	full_name->insert(0, "\0.", 2); // 2-byte unicode period
+      } else {
+        full_name->insert(0, '.'); // 1-byte ascii period
+      }
+
+      full_name->insert(0, parent_name);
+      obj2.free();
+    }
+    obj1.free();
+    parent.copy(&obj1);
+    parent.free();
+  }
+  obj1.free();
+  parent.free();
+
+  if (partialName) {
+    full_name->append(partialName);
+  } else {
+    int len = full_name->getLength();
+    // Remove the last period
+    if (len > 0)
+      full_name->del(len - 1, 1);
+  }
+
+  fullyQualifiedName = full_name;
+  return fullyQualifiedName;
 }
 
 FormWidgetButton::FormWidgetButton (XRef *xrefA, Object *aobj, unsigned num, Ref ref, FormField *p) :
@@ -715,13 +781,14 @@ FormField::FormField(XRef* xrefA, Object *aobj, const Ref& aref, FormFieldType t
     // Load children
     for(int i=0; i<length; i++) { 
       Object obj2,obj3;
-      Object childRef;
       array->get(i, &obj2);
-      array->getNF(i, &childRef);
       if (!obj2.isDict ()) {
 	      error (-1, "Reference to an invalid or non existant object");
+	      obj2.free();
 	      continue;
       }
+      Object childRef;
+      array->getNF(i, &childRef);
       //field child
       if (dict->lookup ("FT", &obj3)->isName()) {
         // If I'm not a generic container field and my children
@@ -990,7 +1057,7 @@ FormFieldText::FormFieldText(XRef *xrefA, Object *aobj, const Ref& ref)
 GooString* FormFieldText::getContentCopy ()
 {
   if (!content) return NULL;
-  return new GooString(*content);
+  return new GooString(content);
 }
 
 void FormFieldText::setContentCopy (GooString* new_content)
@@ -1180,7 +1247,7 @@ Form::~Form() {
 }
 
 // Look up an inheritable field dictionary entry.
-Object *Form::fieldLookup(Dict *field, char *key, Object *obj) {
+static Object *fieldLookup(Dict *field, char *key, Object *obj, std::set<int> *usedParents) {
   Dict *dict;
   Object parent;
 
@@ -1189,13 +1256,33 @@ Object *Form::fieldLookup(Dict *field, char *key, Object *obj) {
     return obj;
   }
   obj->free();
-  if (dict->lookup("Parent", &parent)->isDict()) {
-    fieldLookup(parent.getDict(), key, obj);
+  dict->lookupNF("Parent", &parent);
+  if (parent.isRef()) {
+    const Ref ref = parent.getRef();
+    if (usedParents->find(ref.num) == usedParents->end()) {
+      usedParents->insert(ref.num);
+
+      Object obj2;
+      parent.fetch(dict->getXRef(), &obj2);
+      if (obj2.isDict()) {
+        fieldLookup(obj2.getDict(), key, obj, usedParents);
+      } else {
+        obj->initNull();
+      }
+      obj2.free();
+    }
+  } else if (parent.isDict()) {
+    fieldLookup(parent.getDict(), key, obj, usedParents);
   } else {
     obj->initNull();
   }
   parent.free();
   return obj;
+}
+
+Object *Form::fieldLookup(Dict *field, char *key, Object *obj) {
+  std::set<int> usedParents;
+  return ::fieldLookup(field, key, obj, &usedParents);
 }
 
 FormField *Form::createFieldFromDict (Object* obj, XRef *xrefA, const Ref& pref)

@@ -19,6 +19,12 @@
 #include "poppler.h"
 #include "poppler-private.h"
 
+/**
+ * SECTION:poppler-action
+ * @short_description: Action links
+ * @title: PopplerAction
+ */
+
 POPPLER_DEFINE_BOXED_TYPE (PopplerDest, poppler_dest, poppler_dest_copy, poppler_dest_free)
 
 /**
@@ -34,8 +40,7 @@ poppler_dest_copy (PopplerDest *dest)
 {
 	PopplerDest *new_dest;
 
-	new_dest = g_new0 (PopplerDest, 1);
-	memcpy (new_dest, dest, sizeof (PopplerDest));
+	new_dest = g_slice_dup (PopplerDest, dest);
 
 	if (dest->named_dest)
 		new_dest->named_dest = g_strdup (dest->named_dest);
@@ -59,7 +64,33 @@ poppler_dest_free (PopplerDest *dest)
 	if (dest->named_dest)
 		g_free (dest->named_dest);
 	
-	g_free (dest);
+	g_slice_free (PopplerDest, dest);
+}
+
+static void
+poppler_action_layer_free (PopplerActionLayer *action_layer)
+{
+	if (!action_layer)
+		return;
+
+	if (action_layer->layers) {
+		g_list_foreach (action_layer->layers, (GFunc)g_object_unref, NULL);
+		g_list_free (action_layer->layers);
+		action_layer->layers = NULL;
+	}
+
+	g_slice_free (PopplerActionLayer, action_layer);
+}
+
+static PopplerActionLayer *
+poppler_action_layer_copy (PopplerActionLayer *action_layer)
+{
+	PopplerActionLayer *retval = g_slice_dup (PopplerActionLayer, action_layer);
+
+	retval->layers = g_list_copy (action_layer->layers);
+	g_list_foreach (action_layer->layers, (GFunc)g_object_ref, NULL);
+
+	return retval;
 }
 
 POPPLER_DEFINE_BOXED_TYPE (PopplerAction, poppler_action, poppler_action_copy, poppler_action_free)
@@ -96,14 +127,25 @@ poppler_action_free (PopplerAction *action)
 		g_free (action->named.named_dest);
 		break;
 	case POPPLER_ACTION_MOVIE:
-		/* TODO */
+		if (action->movie.movie)
+			g_object_unref (action->movie.movie);
+		break;
+	case POPPLER_ACTION_RENDITION:
+		if (action->rendition.media)
+			g_object_unref (action->rendition.media);
+		break;
+	case POPPLER_ACTION_OCG_STATE:
+		if (action->ocg_state.state_list) {
+			g_list_foreach (action->ocg_state.state_list, (GFunc)poppler_action_layer_free, NULL);
+			g_list_free (action->ocg_state.state_list);
+		}
 		break;
 	default:
 		break;
 	}
 	
 	g_free (action->any.title);
-	g_free (action);
+	g_slice_free (PopplerAction, action);
 }
 
 /**
@@ -122,8 +164,7 @@ poppler_action_copy (PopplerAction *action)
 	g_return_val_if_fail (action != NULL, NULL);
 
 	/* Do a straight copy of the memory */
-	new_action = g_new0 (PopplerAction, 1);
-	memcpy (new_action, action, sizeof (PopplerAction));
+	new_action = g_slice_dup (PopplerAction, action);
 
 	if (action->any.title != NULL)
 		new_action->any.title = g_strdup (action->any.title);
@@ -152,7 +193,26 @@ poppler_action_copy (PopplerAction *action)
 			new_action->named.named_dest = g_strdup (action->named.named_dest);
 		break;
 	case POPPLER_ACTION_MOVIE:
-		/* TODO */
+		if (action->movie.movie)
+			new_action->movie.movie = (PopplerMovie *)g_object_ref (action->movie.movie);
+		break;
+	case POPPLER_ACTION_RENDITION:
+		if (action->rendition.media)
+			new_action->rendition.media = (PopplerMedia *)g_object_ref (action->rendition.media);
+		break;
+	case POPPLER_ACTION_OCG_STATE:
+		if (action->ocg_state.state_list) {
+			GList *l;
+			GList *new_list = NULL;
+
+			for (l = action->ocg_state.state_list; l; l = g_list_next (l)) {
+				PopplerActionLayer *alayer = (PopplerActionLayer *)l->data;
+				new_list = g_list_prepend (new_list, poppler_action_layer_copy (alayer));
+			}
+
+			new_action->ocg_state.state_list = g_list_reverse (new_list);
+		}
+
 		break;
 	default:
 		break;
@@ -167,7 +227,7 @@ dest_new_goto (PopplerDocument *document,
 {
 	PopplerDest *dest;
 
-	dest = g_new0 (PopplerDest, 1);
+	dest = g_slice_new0 (PopplerDest);
 
 	if (link_dest == NULL) {
 		dest->type = POPPLER_DEST_UNKNOWN;
@@ -252,7 +312,7 @@ dest_new_named (GooString *named_dest)
 {
 	PopplerDest *dest;
 
-	dest = g_new0 (PopplerDest, 1);
+	dest = g_slice_new0 (PopplerDest);
 
 	if (named_dest == NULL) {
 		dest->type = POPPLER_DEST_UNKNOWN;
@@ -352,11 +412,192 @@ build_named (PopplerAction *action,
 		action->named.named_dest = g_strdup (name);
 }
 
-static void
-build_movie (PopplerAction *action,
-	     LinkAction    *link)
+static AnnotMovie *
+find_annot_movie_for_action (PopplerDocument *document,
+			     LinkMovie       *link)
 {
-	/* FIXME: Write */
+  AnnotMovie *annot = NULL;
+  XRef *xref = document->doc->getXRef ();
+  Object annotObj;
+
+  if (link->hasAnnotRef ()) {
+    Ref *ref = link->getAnnotRef ();
+
+    xref->fetch (ref->num, ref->gen, &annotObj);
+  } else if (link->hasAnnotTitle ()) {
+    Catalog *catalog = document->doc->getCatalog ();
+    Object annots;
+    GooString *title = link->getAnnotTitle ();
+    int i;
+
+    for (i = 1; i <= document->doc->getNumPages (); ++i) {
+      Page *p = catalog->getPage (i);
+
+      if (p->getAnnots (&annots)->isArray ()) {
+        int j;
+	GBool found = gFalse;
+
+	for (j = 0; j < annots.arrayGetLength () && !found; ++j) {
+          if (annots.arrayGet(j, &annotObj)->isDict()) {
+	    Object obj1;
+
+	    if (!annotObj.dictLookup ("Subtype", &obj1)->isName ("Movie")) {
+	      obj1.free ();
+	      continue;
+	    }
+	    obj1.free ();
+
+	    if (annotObj.dictLookup ("T", &obj1)->isString()) {
+	      GooString *t = obj1.getString ();
+
+	      if (title->cmp(t) == 0)
+	        found = gTrue;
+	    }
+	    obj1.free ();
+	  }
+	  if (!found)
+	    annotObj.free ();
+	}
+	if (found) {
+	  annots.free ();
+	  break;
+	} else {
+          annotObj.free ();
+	}
+      }
+      annots.free ();
+    }
+  }
+
+  if (annotObj.isDict ()) {
+    Object tmp;
+
+    annot = new AnnotMovie (xref, annotObj.getDict(), document->doc->getCatalog (), &tmp);
+    if (!annot->isOk ()) {
+      delete annot;
+      annot = NULL;
+    }
+  }
+  annotObj.free ();
+
+  return annot;
+}
+
+static void
+build_movie (PopplerDocument *document,
+	     PopplerAction   *action,
+	     LinkMovie       *link)
+{
+	AnnotMovie *annot;
+
+	switch (link->getOperation ()) {
+	case LinkMovie::operationTypePause:
+		action->movie.operation = POPPLER_ACTION_MOVIE_PAUSE;
+		break;
+	case LinkMovie::operationTypeResume:
+		action->movie.operation = POPPLER_ACTION_MOVIE_RESUME;
+		break;
+	case LinkMovie::operationTypeStop:
+		action->movie.operation = POPPLER_ACTION_MOVIE_STOP;
+		break;
+	default:
+	case LinkMovie::operationTypePlay:
+		action->movie.operation = POPPLER_ACTION_MOVIE_PLAY;
+		break;
+	}
+
+	annot = find_annot_movie_for_action (document, link);
+	if (annot) {
+		action->movie.movie = _poppler_movie_new (annot->getMovie());
+		delete annot;
+	}
+}
+
+static void
+build_rendition (PopplerAction *action,
+		 LinkRendition *link)
+{
+	action->rendition.op = link->getOperation();
+	if (link->hasRenditionObject())
+		action->rendition.media = _poppler_media_new (link->getMedia());
+	// TODO: annotation reference
+}
+
+static PopplerLayer *
+get_layer_for_ref (PopplerDocument *document,
+		   GList           *layers,
+		   Ref             *ref,
+		   gboolean         preserve_rb)
+{
+	GList *l;
+
+	for (l = layers; l; l = g_list_next (l)) {
+		Layer *layer = (Layer *)l->data;
+
+		if (layer->oc) {
+			Ref ocgRef = layer->oc->getRef();
+
+			if (ref->num == ocgRef.num && ref->gen == ocgRef.gen) {
+				GList *rb_group = NULL;
+
+				if (preserve_rb)
+					rb_group = _poppler_document_get_layer_rbgroup (document, layer);
+				return _poppler_layer_new (document, layer, rb_group);
+			}
+		}
+
+		if (layer->kids) {
+			PopplerLayer *retval = get_layer_for_ref (document, layer->kids, ref, preserve_rb);
+			if (retval)
+				return retval;
+		}
+	}
+
+	return NULL;
+}
+
+static void
+build_ocg_state (PopplerDocument *document,
+		 PopplerAction   *action,
+		 LinkOCGState    *ocg_state)
+{
+	GooList *st_list = ocg_state->getStateList();
+	GBool    preserve_rb = ocg_state->getPreserveRB();
+	gint     i, j;
+	GList   *layer_state = NULL;
+
+	if (!document->layers) {
+		if (!_poppler_document_get_layers (document))
+			return;
+	}
+
+	for (i = 0; i < st_list->getLength(); ++i) {
+		LinkOCGState::StateList *list = (LinkOCGState::StateList *)st_list->get(i);
+		PopplerActionLayer *action_layer = g_new0 (PopplerActionLayer, 1);
+
+		switch (list->st) {
+		case LinkOCGState::On:
+			action_layer->action = POPPLER_ACTION_LAYER_ON;
+			break;
+		case LinkOCGState::Off:
+			action_layer->action = POPPLER_ACTION_LAYER_OFF;
+			break;
+		case LinkOCGState::Toggle:
+			action_layer->action = POPPLER_ACTION_LAYER_TOGGLE;
+			break;
+		}
+
+		for (j = 0; j < list->list->getLength(); ++j) {
+			Ref *ref = (Ref *)list->list->get(j);
+			PopplerLayer *layer = get_layer_for_ref (document, document->layers, ref, preserve_rb);
+
+			action_layer->layers = g_list_prepend (action_layer->layers, layer);
+		}
+
+		layer_state = g_list_prepend (layer_state, action_layer);
+	}
+
+	action->ocg_state.state_list = g_list_reverse (layer_state);
 }
 
 PopplerAction *
@@ -366,7 +607,7 @@ _poppler_action_new (PopplerDocument *document,
 {
 	PopplerAction *action;
 
-	action = g_new0 (PopplerAction, 1);
+	action = g_slice_new0 (PopplerAction);
 
 	if (title)
 		action->any.title = g_strdup (title);
@@ -399,7 +640,15 @@ _poppler_action_new (PopplerDocument *document,
 		break;
 	case actionMovie:
 		action->type = POPPLER_ACTION_MOVIE;
-		build_movie (action, link);
+		build_movie (document, action, dynamic_cast<LinkMovie*> (link));
+		break;
+	case actionRendition:
+		action->type = POPPLER_ACTION_RENDITION;
+		build_rendition (action, dynamic_cast<LinkRendition*> (link));
+		break;
+	case actionOCGState:
+		action->type = POPPLER_ACTION_OCG_STATE;
+		build_ocg_state (document, action, dynamic_cast<LinkOCGState*> (link));
 		break;
 	case actionUnknown:
 	default:

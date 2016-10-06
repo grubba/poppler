@@ -116,8 +116,11 @@ pgd_info_create_widget (PopplerDocument *document)
 	GtkWidget *frame, *alignment, *table;
 	gchar     *str;
 	gchar     *title, *format, *author, *subject;
-	gchar     *keywords, *creator, *producer, *linearized;
+	gchar     *keywords, *creator, *producer;
 	gchar     *metadata;
+	gchar     *perm_id;
+	gchar     *up_id;
+	gboolean   linearized;
 	GTime      creation_date, mod_date;
 	GEnumValue *enum_value;
 	PopplerBackend backend;
@@ -194,9 +197,8 @@ pgd_info_create_widget (PopplerDocument *document)
 	pgd_table_add_property (GTK_TABLE (table), "<b>Producer:</b>", producer, &row);
 	g_free (producer);
 	
-	pgd_table_add_property (GTK_TABLE (table), "<b>Linearized:</b>", linearized, &row);
-	g_free (linearized);
-	
+	pgd_table_add_property (GTK_TABLE (table), "<b>Linearized:</b>", linearized ? "Yes" : "No", &row);
+
 	str = pgd_format_date (creation_date);
 	pgd_table_add_property (GTK_TABLE (table), "<b>Creation Date:</b>", str, &row);
 	g_free (str);
@@ -210,6 +212,17 @@ pgd_info_create_widget (PopplerDocument *document)
 
 	enum_value = g_enum_get_value ((GEnumClass *) g_type_class_peek (POPPLER_TYPE_PAGE_LAYOUT), layout);
 	pgd_table_add_property (GTK_TABLE (table), "<b>Page Layout:</b>", enum_value->value_name, &row);
+
+	if (poppler_document_get_id (document, &perm_id, &up_id)) {
+		str = g_strndup (perm_id, 32);
+		g_free (perm_id);
+		pgd_table_add_property (GTK_TABLE (table), "<b>Permanent ID:</b>", str, &row);
+		g_free (str);
+		str = g_strndup (up_id, 32);
+		g_free (up_id);
+		pgd_table_add_property (GTK_TABLE (table), "<b>Update ID:</b>", str, &row);
+		g_free (str);
+	}
 
 	pgd_info_add_permissions (GTK_TABLE (table), permissions, &row);
 

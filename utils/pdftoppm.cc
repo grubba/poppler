@@ -20,6 +20,8 @@
 // Copyright (C) 2009 Stefan Thomas <thomas@eload24.com>
 // Copyright (C) 2009, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2010 Adrian Johnson <ajohnson@redneon.com>
+// Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+// Copyright (C) 2010 Jonathan Liu <net147@gmail.com>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -28,6 +30,10 @@
 
 #include "config.h"
 #include <poppler-config.h>
+#ifdef _WIN32
+#include <fcntl.h> // for O_BINARY
+#include <io.h>    // for setmode
+#endif
 #include <stdio.h>
 #include <math.h>
 #include "parseargs.h"
@@ -36,6 +42,7 @@
 #include "GlobalParams.h"
 #include "Object.h"
 #include "PDFDoc.h"
+#include "PDFDocFactory.h"
 #include "splash/SplashBitmap.h"
 #include "splash/Splash.h"
 #include "SplashOutputDev.h"
@@ -44,6 +51,8 @@
 
 static int firstPage = 1;
 static int lastPage = 0;
+static GBool printOnlyOdd = gFalse;
+static GBool printOnlyEven = gFalse;
 static double resolution = 0.0;
 static double x_resolution = 150.0;
 static double y_resolution = 150.0;
@@ -74,6 +83,10 @@ static const ArgDesc argDesc[] = {
    "first page to print"},
   {"-l",      argInt,      &lastPage,      0,
    "last page to print"},
+  {"-o",      argFlag,      &printOnlyOdd, 0,
+   "print only odd pages"},
+  {"-e",      argFlag,      &printOnlyEven, 0,
+   "print only even pages"},
 
   {"-r",      argFP,       &resolution,    0,
    "resolution, in DPI (default is 150)"},
@@ -170,6 +183,10 @@ static void savePageSlice(PDFDoc *doc,
       bitmap->writePNMFile(ppmFile);
     }
   } else {
+#ifdef _WIN32
+    setmode(fileno(stdout), O_BINARY);
+#endif
+
     if (png) {
       bitmap->writeImgFile(splashFormatPng, stdout, x_resolution, y_resolution);
     } else if (jpeg) {
@@ -178,6 +195,18 @@ static void savePageSlice(PDFDoc *doc,
       bitmap->writePNMFile(stdout);
     }
   }
+}
+
+static int numberOfCharacters(unsigned int n)
+{
+  int charNum = 0;
+  while (n >= 10)
+  {
+    n = n / 10;
+    charNum++;
+  }
+  charNum++;
+  return charNum;
 }
 
 int main(int argc, char *argv[]) {
@@ -250,14 +279,17 @@ int main(int argc, char *argv[]) {
   } else {
     userPW = NULL;
   }
-  if(fileName != NULL && fileName->cmp("-") != 0) {
-      doc = new PDFDoc(fileName, ownerPW, userPW);
-  } else {
-      Object obj;
 
-      obj.initNull();
-      doc = new PDFDoc(new FileStream(stdin, 0, gFalse, 0, &obj), ownerPW, userPW);
+  if (fileName == NULL) {
+    fileName = new GooString("fd://0");
   }
+  if (fileName->cmp("-") == 0) {
+    delete fileName;
+    fileName = new GooString("fd://0");
+  }
+  doc = PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW);
+  delete fileName;
+
   if (userPW) {
     delete userPW;
   }
@@ -285,8 +317,10 @@ int main(int argc, char *argv[]) {
 				  gFalse, paperColor);
   splashOut->startDoc(doc->getXRef());
   if (sz != 0) w = h = sz;
-  pg_num_len = (int)ceil(log((double)doc->getNumPages()) / log((double)10));
+  pg_num_len = numberOfCharacters(doc->getNumPages());
   for (pg = firstPage; pg <= lastPage; ++pg) {
+    if (printOnlyEven && pg % 2 == 0) continue;
+    if (printOnlyOdd && pg % 2 == 1) continue;
     if (useCropBox) {
       pg_w = doc->getPageCropWidth(pg);
       pg_h = doc->getPageCropHeight(pg);

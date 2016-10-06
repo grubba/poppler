@@ -1,3 +1,195 @@
+Release 0.15.0 (0.16 Alpha)
+
+	core:
+	 * Remove exception support
+	 * Improve creation of Annotations
+	 * Fix failure to parse PDF with damaged internal structure. (Bugs #29189 #3870)
+	 * Add a way to access the raw text of a page
+	 * Speed improvements when reading multiple characters from a given Stream
+	 * Speed improvements in the Splash backend
+	 * Speed improvement in gray color space calculations
+	 * Speed improvement in ICC color space calculations
+	 * Speed improvement when reading some fonts
+	 * Make GBool a bool instead of an int
+
+	glib:
+	 * Add GObject introspection support
+	 * Improve creation of Annotations
+	 * Add a way to get the coordinates of each character of a page
+	 * Add a way to get the page label
+	 * Documentation improvements
+	 * Support password protected documents in the demo
+	 * Support for selection in the demo
+	 * Support for adding annotationss in the demo
+	 * Misc improvements in the internals
+	
+	qt4:
+	 * Add a way to access the raw text of a page
+	 * Recognize "Print" as named action
+	 * Documentation improvements
+	
+	build system:
+	 * Add option for autogen.sh to skip configure
+	 * Nicer autogen.sh output
+	 * Improvements when build the glib frontend with CMake
+	
+	utils:
+	 * pdftohtml: Use splash instead of external gs invocation to render the background
+	 * pdftohtml: Let the user specify the resolution of the background. (Bug #29551)
+	
+	cpp:
+	 * Add a way to access the raw text of a page
+
+Release 0.14.3
+
+	core:
+	 * Tell Windows we are writing/reading binary data from stdout/stdio (Bug #29329)
+	 * Fix crash when parsing some Movie elements (KDE Bug #249586)
+
+Release 0.14.2
+
+	core:
+	 * Fix rendering of some documents involving tilingPatternFill in the cairo output device
+	 * Improve rendering of some annotations
+	 * Handle ColorTransform in DCT streams when using libjpeg (Bug #28873)
+	 * Fix crash in the ps output device in some files (KDE Bug #246269)
+	 * Fix crash in some malformed files (Bug #28842)
+	
+	build system:
+	 * Improve build on windows
+	 * Add uninstalled .pc file support when using autoconf
+	
+	glib:
+	 * Fix a crash when a layer doesn't have a name (Bug #28842)
+	
+	utils:
+	 * Fix padding of names in pdftoppm
+
+Release 0.14.1
+
+	core:
+	 * Add ObjectStream caching, makes opening some files ten times faster (Bug #26759)
+	 * Fix crash when writing to negative coordinates (Bug #28480)
+	 * Check objects are the type we want them to be when parsing GfxICCBasedColorSpace
+	 * Optimize Splash::compositeBackground
+	 * Optimize color space calculations by using sqrt instead of pow 0.5
+	 * Fix crash in JBIG2Stream with malformed documents
+	
+	build system:
+	 * Make sure we ship two needed cmake files
+	 * Do not distribute glib/poppler-features.h and poppler/poppler-config.h
+	 * Improve compilation with Sun Studio
+	 * Fix linking of the cpp frontend when using autotools
+	
+	glib:
+	 * Fix links/annots area for some documents (Bug #28588)
+	 * Fix poppler_page_find_tex() when called more than once (Bug #27927)
+	
+	utils:
+	 * Add -cropbox to pdftoppm manual
+
+Release 0.14.0
+
+	core:
+	 * Fix crash when parsing pdf with broken JBIG2Stream (Bug #28170)
+	 * Do not follow loops blindly when parsing XRef (Bug #28172)
+	 * Allow quality & progressive mode to be utilised in JpegWriter
+	 * Fix potential assert in Lexer code (KDE bug #240208)
+	 * Fix opening of files whose /P is stored as unsigned integer
+	 * Do not exit() when trying to allocate memory for the XRef fails
+	
+	cpp:
+	 * Minor bugfixes
+	 * Documentation improvements
+	
+	build system:
+	 * Fix build in mingw32 when using autotools
+	 * Preserve compiler flags when using cmake
+
+Release 0.13.4 (0.14 RC 1)
+
+	core:
+	 * Include standard float.h instead of unportable values.h
+	 * Fix first color stop offset of linear gradients. Bug #27837
+	 * Fix compilation if JPEG nor PNG is used
+	 * Use fabs for doubles instead of abs
+	 * Use strtok_r instead strtok
+	 * Adjust bbox for line annots when y1 = y2
+	 * Some fixes and regressions in the cairo output device
+	 * Better check of overlapping of table cells when selecting text
+	
+	cpp:
+	 * Make the pkg-config files really work
+	 * Fix in/out buffer sizes in some functions
+
+Release 0.13.3 (0.14 Beta 2)
+
+	core:
+	 * Fix roll optimization in the PS function interpreter
+	 * Correctly parse numbers with '+' sign. Gnome bug #614549
+	 * Add support for cached files
+	 * Add support for reading a cached file from stdin
+	 * Add HTTP support using libcurl, disabled by default
+	 * Add some const correctnes to GooString
+	 * Rework DCTStream error handling. Bug #26280
+	 * Use current fill_opacity when drawing soft masked images in Cairo backend. Gnome bug #614915
+	 * Use the topleft of the Rect of text annots to draw
+	 * Fix saving update docs that have a compressed xref table. Bug #27450
+	 * Parse varius part of the document catalog on demand
+	 * Implement colorizing image masks with pattern colorspace in Cairo backend
+	 * Fix a crash when rendering 0x0 images in Cairo backend
+	 * Check pattern status after setting matrix when rendering images
+	 * Improve text selection/extraction order. Bug #3188
+	 * Fix pattern size when bbox is not at 0,0
+	 * Improve colorizing text and masks in pattern colorspace. Bug #27482
+	 * Silence some Illegal entry in bfrange block in ToUnicode CMap. Bug #27728
+
+	utils:
+	 * Add the -o[dd] and -e[ven] options to pdftoppm
+	 * Allow read from stdin using the new cached files feature
+	 * Fix crash in pdftohtml when output filename was shorter than 5 characters
+
+	glib:
+	 * Use existing cairo api when rendering to a pixbuf
+	 * Compile with -DGSEAL_ENABLE. Bug #27579
+
+Release 0.13.2 (0.14 Beta 1)
+
+	core:
+	 * Improve Movie support
+	 * Fix experimental Arthur backend to compile when if Splash backend is disable
+	 * Fix usage of some streams in the Cairo backend
+	 * Small improvements in the experimental Arthur backend
+	 * Minor annotation improvements
+	 * Rework LinkRendition to follow the spec
+	 * Add support for Set-OCG-State actions
+	 * Correctly initialize the grayscale softmask color in the Splash backend
+	 * Correctly initialize actualText in TextOutputDev when initialization fails
+	 * Various MSVC fixes
+
+	glib:
+	 * Add support for Movie objects
+	 * Add support for Screen annotations
+	 * Add support for rendition actions
+	 * Add support for OCG State actions
+	 * Improvements to the demo
+	
+	qt4:
+	 * Always compile the experimental Arthur backend
+	 * Minor speed improvement in QPainter usage
+	 * Add a search overload that takes doubles instead of QRectF
+	
+	cpp:
+	 * Fix iconv usage
+	 * use gmtime() when gmtime_r() is not available
+	 * Fix building in autotools in windows
+	 * {from,to}_utf_8() -> {from,to}_utf8()
+	
+	build system:
+	 * Multiple CMake build system fixes
+	 * Fix of some DIST targets in autotools
+	 * Make finding of Qt3 in autotools use pkg-config
+
 Release 0.13.1 (0.14 Alpha 2)
 
 	core:

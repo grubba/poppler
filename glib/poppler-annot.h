@@ -46,7 +46,16 @@ G_BEGIN_DECLS
 #define POPPLER_ANNOT_FILE_ATTACHMENT(obj)   (G_TYPE_CHECK_INSTANCE_CAST ((obj), POPPLER_TYPE_ANNOT_MARKUP, PopplerAnnotFileAttachment))
 #define POPPLER_IS_ANNOT_FILE_ATTACHMENT(obj)(G_TYPE_CHECK_INSTANCE_TYPE ((obj), POPPLER_TYPE_ANNOT_FILE_ATTACHMENT))
 
+#define POPPLER_TYPE_ANNOT_MOVIE             (poppler_annot_movie_get_type ())
+#define POPPLER_ANNOT_MOVIE(obj)             (G_TYPE_CHECK_INSTANCE_CAST ((obj), POPPLER_TYPE_ANNOT_MOVIE, PopplerAnnotMovie))
+#define POPPLER_IS_ANNOT_MOVIE(obj)          (G_TYPE_CHECK_INSTANCE_TYPE ((obj), POPPLER_TYPE_ANNOT_MOVIE))
+
+#define POPPLER_TYPE_ANNOT_SCREEN            (poppler_annot_screen_get_type ())
+#define POPPLER_ANNOT_SCREEN(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), POPPLER_TYPE_ANNOT_SCREEN, PopplerAnnotScreen))
+#define POPPLER_IS_ANNOT_SCREEN(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), POPPLER_TYPE_ANNOT_SCREEN))
+
 #define POPPLER_TYPE_ANNOT_CALLOUT_LINE      (poppler_annot_callout_line_get_type ())
+
 
 typedef enum
 {
@@ -105,6 +114,16 @@ typedef enum
   POPPLER_ANNOT_EXTERNAL_DATA_MARKUP_UNKNOWN
 } PopplerAnnotExternalDataType;
 
+#define POPPLER_ANNOT_TEXT_ICON_NOTE          "Note"
+#define POPPLER_ANNOT_TEXT_ICON_COMMENT       "Comment"
+#define POPPLER_ANNOT_TEXT_ICON_KEY           "Key"
+#define POPPLER_ANNOT_TEXT_ICON_HELP          "Help"
+#define POPPLER_ANNOT_TEXT_ICON_NEW_PARAGRAPH "NewParagraph"
+#define POPPLER_ANNOT_TEXT_ICON_PARAGRAPH     "Paragraph"
+#define POPPLER_ANNOT_TEXT_ICON_INSERT        "Insert"
+#define POPPLER_ANNOT_TEXT_ICON_CROSS         "Cross"
+#define POPPLER_ANNOT_TEXT_ICON_CIRCLE        "Circle"
+
 typedef enum
 {
   POPPLER_ANNOT_TEXT_STATE_MARKED,
@@ -144,15 +163,26 @@ gchar                        *poppler_annot_get_name                           (
 gchar                        *poppler_annot_get_modified                       (PopplerAnnot *poppler_annot);
 PopplerAnnotFlag              poppler_annot_get_flags                          (PopplerAnnot *poppler_annot);
 PopplerColor                 *poppler_annot_get_color                          (PopplerAnnot *poppler_annot);
+void                          poppler_annot_set_color                          (PopplerAnnot *poppler_annot,
+										PopplerColor *poppler_color);
+gint                          poppler_annot_get_page_index                     (PopplerAnnot *poppler_annot);
 
 /* PopplerAnnotMarkup */
 GType                         poppler_annot_markup_get_type                    (void) G_GNUC_CONST;
 gchar                        *poppler_annot_markup_get_label                   (PopplerAnnotMarkup *poppler_annot);
+void                          poppler_annot_markup_set_label                   (PopplerAnnotMarkup *poppler_annot,
+										const gchar        *label);
 gboolean                      poppler_annot_markup_has_popup                   (PopplerAnnotMarkup *poppler_annot);
+void                          poppler_annot_markup_set_popup                   (PopplerAnnotMarkup *poppler_annot,
+										PopplerRectangle   *popup_rect);
 gboolean                      poppler_annot_markup_get_popup_is_open           (PopplerAnnotMarkup *poppler_annot);
+void                          poppler_annot_markup_set_popup_is_open           (PopplerAnnotMarkup *poppler_annot,
+										gboolean            is_open);
 gboolean                      poppler_annot_markup_get_popup_rectangle         (PopplerAnnotMarkup *poppler_annot,
 										PopplerRectangle   *poppler_rect);
 gdouble                       poppler_annot_markup_get_opacity                 (PopplerAnnotMarkup *poppler_annot);
+void                          poppler_annot_markup_set_opacity                 (PopplerAnnotMarkup *poppler_annot,
+										gdouble             opacity);
 GDate                        *poppler_annot_markup_get_date                    (PopplerAnnotMarkup *poppler_annot);
 gchar                        *poppler_annot_markup_get_subject                 (PopplerAnnotMarkup *poppler_annot);
 PopplerAnnotMarkupReplyType   poppler_annot_markup_get_reply_to                (PopplerAnnotMarkup *poppler_annot);
@@ -160,8 +190,14 @@ PopplerAnnotExternalDataType  poppler_annot_markup_get_external_data           (
 
 /* PopplerAnnotText */
 GType                         poppler_annot_text_get_type                      (void) G_GNUC_CONST;
+PopplerAnnot                 *poppler_annot_text_new                           (PopplerDocument  *doc,
+										PopplerRectangle *rect);
 gboolean                      poppler_annot_text_get_is_open                   (PopplerAnnotText *poppler_annot);
+void                          poppler_annot_text_set_is_open                   (PopplerAnnotText *poppler_annot,
+										gboolean          is_open);
 gchar                        *poppler_annot_text_get_icon                      (PopplerAnnotText *poppler_annot);
+void                          poppler_annot_text_set_icon                      (PopplerAnnotText *poppler_annot,
+										const gchar      *icon);
 PopplerAnnotTextState         poppler_annot_text_get_state                     (PopplerAnnotText *poppler_annot);
 
 /* PopplerAnnotFreeText */
@@ -173,6 +209,15 @@ PopplerAnnotCalloutLine      *poppler_annot_free_text_get_callout_line         (
 GType                         poppler_annot_file_attachment_get_type           (void) G_GNUC_CONST;
 PopplerAttachment            *poppler_annot_file_attachment_get_attachment     (PopplerAnnotFileAttachment *poppler_annot);
 gchar                        *poppler_annot_file_attachment_get_name           (PopplerAnnotFileAttachment *poppler_annot);
+
+/* PopplerAnnotMovie */
+GType                         poppler_annot_movie_get_type                     (void) G_GNUC_CONST;
+gchar                        *poppler_annot_movie_get_title                    (PopplerAnnotMovie *poppler_annot);
+PopplerMovie                 *poppler_annot_movie_get_movie                    (PopplerAnnotMovie *poppler_annot);
+
+/* PopplerAnnotScreen */
+GType                         poppler_annot_screen_get_type                    (void) G_GNUC_CONST;
+PopplerAction                *poppler_annot_screen_get_action                  (PopplerAnnotScreen *poppler_annot);
 
 /* PopplerCalloutLine */
 GType                         poppler_annot_callout_line_get_type              (void) G_GNUC_CONST;

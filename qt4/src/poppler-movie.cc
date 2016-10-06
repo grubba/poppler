@@ -1,6 +1,7 @@
 /* poppler-sound.cc: qt interface to poppler
- * Copyright (C) 2008, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2008, 2010, Pino Toscano <pino@kde.org>
  * Copyright (C) 2008, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2010, Carlos Garcia Campos <carlosgc@gnome.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +20,8 @@
 
 #include "poppler-qt4.h"
 
+#include "Object.h"
+#include "Annot.h"
 #include "Movie.h"
 
 namespace Poppler
@@ -48,10 +51,14 @@ MovieObject::MovieObject( AnnotMovie *ann )
 {
 	m_movieData = new MovieData();
 	m_movieData->m_movieObj = ann->getMovie()->copy();
-	ann->getMovieSize( m_movieData->m_size.rwidth(), m_movieData->m_size.rheight() );
-	m_movieData->m_rotation = ann->getRotationAngle();
-	m_movieData->m_showControls = ann->getShowControls();
-	m_movieData->m_playMode = (MovieObject::PlayMode)ann->getRepeatMode();
+
+	MovieActivationParameters *mp = m_movieData->m_movieObj->getActivationParameters();
+	int width, height;
+	m_movieData->m_movieObj->getFloatingWindowSize(&width, &height);
+	m_movieData->m_size = QSize(width, height);
+	m_movieData->m_rotation = m_movieData->m_movieObj->getRotationAngle();
+	m_movieData->m_showControls = mp->showControls;
+	m_movieData->m_playMode = (MovieObject::PlayMode)mp->repeatMode;
 }
 
 MovieObject::~MovieObject()

@@ -1,3 +1,5 @@
+AM_LDFLAGS = @auto_import_flags@
+
 INCLUDES =					\
 	-I$(top_srcdir)				\
 	-I$(top_srcdir)/poppler			\
@@ -19,7 +21,7 @@ SUFFIXES: .moc
 
 noinst_PROGRAMS = test-poppler-qt4 stress-poppler-qt4 \
 	poppler-fonts test-password-qt4 stress-poppler-dir \
-	poppler-attachments
+	poppler-attachments poppler-texts
 
 
 test_poppler_qt4_SOURCES =			\
@@ -43,6 +45,11 @@ poppler_attachments_SOURCES =			\
        poppler-attachments.cpp
 
 poppler_attachments_LDADD = $(LDADDS)
+
+poppler_texts_SOURCES =			\
+       poppler-texts.cpp
+
+poppler_texts_LDADD = $(LDADDS)
 
 
 stress_poppler_qt4_SOURCES =			\
@@ -71,7 +78,8 @@ TESTS = \
 	check_pagemode    	\
 	check_password    	\
 	check_pagelayout	\
-	check_search
+	check_search		\
+	check_strings
 
 check_PROGRAMS = $(TESTS)
 
@@ -122,6 +130,10 @@ check_password_LDADD = $(LDADDS) $(POPPLER_QT4_TEST_LIBS)
 check_search_SOURCES = check_search.cpp
 check_search.$(OBJEXT): check_search.moc
 check_search_LDADD = $(LDADDS) $(POPPLER_QT4_TEST_LIBS)
+
+check_strings_SOURCES = check_strings.cpp
+check_strings.$(OBJEXT): check_strings.moc
+check_strings_LDADD = $(LDADDS) $(POPPLER_QT4_TEST_LIBS)
 
 endif
 

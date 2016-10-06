@@ -4,7 +4,7 @@
 //
 // Copyright 2007 Brad Hards <bradh@kde.org>
 // Copyright 2008 Pino Toscano <pino@kde.org>
-// Copyright 2008 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright 2008, 2010 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright 2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright 2008 Mark Kaplan <mkaplan@finjan.com>
 //
@@ -71,15 +71,19 @@ OCGs::OCGs(Object *ocgObject, XRef *xref) :
     ok = gFalse;
     return;
   }
-#if 0
-  // this is untested - we need an example showing BaseState
+
   Object baseState;
   defaultOcgConfig.dictLookup("BaseState", &baseState);
-  if (baseState.isString()) {
-    // read the value, and set each OptionalContentGroup entry appropriately
+  if (baseState.isName("OFF")) {
+    for (int i = 0; i < optionalContentGroups->getLength(); ++i) {
+      OptionalContentGroup *group;
+
+      group = (OptionalContentGroup *)optionalContentGroups->get(i);
+      group->setState(OptionalContentGroup::Off);
+    }
   }
   baseState.free();
-#endif
+
   Object on;
   defaultOcgConfig.dictLookup("ON", &on);
   if (on.isArray()) {

@@ -101,18 +101,18 @@ int embedded_file::size() const
  \returns the time_t representing the modification date of the embedded file,
           if available
  */
-unsigned int embedded_file::modification_date() const
+time_type embedded_file::modification_date() const
 {
-    return convert_date(d->emb_file->modDate()->getCString());
+    return detail::convert_date(d->emb_file->modDate()->getCString());
 }
 
 /**
  \returns the time_t representing the creation date of the embedded file,
           if available
  */
-unsigned int embedded_file::creation_date() const
+time_type embedded_file::creation_date() const
 {
-    return convert_date(d->emb_file->createDate()->getCString());
+    return detail::convert_date(d->emb_file->createDate()->getCString());
 }
 
 /**

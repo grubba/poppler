@@ -70,6 +70,14 @@ macro(SHOW_END_MESSAGE_YESNO what enabled)
   show_end_message("${what}" "${enabled_string}")
 endmacro(SHOW_END_MESSAGE_YESNO)
 
+macro(POPPLER_CHECK_LINK_FLAG flag var)
+   set(_save_CMAKE_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
+   include(CheckCXXSourceCompiles)
+   set(CMAKE_REQUIRED_LIBRARIES "${flag}")
+   check_cxx_source_compiles("int main() { return 0; }" ${var})
+   set(CMAKE_REQUIRED_LIBRARIES "${_save_CMAKE_REQUIRED_LIBRARIES}")
+endmacro(POPPLER_CHECK_LINK_FLAG)
+
 
 set(CMAKE_SYSTEM_INCLUDE_PATH ${CMAKE_SYSTEM_INCLUDE_PATH}
                               "${CMAKE_INSTALL_PREFIX}/include" )
@@ -93,10 +101,10 @@ endif(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 if(CMAKE_COMPILER_IS_GNUCXX)
   # set the default compile warnings
   set(DEFAULT_COMPILE_WARNINGS_NO)
-  set(DEFAULT_COMPILE_WARNINGS_YES "-ansi -Wall -Wno-write-strings")
-  set(DEFAULT_COMPILE_WARNINGS_KDE "-Wno-long-long -Wundef -ansi -D_XOPEN_SOURCE=500 -D_BSD_SOURCE -Wcast-align -Wconversion -Wchar-subscripts -Wall -W -Wpointer-arith -Wwrite-strings -O2 -Wformat-security -Wmissing-format-attribute -fno-exceptions -fno-check-new -fno-common")
+  set(DEFAULT_COMPILE_WARNINGS_YES "-Wall -Wno-write-strings")
+  set(DEFAULT_COMPILE_WARNINGS_KDE "-Wno-long-long -Wundef -D_XOPEN_SOURCE=600 -D_BSD_SOURCE -Wcast-align -Wconversion -Wchar-subscripts -Wall -W -Wpointer-arith -Wwrite-strings -Wformat-security -Wmissing-format-attribute -fno-exceptions -fno-check-new -fno-common")
 
-  set(CMAKE_CXX_FLAGS                "-Wnon-virtual-dtor -Woverloaded-virtual")
+  set(CMAKE_CXX_FLAGS                "-Wnon-virtual-dtor -Woverloaded-virtual ${CMAKE_CXX_FLAGS}")
   set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
   set(CMAKE_CXX_FLAGS_RELEASE        "-O2 -DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG          "-g -O2 -fno-reorder-blocks -fno-schedule-insns -fno-inline")
@@ -107,6 +115,18 @@ if(CMAKE_COMPILER_IS_GNUCXX)
   set(CMAKE_C_FLAGS_DEBUG            "-g -O2 -fno-reorder-blocks -fno-schedule-insns -fno-inline")
   set(CMAKE_C_FLAGS_DEBUGFULL        "-g3 -fno-inline")
   set(CMAKE_C_FLAGS_PROFILE          "-g3 -fno-inline -ftest-coverage -fprofile-arcs")
+
+  if(CMAKE_SYSTEM_NAME MATCHES Linux)
+    set(DEFAULT_COMPILE_WARNINGS_YES "${DEFAULT_COMPILE_WARNINGS_YES} -ansi")
+    set(DEFAULT_COMPILE_WARNINGS_KDE "${DEFAULT_COMPILE_WARNINGS_KDE} -ansi")
+  endif(CMAKE_SYSTEM_NAME MATCHES Linux)
+
+  poppler_check_link_flag("-Wl,--as-needed" GCC_HAS_AS_NEEDED)
+  if(GCC_HAS_AS_NEEDED)
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--as-needed")
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,--as-needed")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--as-needed")
+  endif(GCC_HAS_AS_NEEDED)
 endif (CMAKE_COMPILER_IS_GNUCXX)
 
 if(CMAKE_C_COMPILER MATCHES "icc")

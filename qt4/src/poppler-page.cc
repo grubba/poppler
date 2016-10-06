@@ -1,11 +1,13 @@
 /* poppler-page.cc: qt interface to poppler
  * Copyright (C) 2005, Net Integration Technologies, Inc.
  * Copyright (C) 2005, Brad Hards <bradh@frogmouth.net>
- * Copyright (C) 2005-2009, Albert Astals Cid <aacid@kde.org>
+ * Copyright (C) 2005-2010, Albert Astals Cid <aacid@kde.org>
  * Copyright (C) 2005, Stefan Kebekus <stefan.kebekus@math.uni-koeln.de>
- * Copyright (C) 2006-2009, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2006-2010, Pino Toscano <pino@kde.org>
  * Copyright (C) 2008 Carlos Garcia Campos <carlosgc@gnome.org>
  * Copyright (C) 2009 Shawn Rutledge <shawn.t.rutledge@gmail.com>
+ * Copyright (C) 2010, Guillermo Amaral <gamaral@kdab.com>
+ * Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -129,6 +131,8 @@ Link* PageData::convertLinkActionToLink(::LinkAction * a, DocumentData *parentDo
         popplerLink = new LinkAction( linkArea, LinkAction::Find );
       else if ( !strcmp( name, "FullScreen" ) )
         popplerLink = new LinkAction( linkArea, LinkAction::Presentation );
+      else if ( !strcmp( name, "Print" ) )
+        popplerLink = new LinkAction( linkArea, LinkAction::Print );
       else if ( !strcmp( name, "Close" ) )
       {
         // acroread closes the document always, doesnt care whether 
@@ -292,14 +296,15 @@ QImage Page::thumbnail() const
   return ret;
 }
 
-QString Page::text(const QRectF &r) const
+QString Page::text(const QRectF &r, TextLayout textLayout) const
 {
   TextOutputDev *output_dev;
   GooString *s;
   PDFRectangle *rect;
   QString result;
   
-  output_dev = new TextOutputDev(0, gFalse, gFalse, gFalse);
+  const GBool rawOrder = textLayout == RawOrderLayout;
+  output_dev = new TextOutputDev(0, gFalse, rawOrder, gFalse);
   m_page->parentDoc->doc->displayPageSlice(output_dev, m_page->index + 1, 72, 72,
       0, false, true, false, -1, -1, -1, -1);
   if (r.isNull())
@@ -319,7 +324,12 @@ QString Page::text(const QRectF &r) const
   return result;
 }
 
-bool Page::search(const QString &text, QRectF &rect, SearchDirection direction, SearchMode caseSensitive, Rotation rotate) const
+QString Page::text(const QRectF &r) const
+{
+  return text(r, PhysicalLayout);
+}
+
+bool Page::search(const QString &text, double &sLeft, double &sTop, double &sRight, double &sBottom, SearchDirection direction, SearchMode caseSensitive, Rotation rotate) const
 {
   const QChar * str = text.unicode();
   int len = text.length();
@@ -331,11 +341,6 @@ bool Page::search(const QString &text, QRectF &rect, SearchDirection direction, 
   else sCase = gFalse;
 
   bool found = false;
-  double sLeft, sTop, sRight, sBottom;
-  sLeft = rect.left();
-  sTop = rect.top();
-  sRight = rect.right();
-  sBottom = rect.bottom();
 
   int rotation = (int)rotate * 90;
 
@@ -355,6 +360,19 @@ bool Page::search(const QString &text, QRectF &rect, SearchDirection direction, 
             gFalse, gTrue, gTrue, gFalse, sCase, gTrue, &sLeft, &sTop, &sRight, &sBottom );
 
   textPage->decRefCnt();
+
+  return found;
+}
+
+bool Page::search(const QString &text, QRectF &rect, SearchDirection direction, SearchMode caseSensitive, Rotation rotate) const
+{
+  double sLeft, sTop, sRight, sBottom;
+  sLeft = rect.left();
+  sTop = rect.top();
+  sRight = rect.right();
+  sBottom = rect.bottom();
+
+  bool found = search(text, sLeft, sTop, sRight, sBottom, direction, caseSensitive, rotate);
 
   rect.setLeft( sLeft );
   rect.setTop( sTop );

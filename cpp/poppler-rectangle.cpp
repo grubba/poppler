@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2009-2010, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,6 +21,25 @@
 #include <iostream>
 
 using namespace poppler;
+
+/**
+ \class poppler::rectangle poppler-rectangle.h "poppler/cpp/poppler-rectangle.h"
+
+ A rectangle.
+ */
+
+/**
+ \typedef poppler::rect
+
+ A rectangle with int dimensions and coordinates.
+ */
+
+/**
+ \typedef poppler::rectf
+
+ A rectangle with float (double) dimensions and coordinates.
+ */
+
 
 std::ostream& poppler::operator<<(std::ostream& stream, const rect &r)
 {

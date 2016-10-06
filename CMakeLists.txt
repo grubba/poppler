@@ -13,8 +13,8 @@ include(MacroBoolTo01)
 find_package(Threads)
 
 set(POPPLER_MAJOR_VERSION "0")
-set(POPPLER_MINOR_VERSION "13")
-set(POPPLER_MICRO_VERSION "1")
+set(POPPLER_MINOR_VERSION "15")
+set(POPPLER_MICRO_VERSION "0")
 set(POPPLER_VERSION "${POPPLER_MAJOR_VERSION}.${POPPLER_MINOR_VERSION}.${POPPLER_MICRO_VERSION}")
 
 # command line switches
@@ -22,14 +22,15 @@ option(ENABLE_XPDF_HEADERS "Install unsupported xpdf headers." OFF)
 option(BUILD_GTK_TESTS "Whether compile the GTK+ test programs." ON)
 option(BUILD_QT3_TESTS "Whether compile the Qt3 test programs." ON)
 option(BUILD_QT4_TESTS "Whether compile the Qt4 test programs." ON)
+option(BUILD_CPP_TESTS "Whether compile the CPP test programs." ON)
 option(ENABLE_SPLASH "Build the Splash graphics backend." ON)
 option(ENABLE_UTILS "Compile poppler command line utils." ON)
 option(ENABLE_CPP "Compile poppler cpp wrapper." ON)
 option(ENABLE_ABIWORD "Build the Abiword backend." ON)
 option(ENABLE_LIBOPENJPEG "Use libopenjpeg for JPX streams." ON)
 option(ENABLE_LCMS "Use liblcms for color management." ON)
+option(ENABLE_LIBCURL "Build libcurl based HTTP support." OFF)
 option(ENABLE_ZLIB "Build with zlib (not totally safe)." OFF)
-option(USE_EXCEPTIONS "Throw exceptions to deal with not enough memory and similar problems." OFF)
 option(USE_FIXEDPOINT "Use fixed point arithmetic in the Splash backend" OFF)
 option(USE_FLOAT "Use single precision arithmetic in the Splash backend" OFF)
 if(WIN32)
@@ -70,8 +71,8 @@ set(TEXTOUT_WORD_LIST ON)
 # setting the minimum required versions for some components
 set(QT3_MIN_VERSION "3.3.0")
 set(QT4_MIN_VERSION "4.4.0")
-set(CAIRO_VERSION "1.8.4")
-set(GLIB_VERSION "2.18")
+set(CAIRO_VERSION "1.10.0")
+set(GLIB_REQUIRED "2.18")
 
 macro_bool_to_01(ENABLE_SPLASH HAVE_SPLASH)
 find_package(Freetype REQUIRED)
@@ -95,12 +96,17 @@ if(CAIRO_FOUND)
   set(CAIRO_REQ "cairo")
   set(POPPLER_GLIB_DISABLE_DEPRECATED "")
   set(POPPLER_GLIB_DISABLE_SINGLE_INCLUDES "")
-  macro_optional_find_package(GTK)
+  macro_optional_find_package(GLIB)
   if(GLIB_FOUND)
     set(ENABLE_GLIB ON)
-    set(GLIB_REQ "glib-2.0 >= ${GLIB_VERSION} gobject-2.0 >= ${GLIB_VERSION} cairo >= ${CAIRO_VERSION}")
+    # Check for introspection
+    #macro_optional_find_package(GObjectIntrospection 0.6.7) # disabled, as it does not work without libtool
+    set(HAVE_INTROSPECTION ${INTROSPECTION_FOUND})
+    set(GLIB_REQ "glib-2.0 >= ${GLIB_REQUIRED} gobject-2.0 >= ${GLIB_REQUIRED} cairo >= ${CAIRO_VERSION}")
     set(POPPLER_GLIB_DISABLE_DEPRECATED "${POPPLER_GLIB_DISABLE_DEPRECATED} -DG_DISABLE_DEPRECATED")
     set(POPPLER_GLIB_DISABLE_SINGLE_INCLUDES "${POPPLER_GLIB_DISABLE_SINGLE_INCLUDES} -DG_DISABLE_SINGLE_INCLUDES")
+    macro_optional_find_package(GDK)
+    macro_optional_find_package(GTK)
     if(GDK_FOUND)
       set(GDK_REQ "gdk-2.0 gdk-pixbuf-2.0")
       set(POPPLER_WITH_GDK ${GDK_FOUND})
@@ -140,11 +146,22 @@ if(ENABLE_LCMS)
   find_package(LCMS)
   set(USE_CMS ${LCMS_FOUND})
 endif(ENABLE_LCMS)
+if(ENABLE_LIBCURL)
+  find_package(CURL)
+  include_directories(${CURL_INCLUDE_DIR})
+  set(POPPLER_HAS_CURL_SUPPORT ON)
+endif(ENABLE_LIBCURL)
 
 add_definitions(-DHAVE_CONFIG_H=1)
 if(FONTCONFIG_FOUND)
   add_definitions(${FONTCONFIG_DEFINITIONS})
 endif(FONTCONFIG_FOUND)
+if(WITH_FONTCONFIGURATION_WIN32)
+  if(MINGW)
+    # Set the minimum required Internet Explorer version to 5.0
+    add_definitions(-D_WIN32_IE=0x0500)
+  endif(MINGW)
+endif(WITH_FONTCONFIGURATION_WIN32)
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/fofi
@@ -224,6 +241,7 @@ set(poppler_SRCS
   poppler/Array.cc
   poppler/BuiltinFont.cc
   poppler/BuiltinFontTables.cc
+  poppler/CachedFile.cc
   poppler/Catalog.cc
   poppler/CharCodeToUnicode.cc
   poppler/CMap.cc
@@ -244,6 +262,7 @@ set(poppler_SRCS
   poppler/JBIG2Stream.cc
   poppler/Lexer.cc
   poppler/Link.cc
+  poppler/LocalPDFDocBuilder.cc
   poppler/NameToCharCode.cc
   poppler/Object.cc
   poppler/OptionalContent.cc
@@ -254,11 +273,13 @@ set(poppler_SRCS
   poppler/Parser.cc
   poppler/PDFDoc.cc
   poppler/PDFDocEncoding.cc
+  poppler/PDFDocFactory.cc
   poppler/PopplerCache.cc
   poppler/ProfileData.cc
   poppler/PreScanOutputDev.cc
   poppler/PSTokenizer.cc
   poppler/Stream.cc
+  poppler/strtok_r.cpp
   poppler/UnicodeMap.cc
   poppler/UnicodeTypeTable.cc
   poppler/XRef.cc
@@ -266,9 +287,12 @@ set(poppler_SRCS
   poppler/TextOutputDev.cc
   poppler/PageLabelInfo.cc
   poppler/SecurityHandler.cc
+  poppler/StdinCachedFile.cc
+  poppler/StdinPDFDocBuilder.cc
   poppler/Sound.cc
   poppler/XpdfPluginAPI.cc
   poppler/Movie.cc
+  poppler/Rendition.cc
 )
 set(poppler_LIBS ${FREETYPE_LIBRARIES})
 if(ENABLE_SPLASH)
@@ -329,6 +353,13 @@ if(ENABLE_ZLIB)
   )
   set(poppler_LIBS ${poppler_LIBS} ${ZLIB_LIBRARIES})
 endif(ENABLE_ZLIB)
+if(ENABLE_LIBCURL)
+  set(poppler_SRCS ${poppler_SRCS}
+    poppler/CurlCachedFile.cc
+    poppler/CurlPDFDocBuilder.cc
+  )
+  set(poppler_LIBS ${poppler_LIBS} ${CURL_LIBRARIES})
+endif(ENABLE_LIBCURL)
 if(LIBOPENJPEG_FOUND)
   set(poppler_SRCS ${poppler_SRCS}
     poppler/JPEG2000Stream.cc
@@ -362,8 +393,9 @@ add_library(poppler STATIC ${poppler_SRCS})
 else(MSVC)
 add_library(poppler SHARED ${poppler_SRCS})
 endif(MSVC)
-set_target_properties(poppler PROPERTIES VERSION 6.0.0 SOVERSION 6)
+set_target_properties(poppler PROPERTIES VERSION 8.0.0 SOVERSION 8)
 target_link_libraries(poppler ${poppler_LIBS})
+target_link_libraries(poppler LINK_INTERFACE_LIBRARIES "")
 install(TARGETS poppler RUNTIME DESTINATION bin LIBRARY DESTINATION lib${LIB_SUFFIX} ARCHIVE DESTINATION lib${LIB_SUFFIX})
 
 if(ENABLE_XPDF_HEADERS)
@@ -372,6 +404,7 @@ if(ENABLE_XPDF_HEADERS)
     poppler/Array.h
     poppler/BuiltinFont.h
     poppler/BuiltinFontTables.h
+    poppler/CachedFile.h
     poppler/Catalog.h
     poppler/CharCodeToUnicode.h
     poppler/CMap.h
@@ -394,6 +427,7 @@ if(ENABLE_XPDF_HEADERS)
     poppler/JBIG2Stream.h
     poppler/Lexer.h
     poppler/Link.h
+    poppler/LocalPDFDocBuilder.h
     poppler/Movie.h
     poppler/NameToCharCode.h
     poppler/Object.h
@@ -404,11 +438,14 @@ if(ENABLE_XPDF_HEADERS)
     poppler/PageTransition.h
     poppler/Parser.h
     poppler/PDFDoc.h
+    poppler/PDFDocBuilder.h
     poppler/PDFDocEncoding.h
+    poppler/PDFDocFactory.h
     poppler/PopplerCache.h
     poppler/ProfileData.h
     poppler/PreScanOutputDev.h
     poppler/PSTokenizer.h
+    poppler/Rendition.h
     poppler/Stream-CCITT.h
     poppler/Stream.h
     poppler/UnicodeMap.h
@@ -425,6 +462,8 @@ if(ENABLE_XPDF_HEADERS)
     poppler/PSOutputDev.h
     poppler/TextOutputDev.h
     poppler/SecurityHandler.h
+    poppler/StdinCachedFile.h
+    poppler/StdinPDFDocBuilder.h
     poppler/UTF8.h
     poppler/XpdfPluginAPI.h
     poppler/Sound.h
@@ -442,6 +481,7 @@ if(ENABLE_XPDF_HEADERS)
     goo/gfile.h
     goo/FixedPoint.h
     goo/ImgWriter.h
+    goo/GooLikely.h
     goo/gstrtod.h
     DESTINATION include/poppler/goo)
   if(PNG_FOUND)
@@ -456,6 +496,12 @@ if(ENABLE_XPDF_HEADERS)
     fofi/FoFiType1.h
     fofi/FoFiType1C.h
     DESTINATION include/poppler/fofi)
+  if(ENABLE_LIBCURL)
+    install(FILES
+      poppler/CurlCachedFile.h
+      poppler/CurlPDFDocBuilder.h
+      DESTINATION include/poppler)
+  endif(ENABLE_LIBCURL)
   if(LIBOPENJPEG_FOUND)
     install(FILES
       poppler/JPEG2000Stream.h
@@ -519,10 +565,10 @@ if(ENABLE_CPP)
 endif(ENABLE_CPP)
 
 set(PKG_CONFIG_VERSION_0_18 TRUE)
-if(PKGCONFIG_EXECUTABLE)
-  exec_program(${PKGCONFIG_EXECUTABLE} ARGS --version RETURN_VALUE _return_VALUE OUTPUT_VARIABLE _output_VAR)
+if(PKG_CONFIG_EXECUTABLE)
+  exec_program(${PKG_CONFIG_EXECUTABLE} ARGS --version RETURN_VALUE _return_VALUE OUTPUT_VARIABLE _output_VAR)
   macro_ensure_version("0.18" "${_output_VAR}" PKG_CONFIG_VERSION_0_18)
-endif(PKGCONFIG_EXECUTABLE)
+endif(PKG_CONFIG_EXECUTABLE)
 if(PKG_CONFIG_VERSION_0_18)
   set(PC_REQUIRES "")
   set(PC_REQUIRES_PRIVATE "Requires.private: poppler = ${POPPLER_VERSION}")
@@ -561,11 +607,13 @@ show_end_message_yesno("qt wrapper" QT3_FOUND)
 show_end_message_yesno("qt4 wrapper" QT4_FOUND)
 show_end_message_yesno("glib wrapper" ENABLE_GLIB)
 show_end_message_yesno("  use GDK" POPPLER_WITH_GDK)
+show_end_message("  introspection" "not supported with this CMake build system")
 show_end_message_yesno("cpp wrapper" ENABLE_CPP)
 show_end_message("use gtk-doc" "not supported with this CMake build system")
 show_end_message_yesno("use libjpeg" ENABLE_LIBJPEG)
 show_end_message_yesno("use libpng" ENABLE_LIBPNG)
 show_end_message_yesno("use zlib" ENABLE_ZLIB)
+show_end_message_yesno("use curl" ENABLE_LIBCURL)
 show_end_message_yesno("use libopenjpeg" LIBOPENJPEG_FOUND)
 show_end_message_yesno("use cms" USE_CMS)
 show_end_message_yesno("command line utils" ENABLE_UTILS)

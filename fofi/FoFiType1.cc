@@ -13,8 +13,9 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2005, 2008 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2005, 2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
+// Copyright (C) 2010 Jakub Wilk <ubanus@users.sf.net>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -30,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "goo/gmem.h"
+#include "goo/GooLikely.h"
 #include "FoFiEncodings.h"
 #include "FoFiType1.h"
 #include "poppler/Error.h"
@@ -192,6 +194,7 @@ void FoFiType1::parse() {
   char buf[256];
   char c;
   int n, code, i, j;
+  char *tokptr;
 
   for (i = 1, line = (char *)file;
        i <= 100 && line && (!name || !encoding);
@@ -202,7 +205,7 @@ void FoFiType1::parse() {
       strncpy(buf, line, 255);
       buf[255] = '\0';
       if ((p = strchr(buf+9, '/')) &&
-	  (p = strtok(p+1, " \t\n\r"))) {
+	  (p = strtok_r(p+1, " \t\n\r", &tokptr))) {
 	name = copyString(p);
       }
       line = getNextLine(line);
@@ -241,7 +244,7 @@ void FoFiType1::parse() {
 		code = code * 8 + (*p2 - '0');
 	      }
 	    }
-	    if (code < 256) {
+	    if (likely(code < 256 && code >= 0)) {
 	      for (p = p2; *p == ' ' || *p == '\t'; ++p) ;
 	      if (*p == '/') {
 		++p;
@@ -270,8 +273,8 @@ void FoFiType1::parse() {
 	    }
 	  }
 	} else {
-	  if (strtok(buf, " \t") &&
-	      (p = strtok(NULL, " \t\n\r")) && !strcmp(p, "def")) {
+	  if (strtok_r(buf, " \t", &tokptr) &&
+	      (p = strtok_r(NULL, " \t\n\r", &tokptr)) && !strcmp(p, "def")) {
 	    break;
 	  }
 	}

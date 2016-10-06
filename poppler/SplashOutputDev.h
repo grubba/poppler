@@ -14,7 +14,7 @@
 // under GPL version 2 or later
 //
 // Copyright (C) 2005 Takashi Iwai <tiwai@suse.de>
-// Copyright (C) 2009 Thomas Freitag <Thomas.Freitag@alfa.de>
+// Copyright (C) 2009, 2010 Thomas Freitag <Thomas.Freitag@alfa.de>
 // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
 //
 // To see a description of the changes please see the Changelog file that
@@ -116,7 +116,6 @@ public:
 
   //----- update text state
   virtual void updateFont(GfxState *state);
-  virtual void updateRender(GfxState *state);
 
   //----- path painting
   virtual void stroke(GfxState *state);
@@ -246,8 +245,7 @@ private:
 			      Guchar *alphaLine);
 
   GBool haveCSPattern;		// set if text has been drawn with a
-				//   clipping render mode because of pattern colorspace
-  int savedRender;		// use if pattern colorspace
+							//   clipping render mode because of pattern colorspace
   GBool keepAlphaChannel;	// don't fill with paper color, keep alpha channel
 
   SplashColorMode colorMode;
@@ -277,6 +275,7 @@ private:
 
   SplashTransparencyGroup *	// transparency group stack
     transpGroupStack;
+  SplashBitmap *maskBitmap; // for image masks in pattern colorspace
 };
 
 #endif

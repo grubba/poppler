@@ -5,9 +5,6 @@ include_directories(
   ${CMAKE_SOURCE_DIR}/utils
 )
 
-# ### temporary
-set(BUILD_CPP_TESTS TRUE)
-
 macro(CPP_ADD_SIMPLETEST exe)
   string(REPLACE "-" "" test_name ${exe})
   set(${test_name}_SOURCES
@@ -21,4 +18,5 @@ macro(CPP_ADD_SIMPLETEST exe)
 endmacro(CPP_ADD_SIMPLETEST)
 
 
-cpp_add_simpletest(poppler-dump poppler-dump.cpp ${CMAKE_SOURCE_DIR}/utils/parseargs.c)
+cpp_add_simpletest(poppler-dump poppler-dump.cpp ${CMAKE_SOURCE_DIR}/utils/parseargs.cc)
+target_link_libraries(poppler-dump poppler)

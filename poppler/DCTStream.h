@@ -6,7 +6,8 @@
 //
 // Copyright 2005 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright 2005 Martin Kretzschmar <martink@gnome.org>
-// Copyright 2005-2007, 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright 2005-2007, 2009, 2010 Albert Astals Cid <aacid@kde.org>
+// Copyright 2010 Carlos Garcia Campos <carlosgc@gnome.org>
 //
 //========================================================================
 
@@ -26,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <setjmp.h>
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -48,7 +50,7 @@ struct str_src_mgr {
     JOCTET buffer;
     Stream *str;
     int index;
-    bool abort;
+    jmp_buf setjmp_buffer;
 };
 
 
@@ -68,6 +70,10 @@ public:
 private:
   void init();
 
+  virtual GBool hasGetChars() { return true; }
+  virtual int getChars(int nChars, Guchar *buffer);
+
+  int colorXform;
   JSAMPLE *current;
   JSAMPLE *limit;
   struct jpeg_decompress_struct cinfo;

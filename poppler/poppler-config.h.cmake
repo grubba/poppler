@@ -19,11 +19,6 @@
 #cmakedefine MULTITHREADED 1
 #endif
 
-/* Enable exceptions. */
-#ifndef USE_EXCEPTIONS
-#cmakedefine USE_EXCEPTIONS 1
-#endif
-
 /* Use fixedpoint. */
 #ifndef USE_FIXEDPOINT
 #cmakedefine USE_FIXEDPOINT 1
@@ -54,6 +49,11 @@
 #cmakedefine WITH_FONTCONFIGURATION_WIN32 1
 #endif
 
+/* Support for curl is compiled in. */
+#ifndef POPPLER_HAS_CURL_SUPPORT
+#cmakedefine POPPLER_HAS_CURL_SUPPORT 1
+#endif
+
 // Also, there's a couple of preprocessor symbols in the header files
 // that are used but never defined: DISABLE_OUTLINE, DEBUG_MEM and
 
@@ -62,7 +62,7 @@
 //------------------------------------------------------------------------
 
 // copyright notice
-#define popplerCopyright "Copyright 2005-2009 The Poppler Developers - http://poppler.freedesktop.org"
+#define popplerCopyright "Copyright 2005-2010 The Poppler Developers - http://poppler.freedesktop.org"
 #define xpdfCopyright "Copyright 1996-2004 Glyph & Cog, LLC"
 
 //------------------------------------------------------------------------
@@ -90,6 +90,14 @@
 #define CDECL
 #endif
 
+#if defined(_WIN32)
+#ifdef _MSC_VER
+#define strtok_r strtok_s
+#elif __MINGW32__
+char * strtok_r (char *s, const char *delim, char **save_ptr);
+#endif
+#endif
+
 //------------------------------------------------------------------------
 // Compiler
 //------------------------------------------------------------------------
@@ -99,6 +107,11 @@
 	__attribute__((__format__(__printf__, fmt_index, va_index)))
 #else
 #define GCC_PRINTF_FORMAT(fmt_index, va_index)
+#endif
+
+#if defined(_MSC_VER)
+#define fmax(a, b) max(a, b)
+#define fmin(a, b) min(a, b)
 #endif
 
 

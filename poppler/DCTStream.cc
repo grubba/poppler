@@ -5,8 +5,9 @@
 // This file is licensed under the GPLv2 or later
 //
 // Copyright 2005 Jeff Muizelaar <jeff@infidigm.net>
-// Copyright 2005-2009 Albert Astals Cid <aacid@kde.org>
+// Copyright 2005-2010 Albert Astals Cid <aacid@kde.org>
 // Copyright 2009 Ryszard Trojnacki <rysiek@menel.com>
+// Copyright 2010 Carlos Garcia Campos <carlosgc@gnome.org>
 //
 //========================================================================
 
@@ -20,7 +21,6 @@ static boolean str_fill_input_buffer(j_decompress_ptr cinfo)
 {
   int c;
   struct str_src_mgr * src = (struct str_src_mgr *)cinfo->src;
-  if (src->abort) return FALSE;
   if (src->index == 0) {
     c = 0xFF;
     src->index++;
@@ -59,6 +59,7 @@ static void str_term_source(j_decompress_ptr cinfo)
 
 DCTStream::DCTStream(Stream *strA, int colorXformA) :
   FilterStream(strA) {
+  colorXform = colorXformA;
   init();
 }
 
@@ -70,7 +71,7 @@ DCTStream::~DCTStream() {
 static void exitErrorHandler(jpeg_common_struct *error) {
   j_decompress_ptr cinfo = (j_decompress_ptr)error;
   str_src_mgr * src = (struct str_src_mgr *)cinfo->src;
-  src->abort = true;
+  longjmp(src->setjmp_buffer, 1);
 }
 
 void DCTStream::init()
@@ -86,7 +87,6 @@ void DCTStream::init()
   src.pub.next_input_byte = NULL;
   src.str = str;
   src.index = 0;
-  src.abort = false;
   current = NULL;
   limit = NULL;
   
@@ -122,7 +122,6 @@ void DCTStream::reset() {
       if (c == -1)
       {
         error(-1, "Could not find start of jpeg data");
-        src.abort = true;
         return;
       }
       if (c != 0xFF) c = 0;
@@ -139,41 +138,87 @@ void DCTStream::reset() {
     }
   }
 
-  jpeg_read_header(&cinfo, TRUE);
-  if (src.abort) return;
+  if (!setjmp(src.setjmp_buffer)) {
+    jpeg_read_header(&cinfo, TRUE);
 
-  if (!jpeg_start_decompress(&cinfo))
-  {
-    src.abort = true;
-    return;
+    // figure out color transform
+    if (colorXform == -1 && !cinfo.saw_Adobe_marker) {
+      if (cinfo.num_components == 3) {
+        if (cinfo.saw_JFIF_marker) {
+	  colorXform = 1;
+        } else if (cinfo.cur_comp_info[0]->component_id == 82 &&
+		   cinfo.cur_comp_info[1]->component_id == 71 &&
+		   cinfo.cur_comp_info[2]->component_id == 66) { // ASCII "RGB"
+	  colorXform = 0;
+	} else {
+	  colorXform = 1;
+	}
+      } else {
+        colorXform = 0;
+      }
+    } else if (cinfo.saw_Adobe_marker) {
+      colorXform = cinfo.Adobe_transform;
+    }
+
+    switch (cinfo.num_components) {
+    case 3:
+	    cinfo.jpeg_color_space = colorXform ? JCS_YCbCr : JCS_RGB;
+	    break;
+    case 4:
+	    cinfo.jpeg_color_space = colorXform ? JCS_YCCK : JCS_CMYK;
+	    break;
+    }
+
+    jpeg_start_decompress(&cinfo);
+
+    row_stride = cinfo.output_width * cinfo.output_components;
+    row_buffer = cinfo.mem->alloc_sarray((j_common_ptr) &cinfo, JPOOL_IMAGE, row_stride, 1);
   }
-
-  row_stride = cinfo.output_width * cinfo.output_components;
-  row_buffer = cinfo.mem->alloc_sarray((j_common_ptr) &cinfo, JPOOL_IMAGE, row_stride, 1);
 }
 
+// we can not go with inline since gcc
+// refuses to inline because of setjmp
+#define DO_GET_CHAR \
+  if (current == limit) { \
+    if (cinfo.output_scanline < cinfo.output_height) \
+    { \
+      if (!setjmp(src.setjmp_buffer)) \
+      { \
+        if (!jpeg_read_scanlines(&cinfo, row_buffer, 1)) c = EOF; \
+        else { \
+          current = &row_buffer[0][0]; \
+          limit = &row_buffer[0][(cinfo.output_width - 1) * cinfo.output_components] + cinfo.output_components; \
+          c = *current; \
+          ++current; \
+        } \
+      } \
+      else c = EOF; \
+    } \
+    else c = EOF; \
+  } else { \
+    c = *current; \
+    ++current; \
+  } \
+
 int DCTStream::getChar() {
-  if (src.abort) return EOF;
-  
   int c;
 
-  if (current == limit) {
-    if (cinfo.output_scanline < cinfo.output_height)
-    {
-      if (!jpeg_read_scanlines(&cinfo, row_buffer, 1)) return EOF;
-      current = &row_buffer[0][0];
-      limit = &row_buffer[0][(cinfo.output_width - 1) * cinfo.output_components] + cinfo.output_components;
-    }
-    else return EOF;
-  }
-  c = *current;
-  ++current;
+  DO_GET_CHAR
+  
   return c;
 }
 
+int DCTStream::getChars(int nChars, Guchar *buffer) {
+  int c;
+  for (int i = 0; i < nChars; ++i) {
+    DO_GET_CHAR
+    if (likely(c != EOF)) buffer[i] = c;
+    else return i;
+  }
+  return nChars;
+}
+
 int DCTStream::lookChar() {
-  if (src.abort) return EOF;
-  
   return *current;
 }
 

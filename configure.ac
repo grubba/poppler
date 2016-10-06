@@ -1,6 +1,6 @@
 m4_define([poppler_version_major],[0])
-m4_define([poppler_version_minor],[13])
-m4_define([poppler_version_micro],[1])
+m4_define([poppler_version_minor],[15])
+m4_define([poppler_version_micro],[0])
 m4_define([poppler_version],[poppler_version_major.poppler_version_minor.poppler_version_micro])
 
 AC_PREREQ(2.59)
@@ -25,10 +25,10 @@ AC_PROG_CC_STDC
 #  CXX="gcc"
 #fi
 AC_PROG_CXX
+if test "x$GXX" = "xyes"; then
+  CXXFLAGS="$CXXFLAGS -ansi"
+fi
 AC_PROG_INSTALL
-AC_CHECK_FUNC(gettimeofday, AC_DEFINE(HAVE_GETTIMEOFDAY, 1, [Defines if gettimeofday is available on your system]))
-AC_CHECK_FUNC(localtime_r, AC_DEFINE(HAVE_LOCALTIME_R, 1, [Defines if localtime_r is available on your system]))
-AC_CHECK_FUNC(gmtime_r, AC_DEFINE(HAVE_GMTIME_R, 1, [Defines if gmtime_r is available on your system]))
 
 dnl ##### Check for pkgconfig
 PKG_PROG_PKG_CONFIG
@@ -108,14 +108,14 @@ dnl ##### Checks for header files.
 AC_PATH_XTRA
 AC_HEADER_DIRENT
 
-AC_ARG_ENABLE(exceptions,
-	      [  --enable-exceptions     use C++ exceptions],
-	      AC_DEFINE([USE_EXCEPTIONS], [1], [Throw exceptions to deal with not enough memory and similar problems]))
-
 dnl ##### Switch over to C++.  This will make the checks below a little
 dnl ##### bit stricter (requiring function prototypes in include files).
 dnl ##### (99% of xpdf is written in C++.)
 AC_LANG_CPLUSPLUS
+
+AC_CHECK_DECL(gettimeofday, [AC_CHECK_FUNC(gettimeofday, AC_DEFINE(HAVE_GETTIMEOFDAY, 1, [Defines if gettimeofday is available on your system]))],[],[#include <sys/time.h>])
+AC_CHECK_FUNC(localtime_r, AC_DEFINE(HAVE_LOCALTIME_R, 1, [Defines if localtime_r is available on your system]))
+AC_CHECK_FUNC(gmtime_r, AC_DEFINE(HAVE_GMTIME_R, 1, [Defines if gmtime_r is available on your system]))
 
 dnl ##### Check for extra libraries needed by X.  (LynxOS needs this.)
 AC_CHECK_FUNC(gethostbyname)
@@ -210,6 +210,21 @@ AM_CONDITIONAL(BUILD_ZLIB, test x$enable_zlib = xyes)
 AH_TEMPLATE([ENABLE_ZLIB],
 	    [Use zlib instead of builtin zlib decoder.])
 
+dnl Test for libcurl
+AC_ARG_ENABLE(libcurl,
+	      AC_HELP_STRING([--enable-libcurl],
+	                     [Build with libcurl based HTTP support.]),
+              enable_libcurl=$enableval,
+              enable_libcurl="no")
+
+if test x$enable_libcurl = xyes; then
+  PKG_CHECK_MODULES(LIBCURL, libcurl)
+  AC_DEFINE(ENABLE_LIBCURL, 1, [Build against libcurl.])
+  AC_DEFINE(POPPLER_HAS_CURL_SUPPORT, 1,
+     [Support for curl based doc builder is compiled in.])
+fi
+
+AM_CONDITIONAL(BUILD_LIBCURL, test x$enable_libcurl = xyes)
 
 dnl Test for libjpeg
 AC_ARG_ENABLE(libjpeg,
@@ -332,7 +347,7 @@ if test x$enable_splash_output = xyes; then
   AC_DEFINE(HAVE_SPLASH)
 fi
 
-CAIRO_VERSION="1.8.4"
+CAIRO_VERSION="1.10.0"
 AC_SUBST(CAIRO_VERSION)
 AC_ARG_ENABLE(cairo-output,
               AC_HELP_STRING([--disable-cairo-output],
@@ -364,6 +379,7 @@ fi
 AC_SUBST(CAIRO_FEATURE)
 AC_SUBST(CAIRO_REQ)
 
+found_introspection=no
 if test x$enable_cairo_output = xyes; then
   POPPLER_GLIB_DISABLE_DEPRECATED=""
   POPPLER_GLIB_DISABLE_SINGLE_INCLUDES=""
@@ -382,6 +398,9 @@ if test x$enable_cairo_output = xyes; then
                       [enable_poppler_glib="no"])
   fi
   if test x$enable_poppler_glib = xyes; then
+    # Check for introspection
+    GOBJECT_INTROSPECTION_CHECK([0.6.7])
+
     GLIB_REQ="glib-2.0 >= $GLIB_REQUIRED gobject-2.0 >= $GLIB_REQUIRED cairo >= $CAIRO_VERSION"
     AC_PATH_PROG([GLIB_MKENUMS],[glib-mkenums])
     POPPLER_GLIB_DISABLE_DEPRECATED="$POPPLER_GLIB_DISABLE_DEPRECATED -DG_DISABLE_DEPRECATED"
@@ -395,9 +414,10 @@ else
   GLIB_REQ=""
 fi
 AM_CONDITIONAL(BUILD_POPPLER_GLIB, test x$enable_poppler_glib = xyes)
+AM_CONDITIONAL(HAVE_INTROSPECTION, test "x$found_introspection" = "xyes")
 AC_SUBST(GLIB_REQ)
 
-GTK_DOC_CHECK([1.0])
+GTK_DOC_CHECK([1.14],[--flavour no-tmpl])
 
 dnl
 dnl GDK
@@ -596,9 +616,9 @@ if test "x$GCC" != xyes; then
 fi
 case "$enable_compile_warnings" in
   no)	;;
-  yes)	CXXFLAGS="-Wall -Wno-write-strings -Woverloaded-virtual -Wnon-virtual-dtor -ansi $CXXFLAGS" ;;
-  kde)	CXXFLAGS="-Wnon-virtual-dtor -Wno-long-long -Wundef -ansi \
-		-D_XOPEN_SOURCE=500 -D_BSD_SOURCE -Wcast-align \
+  yes)	CXXFLAGS="-Wall -Wno-write-strings -Woverloaded-virtual -Wnon-virtual-dtor $CXXFLAGS" ;;
+  kde)	CXXFLAGS="-Wnon-virtual-dtor -Wno-long-long -Wundef \
+		-D_XOPEN_SOURCE=600 -D_BSD_SOURCE -Wcast-align \
 		-Wconversion -Wchar-subscripts -Wall -W -Wpointer-arith \
 		-Wwrite-strings -O2 -Wformat-security \
 		-Wmissing-format-attribute -fno-exceptions -fno-check-new \
@@ -632,6 +652,7 @@ utils/Makefile
 glib/Makefile
 glib/poppler-features.h
 glib/reference/Makefile
+glib/reference/version.xml
 glib/demo/Makefile
 test/Makefile
 qt/Makefile
@@ -643,12 +664,19 @@ cpp/Makefile
 cpp/poppler-version.h
 cpp/tests/Makefile
 poppler.pc
+poppler-uninstalled.pc
 poppler-cairo.pc
+poppler-cairo-uninstalled.pc
 poppler-splash.pc
+poppler-splash-uninstalled.pc
 poppler-glib.pc
+poppler-glib-uninstalled.pc
 poppler-qt.pc
+poppler-qt-uninstalled.pc
 poppler-qt4.pc
-poppler-cpp.pc])
+poppler-qt4-uninstalled.pc
+poppler-cpp.pc
+poppler-cpp-uninstalled.pc])
 
 
 echo ""
@@ -661,11 +689,13 @@ echo "  qt wrapper:         $enable_poppler_qt"
 echo "  qt4 wrapper:        $enable_poppler_qt4"
 echo "  glib wrapper:       $enable_poppler_glib"
 echo "    use GDK:          $enable_gdk"
+echo "    introspection:    $found_introspection"
 echo "  cpp wrapper:        $enable_poppler_cpp"
 echo "  use gtk-doc:        $enable_gtk_doc"
 echo "  use libjpeg:        $enable_libjpeg"
 echo "  use libpng:         $enable_libpng"
 echo "  use zlib:           $enable_zlib"
+echo "  use libcurl:        $enable_libcurl"
 echo "  use libopenjpeg:    $enable_libopenjpeg"
 echo "  use cms:            $enable_cms"
 echo "  command line utils: $enable_utils"

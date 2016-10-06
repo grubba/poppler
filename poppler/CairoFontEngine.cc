@@ -66,7 +66,7 @@
 CairoFont::CairoFont(Ref ref,
 		     cairo_font_face_t *cairo_font_face,
 		     Gushort *codeToGID,
-		     int codeToGIDLen,
+		     Guint codeToGIDLen,
 		     GBool substitute,
 		     GBool printing) : ref(ref),
 				       cairo_font_face(cairo_font_face),
@@ -369,7 +369,7 @@ _ft_new_face (FT_Library lib,
 CairoFreeTypeFont::CairoFreeTypeFont(Ref ref,
 				     cairo_font_face_t *cairo_font_face,
 				     Gushort *codeToGID,
-				     int codeToGIDLen,
+				     Guint codeToGIDLen,
 				     GBool substitute) : CairoFont(ref,
 								   cairo_font_face,
 								   codeToGID,
@@ -399,7 +399,7 @@ CairoFreeTypeFont *CairoFreeTypeFont::create(GfxFont *gfxFont, XRef *xref,
   cairo_font_face_t *font_face;
 
   Gushort *codeToGID;
-  int codeToGIDLen;
+  Guint codeToGIDLen;
   
   dfp = NULL;
   codeToGID = NULL;
@@ -527,7 +527,7 @@ CairoFreeTypeFont *CairoFreeTypeFont::create(GfxFont *gfxFont, XRef *xref,
         ff1c = FoFiType1C::load(fileNameC);
       }
       if (ff1c) {
-        codeToGID = ff1c->getCIDToGIDMap(&codeToGIDLen);
+        codeToGID = ff1c->getCIDToGIDMap((int *)&codeToGIDLen);
         delete ff1c;
       }
     }
@@ -668,7 +668,7 @@ CairoType3Font *CairoType3Font::create(GfxFont *gfxFont, XRef *xref,
   cairo_font_face_t *font_face;
   Ref ref;
   Gushort *codeToGID;
-  int codeToGIDLen;
+  Guint codeToGIDLen;
   int i, j;
   char **enc;
   Dict *charProcs;
@@ -693,7 +693,7 @@ CairoType3Font *CairoType3Font::create(GfxFont *gfxFont, XRef *xref,
   codeToGIDLen = 256;
   for (i = 0; i < 256; ++i) {
     codeToGID[i] = 0;
-    if ((name = enc[i])) {
+    if (charProcs && (name = enc[i])) {
       for (j = 0; j < charProcs->getLength(); j++) {
 	if (strcmp(name, charProcs->getKey(j)) == 0) {
 	  codeToGID[i] = (Gushort) j;
@@ -710,7 +710,7 @@ CairoType3Font::CairoType3Font(Ref ref,
 			       Catalog *cat,
 			       cairo_font_face_t *cairo_font_face,
 			       Gushort *codeToGID,
-			       int codeToGIDLen,
+			       Guint codeToGIDLen,
 			       GBool printing) : CairoFont(ref,
 							   cairo_font_face,
 							   codeToGID,

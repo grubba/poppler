@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2009-2010, Pino Toscano <pino@kde.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,11 +62,12 @@ public:
     void get_pdf_version(int *major, int *minor) const;
     std::vector<std::string> info_keys() const;
     ustring info_key(const std::string &key) const;
-    unsigned int /*time_t*/ info_date(const std::string &key) const;
+    time_type info_date(const std::string &key) const;
     bool is_encrypted() const;
     bool is_linearized() const;
     bool has_permission(permission_enum which) const;
     ustring metadata() const;
+    bool get_pdf_id(std::string *permanent_id, std::string *update_id) const;
 
     int pages() const;
     page* create_page(const ustring &label) const;
@@ -86,6 +87,10 @@ public:
     static document* load_from_data(byte_array *file_data,
                                     const std::string &owner_password = std::string(),
                                     const std::string &user_password = std::string());
+    static document* load_from_raw_data(const char *file_data,
+                                        int file_data_length,
+                                        const std::string &owner_password = std::string(),
+                                        const std::string &user_password = std::string());
 
 private:
     document(document_private &dd);

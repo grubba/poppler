@@ -102,6 +102,24 @@ zlib_libs = 					\
 
 endif
 
+if BUILD_LIBCURL
+
+libcurl_libs =					\
+	$(LIBCURL_LIBS)
+
+libcurl_includes =				\
+	$(LIBCURL_CFLAGS)
+
+curl_headers =					\
+	CurlCachedFile.h			\
+	CurlPDFDocBuilder.h
+
+curl_sources =					\
+	CurlCachedFile.cc			\
+	CurlPDFDocBuilder.cc
+
+endif
+
 if BUILD_ABIWORD_OUTPUT
 
 abiword_sources =				\
@@ -130,6 +148,7 @@ INCLUDES =					\
 	$(arthur_includes)			\
 	$(abiword_includes)			\
 	$(libpng_includes)			\
+	$(libcurl_includes)			\
 	$(FREETYPE_CFLAGS)			\
 	$(FONTCONFIG_CFLAGS)
 
@@ -149,6 +168,7 @@ libpoppler_la_LIBADD =				\
 	$(libjpeg_libs)				\
 	$(libpng_libs)				\
 	$(zlib_libs)				\
+	$(libcurl_libs)				\
 	$(libjpeg2000_libs)			\
 	$(abiword_libs)				\
 	$(FREETYPE_LIBS)			\
@@ -156,17 +176,19 @@ libpoppler_la_LIBADD =				\
 	$(PTHREAD_LIBS)				\
 	$(win32_libs)
 
-libpoppler_la_LDFLAGS = -version-info 6:0:0 @create_shared_lib@
+libpoppler_la_LDFLAGS = -version-info 8:0:0 @create_shared_lib@ @auto_import_flags@
 
 if ENABLE_XPDF_HEADERS
 
 poppler_includedir = $(includedir)/poppler
 poppler_include_HEADERS =	\
 	$(splash_headers)	\
+	$(curl_headers)		\
 	Annot.h			\
 	Array.h			\
 	BuiltinFont.h		\
 	BuiltinFontTables.h	\
+	CachedFile.h		\
 	Catalog.h		\
 	CharCodeToUnicode.h	\
 	CMap.h			\
@@ -188,6 +210,7 @@ poppler_include_HEADERS =	\
 	JBIG2Stream.h		\
 	Lexer.h			\
 	Link.h			\
+	LocalPDFDocBuilder.h	\
 	Movie.h                 \
 	NameToCharCode.h	\
 	Object.h		\
@@ -198,11 +221,16 @@ poppler_include_HEADERS =	\
 	PageTransition.h	\
 	Parser.h		\
 	PDFDoc.h		\
+	PDFDocBuilder.h		\
 	PDFDocEncoding.h	\
+	PDFDocFactory.h		\
 	PopplerCache.h		\
 	ProfileData.h		\
 	PreScanOutputDev.h	\
 	PSTokenizer.h		\
+	Rendition.h		\
+	StdinCachedFile.h	\
+	StdinPDFDocBuilder.h	\
 	Stream-CCITT.h		\
 	Stream.h		\
 	UnicodeMap.h		\
@@ -221,8 +249,8 @@ poppler_include_HEADERS =	\
 	SecurityHandler.h	\
 	UTF8.h			\
 	XpdfPluginAPI.h		\
-	Sound.h			\
-	poppler-config.h
+	Sound.h
+nodist_poppler_include_HEADERS = poppler-config.h
 
 endif
 
@@ -234,10 +262,12 @@ libpoppler_la_SOURCES =		\
 	$(zlib_sources)		\
 	$(libjpeg2000_sources)	\
 	$(abiword_sources)	\
+	$(curl_sources)		\
 	Annot.cc		\
 	Array.cc 		\
 	BuiltinFont.cc		\
 	BuiltinFontTables.cc	\
+	CachedFile.cc		\
 	Catalog.cc 		\
 	CharCodeToUnicode.cc	\
 	CMap.cc			\
@@ -258,6 +288,7 @@ libpoppler_la_SOURCES =		\
 	JBIG2Stream.cc		\
 	Lexer.cc 		\
 	Link.cc 		\
+	LocalPDFDocBuilder.cc	\
 	Movie.cc                \
 	NameToCharCode.cc	\
 	Object.cc 		\
@@ -269,11 +300,16 @@ libpoppler_la_SOURCES =		\
 	Parser.cc 		\
 	PDFDoc.cc 		\
 	PDFDocEncoding.cc	\
+	PDFDocFactory.cc	\
 	PopplerCache.cc		\
 	ProfileData.cc		\
 	PreScanOutputDev.cc \
 	PSTokenizer.cc		\
+	Rendition.cc		\
+	StdinCachedFile.cc	\
+	StdinPDFDocBuilder.cc	\
 	Stream.cc 		\
+	strtok_r.cpp		\
 	UnicodeMap.cc		\
 	UnicodeTypeTable.cc	\
 	XRef.cc			\

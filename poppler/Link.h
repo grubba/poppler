@@ -15,6 +15,7 @@
 //
 // Copyright (C) 2006, 2008 Pino Toscano <pino@kde.org>
 // Copyright (C) 2008 Hugo Mercier <hmercier31@gmail.com>
+// Copyright (C) 2010 Carlos Garcia Campos <carlosgc@gnome.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -31,10 +32,11 @@
 #include "Object.h"
 
 class GooString;
+class GooList;
 class Array;
 class Dict;
 class Sound;
-class Movie;
+class MediaRendition;
 
 //------------------------------------------------------------------------
 // LinkAction
@@ -50,6 +52,7 @@ enum LinkActionKind {
   actionRendition,
   actionSound,			// sound action
   actionJavaScript,		// JavaScript action
+  actionOCGState,               // Set-OCG-State action
   actionUnknown			// anything else
 };
 
@@ -321,23 +324,27 @@ public:
 
   virtual LinkActionKind getKind() { return actionRendition; }
 
-  GBool hasRenditionObject() { return !renditionObj.isNull(); }
+  GBool hasRenditionObject() { return renditionObj.isDict(); }
   Object* getRenditionObject() { return &renditionObj; }
 
-  GBool hasScreenAnnot() { return screenRef.num > 0; }
-  Ref* getScreenAnnot() { return &screenRef; }
+  GBool hasScreenAnnot() { return screenRef.isRef(); }
+  Ref getScreenAnnot() { return screenRef.getRef(); }
 
   int getOperation() { return operation; }
 
-  Movie* getMovie() { return movie; }
+  MediaRendition* getMedia() { return media; }
+
+  GooString *getScript() { return js; }
 
 private:
 
-  Ref screenRef;
+  Object screenRef;
   Object renditionObj;
   int operation;
 
-  Movie* movie;
+  MediaRendition* media;
+
+  GooString *js;
 };
 
 //------------------------------------------------------------------------
@@ -390,6 +397,35 @@ public:
 private:
 
   GooString *js;
+};
+
+//------------------------------------------------------------------------
+// LinkOCGState
+//------------------------------------------------------------------------
+class LinkOCGState: public LinkAction {
+public:
+  LinkOCGState(Object *obj);
+
+  virtual ~LinkOCGState();
+
+  virtual GBool isOk() { return stateList != NULL; }
+
+  virtual LinkActionKind getKind() { return actionOCGState; }
+
+  enum State { On, Off, Toggle};
+  struct StateList {
+    StateList() { list = NULL; }
+    ~StateList();
+    State st;
+    GooList *list;
+  };
+
+  GooList *getStateList() { return stateList; }
+  GBool getPreserveRB() { return preserveRB; }
+
+private:
+  GooList *stateList;
+  GBool preserveRB;
 };
 
 //------------------------------------------------------------------------

@@ -23,6 +23,7 @@
 #include <poppler-toc.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <iomanip>
 #include <iostream>
@@ -44,6 +45,8 @@ bool show_fonts = false;
 bool show_embedded_files = false;
 bool show_pages = false;
 bool show_help = false;
+char show_text[32];
+poppler::page::text_layout_enum show_text_layout = poppler::page::physical_layout;
 
 static const ArgDesc the_args[] = {
     { "--show-all",            argFlag,  &show_all,            0,
@@ -62,6 +65,8 @@ static const ArgDesc the_args[] = {
       "show the document-level embedded files" },
     { "--show-pages",          argFlag,  &show_pages,          0,
       "show pages information" },
+    { "--show-text",           argString, &show_text,          sizeof(show_text),
+      "show text (physical|raw) extracted from all pages" },
     { "-h",                    argFlag,  &show_help,           0,
       "print usage information" },
     { "--help",                argFlag,  &show_help,           0,
@@ -76,9 +81,13 @@ static void error(const std::string &msg)
     exit(1);
 }
 
-static std::string out_ustring(const poppler::ustring &str)
+std::ostream& operator<<(std::ostream& stream, const poppler::ustring &str)
 {
-    return str.to_latin1();
+    const poppler::byte_array ba = str.to_utf8();
+    for (unsigned int i = 0; i < ba.size(); ++i) {
+        stream << (char)(ba[i]);
+    }
+    return stream;
 }
 
 static std::string out_date(std::time_t date)
@@ -166,10 +175,16 @@ static void print_info(poppler::document *doc)
     int major = 0, minor = 0;
     doc->get_pdf_version(&major, &minor);
     std::cout << std::setw(out_width) << "PDF version" << ": " << major << "." << minor << std::endl;
+    std::string permanent_id, update_id;
+    if (doc->get_pdf_id(&permanent_id, &update_id)) {
+        std::cout << std::setw(out_width) << "PDF IDs" << ": P: " << permanent_id << " - U: " << update_id << std::endl;
+    } else {
+        std::cout << std::setw(out_width) << "PDF IDs" << ": <none>" << std::endl;
+    }
     const std::vector<std::string> keys = doc->info_keys();
     std::vector<std::string>::const_iterator key_it = keys.begin(), key_end = keys.end();
     for (; key_it != key_end; ++key_it) {
-        std::cout << std::setw(out_width) << *key_it << ": " << out_ustring(doc->info_key(*key_it)) << std::endl;
+        std::cout << std::setw(out_width) << *key_it << ": " << doc->info_key(*key_it) << std::endl;
     }
     std::cout << std::setw(out_width) << "Date (creation)" << ": " << out_date(doc->info_date("CreationDate")) << std::endl;
     std::cout << std::setw(out_width) << "Date (modification)" << ": " << out_date(doc->info_date("ModDate")) << std::endl;
@@ -200,14 +215,14 @@ static void print_perm(poppler::document *doc)
 static void print_metadata(poppler::document *doc)
 {
     std::cout << std::setw(out_width) << "Metadata" << ":" << std::endl
-              << out_ustring(doc->metadata()) << std::endl;
+              << doc->metadata() << std::endl;
     std::cout << std::endl;
 }
 
 static void print_toc_item(poppler::toc_item *item, int indent)
 {
     std::cout << std::setw(indent * 2) << " "
-              << "+ " << out_ustring(item->title()) << " (" << item->is_open() << ")"
+              << "+ " << item->title() << " (" << item->is_open() << ")"
               << std::endl;
     poppler::toc_item::iterator it = item->children_begin(), it_end = item->children_end();
     for (; it != it_end; ++it) {
@@ -266,7 +281,13 @@ static void print_embedded_files(poppler::document *doc)
                 << " " << std::setw(20) << out_date(f->creation_date())
                 << " " << std::setw(20) << out_date(f->modification_date())
                 << std::endl
-                << "     " << (f->description().empty() ? std::string("<no description>") : out_ustring(f->description()))
+                << "     ";
+            if (f->description().empty()) {
+                std::cout << "<no description>";
+            } else {
+                std::cout << f->description();
+            }
+            std::cout
                 << std::endl
                 << "     " << std::setw(35) << (f->checksum().empty() ? std::string("<no checksum>") : out_hex_string(f->checksum()))
                 << " " << (f->mime_type().empty() ? std::string("<no mime type>") : f->mime_type())
@@ -282,9 +303,15 @@ static void print_embedded_files(poppler::document *doc)
 static void print_page(poppler::page *p)
 {
     std::cout << std::setw(out_width) << "Rect" << ": " << p->page_rect() << std::endl;
-    std::cout << std::setw(out_width) << "Label" << ": " << out_ustring(p->label()) << std::endl;
+    std::cout << std::setw(out_width) << "Label" << ": " << p->label() << std::endl;
     std::cout << std::setw(out_width) << "Duration" << ": " << p->duration() << std::endl;
     std::cout << std::setw(out_width) << "Orientation" << ": " << out_page_orientation(p->orientation()) << std::endl;
+    std::cout << std::endl;
+}
+
+static void print_page_text(poppler::page *p)
+{
+    std::cout << p->text(p->page_rect(), show_text_layout) << std::endl;
     std::cout << std::endl;
 }
 
@@ -294,6 +321,16 @@ int main(int argc, char *argv[])
         || argc < 2 || show_help) {
         printUsage(argv[0], "DOCUMENT", the_args);
         exit(1);
+    }
+
+    if (show_text[0]) {
+        if (!memcmp(show_text, "physical", 9)) {
+            show_text_layout = poppler::page::physical_layout;
+        } else if (!memcmp(show_text, "raw", 4)) {
+            show_text_layout = poppler::page::raw_order_layout;
+        } else {
+            error(std::string("unrecognized text mode: '") + show_text + "'");
+        }
     }
 
     std::string file_name(argv[1]);
@@ -343,6 +380,14 @@ int main(int argc, char *argv[])
             std::cout << "Page " << (i + 1) << "/" << pages << ":" << std::endl;
             std::auto_ptr<poppler::page> p(doc->create_page(i));
             print_page(p.get());
+        }
+    }
+    if (show_text[0]) {
+        const int pages = doc->pages();
+        for (int i = 0; i < pages; ++i) {
+            std::cout << "Page " << (i + 1) << "/" << pages << ":" << std::endl;
+            std::auto_ptr<poppler::page> p(doc->create_page(i));
+            print_page_text(p.get());
         }
     }
 

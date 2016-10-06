@@ -13,8 +13,9 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2006-2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006-2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2006 Krzysztof Kowalczyk <kkowalczyk@gmail.com>
+// Copyright (C) 2010 Carlos Garcia Campos <carlosgc@gnome.org>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -153,10 +154,11 @@ int Lexer::lookChar() {
 Object *Lexer::getObj(Object *obj, int objNum) {
   char *p;
   int c, c2;
-  GBool comment, neg, done, overflownInteger;
+  GBool comment, neg, done, overflownInteger, overflownUnsignedInteger;
   int numParen;
   int xi;
-  double xf, scale;
+  unsigned int xui = 0;
+  double xf = 0, scale;
   GooString *s;
   int n, m;
 
@@ -182,15 +184,16 @@ Object *Lexer::getObj(Object *obj, int objNum) {
   // number
   case '0': case '1': case '2': case '3': case '4':
   case '5': case '6': case '7': case '8': case '9':
-  case '-': case '.':
+  case '+': case '-': case '.':
     overflownInteger = gFalse;
+    overflownUnsignedInteger = gFalse;
     neg = gFalse;
     xi = 0;
     if (c == '-') {
       neg = gTrue;
     } else if (c == '.') {
       goto doReal;
-    } else {
+    } else if (c != '+') {
       xi = c - '0';
     }
     while (1) {
@@ -198,12 +201,22 @@ Object *Lexer::getObj(Object *obj, int objNum) {
       if (isdigit(c)) {
 	getChar();
 	if (unlikely(overflownInteger)) {
-	  xf = xf * 10.0 + (c - '0');
+	  if (overflownUnsignedInteger) {
+	    xf = xf * 10.0 + (c - '0');
+	  } else {
+	    overflownUnsignedInteger = gTrue;
+	    xf = xui * 10.0 + (c - '0');
+	  }
 	} else {
 	  if (unlikely(xi > IntegerSafeLimit) &&
 	      (xi > (INT_MAX - (c - '0')) / 10.0)) {
 	    overflownInteger = gTrue;
-	    xf = xi * 10.0 + (c - '0');
+	    if (xi > (UINT_MAX - (c - '0')) / 10.0) {
+	      overflownUnsignedInteger = gTrue;
+	      xf = xi * 10.0 + (c - '0');
+	    } else {
+	      xui = xi * 10.0 + (c - '0');
+	    }
 	  } else {
 	    xi = xi * 10 + (c - '0');
 	  }
@@ -218,7 +231,11 @@ Object *Lexer::getObj(Object *obj, int objNum) {
     if (neg)
       xi = -xi;
     if (unlikely(overflownInteger)) {
-      obj->initError();
+      if (overflownUnsignedInteger) {
+        obj->initError();
+      } else {
+        obj->initUint(xui);
+      }
     } else {
       obj->initInt(xi);
     }
@@ -226,6 +243,8 @@ Object *Lexer::getObj(Object *obj, int objNum) {
   doReal:
     if (likely(!overflownInteger)) {
       xf = xi;
+    } else if (!overflownUnsignedInteger) {
+      xf = xui;
     }
     scale = 0.1;
     while (1) {

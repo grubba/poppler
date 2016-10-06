@@ -21,17 +21,19 @@
 #include "poppler.h"
 #include "poppler-private.h"
 
+/**
+ * SECTION:poppler-annot
+ * @short_description: Annotations
+ * @title: PopplerAnnot
+ */
+
 typedef struct _PopplerAnnotClass               PopplerAnnotClass;
 typedef struct _PopplerAnnotMarkupClass         PopplerAnnotMarkupClass;
 typedef struct _PopplerAnnotFreeTextClass       PopplerAnnotFreeTextClass;
 typedef struct _PopplerAnnotTextClass           PopplerAnnotTextClass;
 typedef struct _PopplerAnnotFileAttachmentClass PopplerAnnotFileAttachmentClass;
-
-struct _PopplerAnnot
-{
-  GObject  parent_instance;
-  Annot   *annot;
-};
+typedef struct _PopplerAnnotMovieClass          PopplerAnnotMovieClass;
+typedef struct _PopplerAnnotScreenClass         PopplerAnnotScreenClass;
 
 struct _PopplerAnnotClass
 {
@@ -78,11 +80,38 @@ struct _PopplerAnnotFileAttachmentClass
   PopplerAnnotMarkupClass parent_class;
 };
 
+struct _PopplerAnnotMovie
+{
+  PopplerAnnot  parent_instance;
+
+  PopplerMovie *movie;
+};
+
+struct _PopplerAnnotMovieClass
+{
+  PopplerAnnotClass parent_class;
+};
+
+struct _PopplerAnnotScreen
+{
+  PopplerAnnot  parent_instance;
+
+  PopplerAction *action;
+};
+
+struct _PopplerAnnotScreenClass
+{
+  PopplerAnnotClass parent_class;
+};
+
+
 G_DEFINE_TYPE (PopplerAnnot, poppler_annot, G_TYPE_OBJECT)
 G_DEFINE_TYPE (PopplerAnnotMarkup, poppler_annot_markup, POPPLER_TYPE_ANNOT)
 G_DEFINE_TYPE (PopplerAnnotText, poppler_annot_text, POPPLER_TYPE_ANNOT_MARKUP)
 G_DEFINE_TYPE (PopplerAnnotFreeText, poppler_annot_free_text, POPPLER_TYPE_ANNOT_MARKUP)
 G_DEFINE_TYPE (PopplerAnnotFileAttachment, poppler_annot_file_attachment, POPPLER_TYPE_ANNOT_MARKUP)
+G_DEFINE_TYPE (PopplerAnnotMovie, poppler_annot_movie, POPPLER_TYPE_ANNOT)
+G_DEFINE_TYPE (PopplerAnnotScreen, poppler_annot_screen, POPPLER_TYPE_ANNOT)
 
 static void
 poppler_annot_finalize (GObject *object)
@@ -149,6 +178,32 @@ _poppler_annot_text_new (Annot *annot)
   return poppler_annot;
 }
 
+/**
+ * poppler_annot_text_new:
+ * @doc: a #PopplerDocument
+ * @rect: a #PopplerRectangle
+ *
+ * Creates a new Text annotation that will be
+ * located on @rect when added to a page. See
+ * poppler_page_add_annot()
+ *
+ * Return value: A newly created #PopplerAnnotText annotation
+ *
+ * Since: 0.16
+ */
+PopplerAnnot *
+poppler_annot_text_new (PopplerDocument  *doc,
+			PopplerRectangle *rect)
+{
+  Annot *annot;
+  PDFRectangle pdf_rect(rect->x1, rect->y1,
+			rect->x2, rect->y2);
+
+  annot = new AnnotText (doc->doc->getXRef(), &pdf_rect, doc->doc->getCatalog());
+
+  return _poppler_annot_text_new (annot);
+}
+
 static void
 poppler_annot_free_text_init (PopplerAnnotFreeText *poppler_annot)
 {
@@ -190,6 +245,93 @@ _poppler_annot_file_attachment_new (Annot *annot)
 
   return poppler_annot;
 }
+
+
+static void
+poppler_annot_movie_finalize (GObject *object)
+{
+  PopplerAnnotMovie *annot_movie = POPPLER_ANNOT_MOVIE (object);
+
+  if (annot_movie->movie) {
+    g_object_unref (annot_movie->movie);
+    annot_movie->movie = NULL;
+  }
+
+  G_OBJECT_CLASS (poppler_annot_movie_parent_class)->finalize (object);
+}
+
+static void
+poppler_annot_movie_init (PopplerAnnotMovie *poppler_annot)
+{
+}
+
+static void
+poppler_annot_movie_class_init (PopplerAnnotMovieClass *klass)
+{
+  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+
+  gobject_class->finalize = poppler_annot_movie_finalize;
+}
+
+PopplerAnnot *
+_poppler_annot_movie_new (Annot *annot)
+{
+  PopplerAnnot *poppler_annot;
+  AnnotMovie   *annot_movie;
+
+  poppler_annot = POPPLER_ANNOT (g_object_new (POPPLER_TYPE_ANNOT_MOVIE, NULL));
+  poppler_annot->annot = annot;
+
+  annot_movie = static_cast<AnnotMovie *>(poppler_annot->annot);
+  POPPLER_ANNOT_MOVIE (poppler_annot)->movie = _poppler_movie_new (annot_movie->getMovie());
+
+  return poppler_annot;
+}
+
+static void
+poppler_annot_screen_finalize (GObject *object)
+{
+  PopplerAnnotScreen *annot_screen = POPPLER_ANNOT_SCREEN (object);
+
+  if (annot_screen->action) {
+    poppler_action_free (annot_screen->action);
+    annot_screen->action = NULL;
+  }
+
+  G_OBJECT_CLASS (poppler_annot_screen_parent_class)->finalize (object);
+}
+
+static void
+poppler_annot_screen_init (PopplerAnnotScreen *poppler_annot)
+{
+}
+
+static void
+poppler_annot_screen_class_init (PopplerAnnotScreenClass *klass)
+{
+  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+
+  gobject_class->finalize = poppler_annot_screen_finalize;
+}
+
+PopplerAnnot *
+_poppler_annot_screen_new (Annot *annot)
+{
+  PopplerAnnot *poppler_annot;
+  AnnotScreen  *annot_screen;
+  LinkAction   *action;
+
+  poppler_annot = POPPLER_ANNOT (g_object_new (POPPLER_TYPE_ANNOT_SCREEN, NULL));
+  poppler_annot->annot = annot;
+
+  annot_screen = static_cast<AnnotScreen *>(poppler_annot->annot);
+  action = annot_screen->getAction();
+  if (action)
+    POPPLER_ANNOT_SCREEN (poppler_annot)->action = _poppler_action_new (NULL, action, NULL);
+
+  return poppler_annot;
+}
+
 
 /* Public methods */
 /**
@@ -292,6 +434,8 @@ poppler_annot_get_contents (PopplerAnnot *poppler_annot)
  *
  * Sets the contents of @poppler_annot to the given value,
  * replacing the current contents.
+ *
+ * Since: 0.12
  **/
 void
 poppler_annot_set_contents (PopplerAnnot *poppler_annot,
@@ -421,15 +565,61 @@ poppler_annot_get_color (PopplerAnnot *poppler_annot)
   return poppler_color;
 }
 
+/**
+ * poppler_annot_set_color:
+ * @poppler_annot: a #PopplerAnnot
+ * @poppler_color: (allow-none): a #PopplerColor, or %NULL
+ *
+ * Sets the color of @poppler_annot.
+ *
+ * Since: 0.16
+ */
+void
+poppler_annot_set_color (PopplerAnnot *poppler_annot,
+			 PopplerColor *poppler_color)
+{
+  AnnotColor *color = NULL;
+
+  if (poppler_color) {
+    color = new AnnotColor ((double)poppler_color->red / 65535,
+			    (double)poppler_color->green / 65535,
+			    (double)poppler_color->blue / 65535);
+  }
+
+  /* Annot takes ownership of the color */
+  poppler_annot->annot->setColor (color);
+}
+
+/**
+ * poppler_annot_get_page_index:
+ * @poppler_annot: a #PopplerAnnot
+ *
+ * Returns the page index to which @poppler_annot is associated, or -1 if unknown
+ *
+ * Return value: page index or -1
+ *
+ * Since: 0.14
+ **/
+gint
+poppler_annot_get_page_index (PopplerAnnot *poppler_annot)
+{
+  gint page_num;
+
+  g_return_val_if_fail (POPPLER_IS_ANNOT (poppler_annot), -1);
+
+  page_num = poppler_annot->annot->getPageNum();
+  return page_num <= 0 ? -1 : page_num - 1;
+}
+
 /* PopplerAnnotMarkup */
 /**
-* poppler_annot_markup_get_label:
-* @poppler_annot: a #PopplerAnnotMarkup
-*
-* Retrieves the label text of @poppler_annot.
-*
-* Return value: the label text of @poppler_annot.
-*/
+ * poppler_annot_markup_get_label:
+ * @poppler_annot: a #PopplerAnnotMarkup
+ *
+ * Retrieves the label text of @poppler_annot.
+ *
+ * Return value: the label text of @poppler_annot.
+ */
 gchar *
 poppler_annot_markup_get_label (PopplerAnnotMarkup *poppler_annot)
 {
@@ -446,12 +636,43 @@ poppler_annot_markup_get_label (PopplerAnnotMarkup *poppler_annot)
 }
 
 /**
+ * poppler_annot_markup_set_label:
+ * @poppler_annot: a #PopplerAnnotMarkup
+ * @label: (allow-none): a text string containing the new label, or %NULL
+ *
+ * Sets the label text of @poppler_annot, replacing the current one
+ *
+ * Since: 0.16
+ */
+void
+poppler_annot_markup_set_label (PopplerAnnotMarkup *poppler_annot,
+				const gchar        *label)
+{
+  AnnotMarkup *annot;
+  GooString *goo_tmp;
+  gchar *tmp;
+  gsize length = 0;
+
+  g_return_if_fail (POPPLER_IS_ANNOT_MARKUP (poppler_annot));
+
+  annot = static_cast<AnnotMarkup *>(POPPLER_ANNOT (poppler_annot)->annot);
+
+  tmp = label ? g_convert (label, -1, "UTF-16BE", "UTF-8", NULL, &length, NULL) : NULL;
+  goo_tmp = new GooString (tmp, length);
+  g_free (tmp);
+  annot->setLabel (goo_tmp);
+  delete goo_tmp;
+}
+
+/**
  * poppler_annot_markup_has_popup:
  * @poppler_annot: a #PopplerAnnotMarkup
  *
  * Return %TRUE if the markup annotation has a popup window associated
  *
  * Return value: %TRUE, if @poppler_annot has popup, %FALSE otherwise
+ *
+ * Since: 0.12
  **/
 gboolean
 poppler_annot_markup_has_popup (PopplerAnnotMarkup *poppler_annot)
@@ -466,10 +687,36 @@ poppler_annot_markup_has_popup (PopplerAnnotMarkup *poppler_annot)
 }
 
 /**
+ * poppler_annot_markup_set_popup:
+ * @poppler_annot: a #PopplerAnnotMarkup
+ * @popup_rect: a #PopplerRectangle
+ *
+ * Associates a new popup window for editing contents of @poppler_annot.
+ * Popup window shall be displayed by viewers at @popup_rect on the page.
+ *
+ * Since: 0.16
+ */
+void
+poppler_annot_markup_set_popup (PopplerAnnotMarkup *poppler_annot,
+				PopplerRectangle   *popup_rect)
+{
+  AnnotMarkup *annot;
+  AnnotPopup  *popup;
+  PDFRectangle pdf_rect(popup_rect->x1, popup_rect->y1,
+			popup_rect->x2, popup_rect->y2);
+
+  g_return_if_fail (POPPLER_IS_ANNOT_MARKUP (poppler_annot));
+
+  annot = static_cast<AnnotMarkup *>(POPPLER_ANNOT (poppler_annot)->annot);
+  popup = new AnnotPopup (annot->getXRef(), &pdf_rect, (Catalog *)NULL);
+  annot->setPopup (popup);
+}
+
+/**
  * poppler_annot_markup_get_popup_is_open:
  * @poppler_annot: a #PopplerAnnotMarkup
  *
- * Retrieves the state of the popup annot related to @poppler_annot.
+ * Retrieves the state of the popup window related to @poppler_annot.
  *
  * Return value: the state of @poppler_annot. %TRUE if it's open, %FALSE in
  *               other case.
@@ -491,14 +738,43 @@ poppler_annot_markup_get_popup_is_open (PopplerAnnotMarkup *poppler_annot)
 }
 
 /**
+ * poppler_annot_markup_set_popup_is_open:
+ * @poppler_annot: a #PopplerAnnotMarkup
+ * @is_open: whether popup window should initially be displayed open
+ *
+ * Sets the state of the popup window related to @poppler_annot.
+ *
+ * Since: 0.16
+ **/
+void
+poppler_annot_markup_set_popup_is_open (PopplerAnnotMarkup *poppler_annot,
+					gboolean            is_open)
+{
+  AnnotMarkup *annot;
+  AnnotPopup *annot_popup;
+
+  g_return_if_fail (POPPLER_IS_ANNOT_MARKUP (poppler_annot));
+
+  annot = static_cast<AnnotMarkup *>(POPPLER_ANNOT (poppler_annot)->annot);
+
+  annot_popup = annot->getPopup ();
+  if (!annot_popup)
+    return;
+
+  if (annot_popup->getOpen () != is_open)
+    annot_popup->setOpen (is_open);
+}
+
+/**
  * poppler_annot_markup_get_popup_rectangle:
  * @poppler_annot: a #PopplerAnnotMarkup
- * @poppler_rect: a #PopplerRectangle to store the popup rectangle
+ * @poppler_rect: (out): a #PopplerRectangle to store the popup rectangle
  *
- * Retrieves the rectangle of the popup annot related to @poppler_annot.
+ * Retrieves the rectangle of the popup window related to @poppler_annot.
  *
- * Return value: %TRUE if #PopplerRectangle was correctly filled,
- *               %FALSE otherwise
+ * Return value: %TRUE if #PopplerRectangle was correctly filled, %FALSE otherwise
+ *
+ * Since: 0.12
  **/
 gboolean
 poppler_annot_markup_get_popup_rectangle (PopplerAnnotMarkup *poppler_annot,
@@ -526,13 +802,14 @@ poppler_annot_markup_get_popup_rectangle (PopplerAnnotMarkup *poppler_annot,
 }
 
 /**
-* poppler_annot_markup_get_opacity:
-* @poppler_annot: a #PopplerAnnotMarkup
-*
-* Retrieves the opacity value of @poppler_annot.
-*
-* Return value: the opacity value of @poppler_annot.
-*/
+ * poppler_annot_markup_get_opacity:
+ * @poppler_annot: a #PopplerAnnotMarkup
+ *
+ * Retrieves the opacity value of @poppler_annot.
+ *
+ * Return value: the opacity value of @poppler_annot,
+ *               between 0 (transparent) and 1 (opaque)
+ */
 gdouble
 poppler_annot_markup_get_opacity (PopplerAnnotMarkup *poppler_annot)
 {
@@ -545,6 +822,38 @@ poppler_annot_markup_get_opacity (PopplerAnnotMarkup *poppler_annot)
   return annot->getOpacity ();
 }
 
+/**
+ * poppler_annot_markup_set_opacity:
+ * @poppler_annot: a #PopplerAnnotMarkup
+ * @opacity: a constant opacity value, between 0 (transparent) and 1 (opaque)
+ *
+ * Sets the opacity of @poppler_annot. This value applies to
+ * all visible elements of @poppler_annot in its closed state,
+ * but not to the pop-up window that appears when it's openened
+ *
+ * Since: 0.16
+ */
+void
+poppler_annot_markup_set_opacity (PopplerAnnotMarkup *poppler_annot,
+				  gdouble             opacity)
+{
+  AnnotMarkup *annot;
+
+  g_return_if_fail (POPPLER_IS_ANNOT_MARKUP (poppler_annot));
+
+  annot = static_cast<AnnotMarkup *>(POPPLER_ANNOT (poppler_annot)->annot);
+  annot->setOpacity(opacity);
+}
+
+/**
+ * poppler_annot_markup_get_date:
+ * @poppler_annot: a #PopplerAnnotMarkup
+ *
+ * Returns the date and time when the annotation was created
+ *
+ * Return value: (transfer full): a #GDate representing the date and time
+ *               when the annotation was created, or %NULL
+ */
 GDate *
 poppler_annot_markup_get_date (PopplerAnnotMarkup *poppler_annot)
 {
@@ -677,13 +986,34 @@ poppler_annot_text_get_is_open (PopplerAnnotText *poppler_annot)
 }
 
 /**
+ * poppler_annot_text_set_is_open:
+ * @poppler_annot: a #PopplerAnnotText
+ * @is_open: whether annotation should initially be displayed open
+ *
+ * Sets whether @poppler_annot should initially be displayed open
+ *
+ * Since: 0.16
+ */
+void
+poppler_annot_text_set_is_open (PopplerAnnotText *poppler_annot,
+				gboolean          is_open)
+{
+  AnnotText *annot;
+
+  g_return_if_fail (POPPLER_IS_ANNOT_TEXT (poppler_annot));
+
+  annot = static_cast<AnnotText *>(POPPLER_ANNOT (poppler_annot)->annot);
+  annot->setOpen(is_open);
+}
+
+/**
  * poppler_annot_text_get_icon:
  * @poppler_annot: a #PopplerAnnotText
  *
- * Gets the icon type of @poppler_annot.
+ * Gets name of the icon of @poppler_annot.
  *
- * Return value: #PopplerAnnotTextIcon of @poppler_annot.
- **/ 
+ * Return value: a new allocated string containing the icon name
+ */
 gchar *
 poppler_annot_text_get_icon (PopplerAnnotText *poppler_annot)
 {
@@ -697,6 +1027,61 @@ poppler_annot_text_get_icon (PopplerAnnotText *poppler_annot)
   text = annot->getIcon ();
 
   return text ? _poppler_goo_string_to_utf8 (text) : NULL;
+}
+
+/**
+ * poppler_annot_text_set_icon:
+ * @poppler_annot: a #PopplerAnnotText
+ * @icon: the name of an icon
+ *
+ * Sets the icon of @poppler_annot. The following predefined
+ * icons are currently supported:
+ * <variablelist>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_NOTE</term>
+ *  </varlistentry>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_COMMENT</term>
+ *  </varlistentry>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_KEY</term>
+ *  </varlistentry>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_HELP</term>
+ *  </varlistentry>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_NEW_PARAGRAPH</term>
+ *  </varlistentry>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_PARAGRAPH</term>
+ *  </varlistentry>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_INSERT</term>
+ *  </varlistentry>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_CROSS</term>
+ *  </varlistentry>
+ *  <varlistentry>
+ *   <term>#POPPLER_ANNOT_TEXT_ICON_CIRCLE</term>
+ *  </varlistentry>
+ * </variablelist>
+ *
+ * Since: 0.16
+ */
+void
+poppler_annot_text_set_icon (PopplerAnnotText *poppler_annot,
+			     const gchar      *icon)
+{
+  AnnotText *annot;
+  GooString *text;
+
+  g_return_if_fail (POPPLER_IS_ANNOT_TEXT (poppler_annot));
+
+  annot = static_cast<AnnotText *>(POPPLER_ANNOT (poppler_annot)->annot);
+
+  text = new GooString(icon);
+  annot->setIcon(text);
+  delete text;
 }
 
 /**
@@ -827,6 +1212,8 @@ poppler_annot_free_text_get_callout_line (PopplerAnnotFreeText *poppler_annot)
  * The #PopplerAttachment must be unrefed with g_object_unref by the caller.
  *
  * Return value: @PopplerAttachment
+ *
+ * Since: 0.14
  **/
 PopplerAttachment *
 poppler_annot_file_attachment_get_attachment (PopplerAnnotFileAttachment *poppler_annot)
@@ -853,6 +1240,7 @@ poppler_annot_file_attachment_get_attachment (PopplerAnnotFileAttachment *popple
  *
  * Return value: a new allocated string with the name of @poppler_annot. It must
  *               be freed with g_free() when done.
+ * Since: 0.14
  **/
 gchar *
 poppler_annot_file_attachment_get_name (PopplerAnnotFileAttachment *poppler_annot)
@@ -919,4 +1307,66 @@ void
 poppler_annot_callout_line_free (PopplerAnnotCalloutLine *callout)
 {
   g_free (callout);
+}
+
+
+/* PopplerAnnotMovie */
+/**
+ * poppler_annot_movie_get_title:
+ * @poppler_annot: a #PopplerAnnotMovie
+ *
+ * Retrieves the movie title of @poppler_annot.
+ *
+ * Return value: the title text of @poppler_annot.
+ *
+ * Since: 0.14
+ */
+gchar *
+poppler_annot_movie_get_title (PopplerAnnotMovie *poppler_annot)
+{
+  AnnotMovie *annot;
+  GooString *title;
+
+  g_return_val_if_fail (POPPLER_IS_ANNOT_MOVIE (poppler_annot), NULL);
+
+  annot = static_cast<AnnotMovie *>(POPPLER_ANNOT (poppler_annot)->annot);
+
+  title = annot->getTitle ();
+
+  return title ? _poppler_goo_string_to_utf8 (title) : NULL;
+}
+
+/**
+ * poppler_annot_movie_get_movie:
+ * @poppler_annot: a #PopplerAnnotMovie
+ *
+ * Retrieves the movie object (PopplerMovie) stored in the @poppler_annot.
+ *
+ * Return value: (transfer none): the movie object stored in the @poppler_annot. The returned
+ *               object is owned by #PopplerAnnotMovie and should not be freed
+ *
+ * Since: 0.14
+ */
+PopplerMovie *
+poppler_annot_movie_get_movie (PopplerAnnotMovie *poppler_annot)
+{
+  return poppler_annot->movie;
+}
+
+/* PopplerAnnotScreen */
+/**
+ * poppler_annot_screen_get_action:
+ * @poppler_annot: a #PopplerAnnotScreen
+ *
+ * Retrieves the action (#PopplerAction) that shall be performed when @poppler_annot is activated
+ *
+ * Return value: (transfer none): the action to perform. The returned
+ *               object is owned by @poppler_annot and should not be freed
+ *
+ * Since: 0.14
+ */
+PopplerAction *
+poppler_annot_screen_get_action (PopplerAnnotScreen *poppler_annot)
+{
+  return poppler_annot->action;
 }

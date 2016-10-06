@@ -13,7 +13,7 @@
 // All changes made under the Poppler project to this file are licensed
 // under GPL version 2 or later
 //
-// Copyright (C) 2006, 2008, 2009 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2006, 2008-2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2006 Jeff Muizelaar <jeff@infidigm.net>
 //
 // To see a description of the changes please see the Changelog file that
@@ -422,7 +422,11 @@ void SampledFunction::transform(double *in, double *out) {
       for (k = 0, t = j; k < m; ++k, t >>= 1) {
 	idx += idxMul[k] * (e[k][t & 1]);
       }
-      sBuf[j] = samples[idx];
+      if (likely(idx >= 0 && idx < nSamples)) {
+        sBuf[j] = samples[idx];
+      } else {
+        sBuf[j] = 0; // TODO Investigate if this is what Adobe does
+      }
     }
 
     // do m sets of interpolations
@@ -1012,11 +1016,13 @@ void PSStack::roll(int n, int j) {
     }
   } else {
     j = n - j;
-    obj = stack[sp + n - 1];
-    for (k = sp + n - 1; k > sp; --k) {
-      stack[k] = stack[k-1];
+    for (i = 0; i < j; ++i) {
+      obj = stack[sp + n - 1];
+      for (k = sp + n - 1; k > sp; --k) {
+        stack[k] = stack[k-1];
+      }
+      stack[sp] = obj;
     }
-    stack[sp] = obj;
   }
 }
 
@@ -1106,6 +1112,7 @@ PostScriptFunction::PostScriptFunction(Object *funcObj, Dict *dict) {
   code = NULL;
   codeString = NULL;
   codeSize = 0;
+  stack = NULL;
   ok = gFalse;
   cache = new PopplerCache(5);
 

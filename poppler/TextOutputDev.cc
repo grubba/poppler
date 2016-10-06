@@ -19,9 +19,11 @@
 // Copyright (C) 2008 Koji Otani <sho@bbr.jp>
 // Copyright (C) 2008, 2010 Albert Astals Cid <aacid@kde.org>
 // Copyright (C) 2008 Pino Toscano <pino@kde.org>
-// Copyright (C) 2008 Hib Eris <hib@hiberis.nl>
+// Copyright (C) 2008, 2010 Hib Eris <hib@hiberis.nl>
 // Copyright (C) 2009 Ross Moore <ross@maths.mq.edu.au>
 // Copyright (C) 2009 Kovid Goyal <kovid@kovidgoyal.net>
+// Copyright (C) 2010 Brian Ewins <brian.ewins@gmail.com>
+// Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
 //
 // To see a description of the changes please see the Changelog file that
 // came with your tarball or type make ChangeLog if you are building from git
@@ -38,6 +40,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <math.h>
+#include <float.h>
 #include <ctype.h>
 #ifdef _WIN32
 #include <fcntl.h> // for O_BINARY
@@ -1154,6 +1157,8 @@ TextBlock::TextBlock(TextPage *pageA, int rotA) {
   curLine = NULL;
   next = NULL;
   stackNext = NULL;
+  tableId = -1;
+  tableEnd = gFalse;
 }
 
 TextBlock::~TextBlock() {
@@ -1613,6 +1618,163 @@ GBool TextBlock::isBelow(TextBlock *blk) {
   }
 
   return below;
+}
+
+GBool TextBlock::isBeforeByRule1(TextBlock *blk1) {
+  GBool before = gFalse;
+  GBool overlap = gFalse;
+
+  switch (this->page->primaryRot) {
+  case 0:
+  case 2:
+    overlap = ((this->ExMin <= blk1->ExMin) &&
+	       (blk1->ExMin <= this->ExMax)) ||
+      ((blk1->ExMin <= this->ExMin) &&
+       (this->ExMin <= blk1->ExMax));
+    break;
+  case 1:
+  case 3:
+    overlap = ((this->EyMin <= blk1->EyMin) &&
+	       (blk1->EyMin <= this->EyMax)) ||
+      ((blk1->EyMin <= this->EyMin) &&
+       (this->EyMin <= blk1->EyMax));
+    break;
+  }
+  switch (this->page->primaryRot) {
+  case 0:
+    before = overlap && this->EyMin < blk1->EyMin;
+    break;
+  case 1:
+    before = overlap && this->ExMax > blk1->ExMax;
+    break;
+  case 2:
+    before = overlap && this->EyMax > blk1->EyMax;
+    break;
+  case 3:
+    before = overlap && this->ExMin < blk1->ExMin;
+    break;
+  }
+  return before;
+}
+
+GBool TextBlock::isBeforeByRule2(TextBlock *blk1) {
+  double cmp = 0;
+  int rotLR = rot;
+
+  if (!page->primaryLR) {
+    rotLR = (rotLR + 2) % 4;
+  }
+
+  switch (rotLR) {
+  case 0:
+    cmp = ExMax - blk1->ExMin;
+    break;
+  case 1:
+    cmp = EyMin - blk1->EyMax;
+    break;
+  case 2:
+    cmp = blk1->ExMax - ExMin;
+    break;
+  case 3:
+    cmp = blk1->EyMin - EyMax;
+    break;
+  }
+  return cmp <= 0;
+}
+
+// Sort into reading order by performing a topological sort using the rules
+// given in "High Performance Document Layout Analysis", T.M. Breuel, 2003.
+// See http://pubs.iupr.org/#2003-breuel-sdiut
+// Topological sort is done by depth first search, see
+// http://en.wikipedia.org/wiki/Topological_sorting
+int TextBlock::visitDepthFirst(TextBlock *blkList, int pos1,
+			       TextBlock **sorted, int sortPos,
+			       GBool* visited) {
+  int pos2;
+  TextBlock *blk1, *blk2, *blk3;
+  GBool before;
+
+  if (visited[pos1]) {
+    return sortPos;
+  }
+
+  blk1 = this;
+
+#if 0 // for debugging
+  printf("visited: %d %.2f..%.2f %.2f..%.2f\n",
+	 sortPos, blk1->ExMin, blk1->ExMax, blk1->EyMin, blk1->EyMax);
+#endif
+  visited[pos1] = gTrue;
+  pos2 = -1;
+  for (blk2 = blkList; blk2; blk2 = blk2->next) {
+    pos2++;
+    if (visited[pos2]) {
+      // skip visited nodes
+      continue;
+    }
+    before = gFalse;
+
+    // is blk2 before blk1? (for table entries)
+    if (blk1->tableId >= 0 && blk1->tableId == blk2->tableId) {
+      if (page->primaryLR) {
+        if (blk2->xMax <= blk1->xMin &&
+            blk2->yMin <= blk1->yMax &&
+            blk2->yMax >= blk1->yMin)
+          before = gTrue;
+      } else {
+        if (blk2->xMin >= blk1->xMax &&
+            blk2->yMin <= blk1->yMax &&
+            blk2->yMax >= blk1->yMin)
+          before = gTrue;
+      }
+
+      if (blk2->yMax <= blk1->yMin)
+        before = gTrue;
+    } else {
+      if (blk2->isBeforeByRule1(blk1)) {
+        // Rule (1) blk1 and blk2 overlap, and blk2 is above blk1.
+        before = gTrue;
+#if 0   // for debugging
+        printf("rule1: %.2f..%.2f %.2f..%.2f %.2f..%.2f %.2f..%.2f\n",
+	       blk2->ExMin, blk2->ExMax, blk2->EyMin, blk2->EyMax,
+	       blk1->ExMin, blk1->ExMax, blk1->EyMin, blk1->EyMax);
+#endif
+      } else if (blk2->isBeforeByRule2(blk1)) {
+        // Rule (2) blk2 left of blk1, and no intervening blk3
+        //          such that blk1 is before blk3 by rule 1,
+        //          and blk3 is before blk2 by rule 1.
+        before = gTrue;
+        for (blk3 = blkList; blk3; blk3 = blk3->next) {
+	  if (blk3 == blk2 || blk3 == blk1) {
+	    continue;
+	  }
+	  if (blk1->isBeforeByRule1(blk3) &&
+	      blk3->isBeforeByRule1(blk2)) {
+	    before = gFalse;
+	    break;
+	  }
+        }
+#if 0 // for debugging
+        if (before) {
+	  printf("rule2: %.2f..%.2f %.2f..%.2f %.2f..%.2f %.2f..%.2f\n",
+	         blk1->ExMin, blk1->ExMax, blk1->EyMin, blk1->EyMax,
+	         blk2->ExMin, blk2->ExMax, blk2->EyMin, blk2->EyMax);
+        }
+#endif
+      }
+    }
+    if (before) {
+      // blk2 is before blk1, so it needs to be visited
+      // before we can add blk1 to the sorted list.
+      sortPos = blk2->visitDepthFirst(blkList, pos2, sorted, sortPos, visited);
+    }
+  }
+#if 0 // for debugging
+  printf("sorted: %d %.2f..%.2f %.2f..%.2f\n",
+	 sortPos, blk1->ExMin, blk1->ExMax, blk1->EyMin, blk1->EyMax);
+#endif
+  sorted[sortPos++] = blk1;
+  return sortPos;
 }
 
 //------------------------------------------------------------------------
@@ -2090,25 +2252,25 @@ void TextPage::addChar(GfxState *state, double x, double y,
       beginWord(state, x, y);
     }
 
-  // page rotation and/or transform matrices can cause text to be
-  // drawn in reverse order -- in this case, swap the begin/end
-  // coordinates and break text into individual chars
-  if ((curWord->rot == 0 && w1 < 0) ||
-      (curWord->rot == 1 && h1 < 0) ||
-      (curWord->rot == 2 && w1 > 0) ||
-      (curWord->rot == 3 && h1 > 0)) {
-    endWord();
-    beginWord(state, x + dx, y + dy);
-    x1 += w1;
-    y1 += h1;
-    w1 = -w1;
-    h1 = -h1;
-  }
+    // page rotation and/or transform matrices can cause text to be
+    // drawn in reverse order -- in this case, swap the begin/end
+    // coordinates and break text into individual chars
+    if ((curWord->rot == 0 && w1 < 0) ||
+        (curWord->rot == 1 && h1 < 0) ||
+        (curWord->rot == 2 && w1 > 0) ||
+        (curWord->rot == 3 && h1 > 0)) {
+      endWord();
+      beginWord(state, x + dx, y + dy);
+      x1 += w1;
+      y1 += h1;
+      w1 = -w1;
+      h1 = -h1;
+    }
 
-  // add the characters to the current word
+    // add the characters to the current word
     w1 /= uLen;
     h1 /= uLen;
-  for (i = 0; i < uLen; ++i) {
+    for (i = 0; i < uLen; ++i) {
       if (u[i] >= 0xd800 && u[i] < 0xdc00) { /* surrogate pair */
 	if (i + 1 < uLen && u[i+1] >= 0xdc00 && u[i+1] < 0xe000) {
 	  /* next code is a low surrogate */
@@ -2127,7 +2289,7 @@ void TextPage::addChar(GfxState *state, double x, double y,
       } else {
 	curWord->addChar(state, x1 + i*w1, y1 + i*h1, w1, h1, c, u[i]);
       }
-  }
+    }
   }
   if (curWord) {
     curWord->charLen += nBytes;
@@ -2183,8 +2345,7 @@ void TextPage::coalesce(GBool physLayout, GBool doHTML) {
   TextPool *pool;
   TextWord *word0, *word1, *word2;
   TextLine *line;
-  TextBlock *blkList, *blkStack, *blk, *lastBlk, *blk0, *blk1;
-  TextBlock **blkArray;
+  TextBlock *blkList, *blk, *lastBlk, *blk0, *blk1, *blk2;
   TextFlow *flow, *lastFlow;
   TextUnderline *underline;
   TextLink *link;
@@ -2194,7 +2355,6 @@ void TextPage::coalesce(GBool physLayout, GBool doHTML) {
   GBool found;
   int count[4];
   int lrCount;
-  int firstBlkIdx, nBlocksLeft;
   int col1, col2;
   int i, j, n;
 
@@ -2687,7 +2847,7 @@ void TextPage::coalesce(GBool physLayout, GBool doHTML) {
     }
   }
 
-#if 0 // for debugging 
+#if 0 // for debugging
   printf("*** rotation ***\n");
   for (rot = 0; rot < 4; ++rot) {
     printf("  %d: %6d\n", rot, count[rot]);
@@ -2841,9 +3001,6 @@ void TextPage::coalesce(GBool physLayout, GBool doHTML) {
 
   //----- reading order sort
 
-  // sort blocks into yx order (in preparation for reading order sort)
-  qsort(blocks, nBlocks, sizeof(TextBlock *), &TextBlock::cmpYXPrimaryRot);
-
   // compute space on left and right sides of each block
   for (i = 0; i < nBlocks; ++i) {
     blk0 = blocks[i];
@@ -2856,7 +3013,285 @@ void TextPage::coalesce(GBool physLayout, GBool doHTML) {
   }
 
 #if 0 // for debugging
-  printf("*** blocks, after yx sort ***\n");
+  printf("PAGE\n");
+#endif
+
+  int sortPos = 0;
+  GBool *visited = (GBool *)gmallocn(nBlocks, sizeof(GBool));
+  for (i = 0; i < nBlocks; i++) {
+    visited[i] = gFalse;
+  }
+
+  double bxMin0, byMin0, bxMin1, byMin1;
+  int numTables = 0;
+  int tableId = -1;
+  int correspondenceX, correspondenceY;
+  double xCentre1, yCentre1, xCentre2, yCentre2;
+  double xCentre3, yCentre3, xCentre4, yCentre4;
+  double deltaX, deltaY;
+  TextBlock *fblk2 = NULL, *fblk3 = NULL, *fblk4 = NULL;
+
+  for (blk1 = blkList; blk1; blk1 = blk1->next) {
+    blk1->ExMin = blk1->xMin;
+    blk1->ExMax = blk1->xMax;
+    blk1->EyMin = blk1->yMin;
+    blk1->EyMax = blk1->yMax;
+
+    bxMin0 = DBL_MAX;
+    byMin0 = DBL_MAX;
+    bxMin1 = DBL_MAX;
+    byMin1 = DBL_MAX;
+
+    fblk2 = NULL;
+    fblk3 = NULL;
+    fblk4 = NULL;
+
+    /*  find fblk2, fblk3 and fblk4 so that
+     *  fblk2 is on the right of blk1 and overlap with blk1 in y axis
+     *  fblk3 is under blk1 and overlap with blk1 in x axis
+     *  fblk4 is under blk1 and on the right of blk1
+     *  and they are closest to blk1
+     */
+    for (blk2 = blkList; blk2; blk2 = blk2->next) {
+      if (blk2 != blk1) {
+        if (blk2->yMin <= blk1->yMax &&
+            blk2->yMax >= blk1->yMin &&
+            blk2->xMin > blk1->xMax &&
+            blk2->xMin < bxMin0) {
+          bxMin0 = blk2->xMin;
+          fblk2 = blk2;
+        } else if (blk2->xMin <= blk1->xMax &&
+                   blk2->xMax >= blk1->xMin &&
+                   blk2->yMin > blk1->yMax &&
+                   blk2->yMin < byMin0) {
+          byMin0 = blk2->yMin;
+          fblk3 = blk2;
+        } else if (blk2->xMin > blk1->xMax &&
+                   blk2->xMin < bxMin1 &&
+                   blk2->yMin > blk1->yMax &&
+                   blk2->yMin < byMin1) {
+          bxMin1 = blk2->xMin;
+          byMin1 = blk2->yMin;
+          fblk4 = blk2;
+        }
+      }
+    }
+
+    /*  fblk4 can not overlap with fblk3 in x and with fblk2 in y
+     *  fblk2 can not overlap with fblk3 in x and y
+     *  fblk4 has to overlap with fblk3 in y and with fblk2 in x
+     */
+    if (fblk2 != NULL &&
+        fblk3 != NULL &&
+        fblk4 != NULL) {
+      if (((fblk3->xMin <= fblk4->xMax && fblk3->xMax >= fblk4->xMin) ||
+           (fblk2->yMin <= fblk4->yMax && fblk2->yMax >= fblk4->yMin) ||
+           (fblk2->xMin <= fblk3->xMax && fblk2->xMax >= fblk3->xMin) ||
+           (fblk2->yMin <= fblk3->yMax && fblk2->yMax >= fblk3->yMin)) ||
+          !(fblk4->xMin <= fblk2->xMax && fblk4->xMax >= fblk2->xMin &&
+            fblk4->yMin <= fblk3->yMax && fblk4->yMax >= fblk3->yMin)) {
+        fblk2 = NULL;
+        fblk3 = NULL;
+        fblk4 = NULL;
+      }
+    }
+
+    // if we found any then look whether they form a table
+    if (fblk2 != NULL &&
+        fblk3 != NULL &&
+        fblk4 != NULL) {
+      tableId = -1;
+      correspondenceX = 0;
+      correspondenceY = 0;
+      deltaX = 0.0;
+      deltaY = 0.0;
+
+      if (blk1->lines && blk1->lines->words)
+        deltaX = blk1->lines->words->getFontSize();
+      if (fblk2->lines && fblk2->lines->words)
+        deltaX = deltaX < fblk2->lines->words->getFontSize() ?
+                   deltaX : fblk2->lines->words->getFontSize();
+      if (fblk3->lines && fblk3->lines->words)
+        deltaX = deltaX < fblk3->lines->words->getFontSize() ?
+                   deltaX : fblk3->lines->words->getFontSize();
+      if (fblk4->lines && fblk4->lines->words)
+        deltaX = deltaX < fblk4->lines->words->getFontSize() ?
+                   deltaX : fblk4->lines->words->getFontSize();
+
+      deltaY = deltaX;
+
+      deltaX *= minColSpacing1;
+      deltaY *= maxIntraLineDelta;
+
+      xCentre1 = (blk1->xMax + blk1->xMin) / 2.0;
+      yCentre1 = (blk1->yMax + blk1->yMin) / 2.0;
+      xCentre2 = (fblk2->xMax + fblk2->xMin) / 2.0;
+      yCentre2 = (fblk2->yMax + fblk2->yMin) / 2.0;
+      xCentre3 = (fblk3->xMax + fblk3->xMin) / 2.0;
+      yCentre3 = (fblk3->yMax + fblk3->yMin) / 2.0;
+      xCentre4 = (fblk4->xMax + fblk4->xMin) / 2.0;
+      yCentre4 = (fblk4->yMax + fblk4->yMin) / 2.0;
+
+      // are blocks centrally aligned in x ?
+      if (fabs (xCentre1 - xCentre3) <= deltaX &&
+          fabs (xCentre2 - xCentre4) <= deltaX)
+        correspondenceX++;
+
+      // are blocks centrally aligned in y ?
+      if (fabs (yCentre1 - yCentre2) <= deltaY &&
+          fabs (yCentre3 - yCentre4) <= deltaY)
+        correspondenceY++;
+
+      // are blocks aligned to the left ?
+      if (fabs (blk1->xMin - fblk3->xMin) <= deltaX &&
+          fabs (fblk2->xMin - fblk4->xMin) <= deltaX)
+        correspondenceX++;
+
+      // are blocks aligned to the right ?
+      if (fabs (blk1->xMax - fblk3->xMax) <= deltaX &&
+          fabs (fblk2->xMax - fblk4->xMax) <= deltaX)
+        correspondenceX++;
+
+      // are blocks aligned to the top ?
+      if (fabs (blk1->yMin - fblk2->yMin) <= deltaY &&
+          fabs (fblk3->yMin - fblk4->yMin) <= deltaY)
+        correspondenceY++;
+
+      // are blocks aligned to the bottom ?
+      if (fabs (blk1->yMax - fblk2->yMax) <= deltaY &&
+          fabs (fblk3->yMax - fblk4->yMax) <= deltaY)
+        correspondenceY++;
+
+      // are blocks aligned in x and y ?
+      if (correspondenceX > 0 &&
+          correspondenceY > 0) {
+
+        // find maximal tableId
+        tableId = tableId < fblk4->tableId ? fblk4->tableId : tableId;
+        tableId = tableId < fblk3->tableId ? fblk3->tableId : tableId;
+        tableId = tableId < fblk2->tableId ? fblk2->tableId : tableId;
+        tableId = tableId < blk1->tableId ? blk1->tableId : tableId;
+
+        // if the tableId is -1, then we found new table
+        if (tableId < 0) {
+          tableId = numTables;
+          numTables++;
+        }
+
+        blk1->tableId = tableId;
+        fblk2->tableId = tableId;
+        fblk3->tableId = tableId;
+        fblk4->tableId = tableId;
+      }
+    }
+  }
+
+  /*  set extended bounding boxes of all table entries
+   *  so that they contain whole table
+   *  (we need to process whole table size when comparing it
+   *   with regular text blocks)
+   */
+  PDFRectangle *envelopes = new PDFRectangle [numTables];
+  TextBlock **ending_blocks = new TextBlock* [numTables];
+
+  for (i = 0; i < numTables; i++) {
+    envelopes[i].x1 = DBL_MAX;
+    envelopes[i].x2 = DBL_MIN;
+    envelopes[i].y1 = DBL_MAX;
+    envelopes[i].y2 = DBL_MIN;
+  }
+
+  for (blk1 = blkList; blk1; blk1 = blk1->next) {
+    if (blk1->tableId >= 0) {
+      if (blk1->ExMin < envelopes[blk1->tableId].x1) {
+        envelopes[blk1->tableId].x1 = blk1->ExMin;
+        if (!blk1->page->primaryLR)
+          ending_blocks[blk1->tableId] = blk1;
+      }
+
+      if (blk1->ExMax > envelopes[blk1->tableId].x2) {
+        envelopes[blk1->tableId].x2 = blk1->ExMax;
+        if (blk1->page->primaryLR)
+          ending_blocks[blk1->tableId] = blk1;
+      }
+
+      envelopes[blk1->tableId].y1 = blk1->EyMin < envelopes[blk1->tableId].y1 ?
+                                      blk1->EyMin : envelopes[blk1->tableId].y1;
+      envelopes[blk1->tableId].y2 = blk1->EyMax > envelopes[blk1->tableId].y2 ?
+                                      blk1->EyMax : envelopes[blk1->tableId].y2;
+    }
+  }
+
+  for (blk1 = blkList; blk1; blk1 = blk1->next) {
+    if (blk1->tableId >= 0 &&
+        blk1->xMin <= ending_blocks[blk1->tableId]->xMax &&
+        blk1->xMax >= ending_blocks[blk1->tableId]->xMin) {
+      blk1->tableEnd = gTrue;
+    }
+  }
+
+  for (blk1 = blkList; blk1; blk1 = blk1->next) {
+    if (blk1->tableId >= 0) {
+      blk1->ExMin = envelopes[blk1->tableId].x1;
+      blk1->ExMax = envelopes[blk1->tableId].x2;
+      blk1->EyMin = envelopes[blk1->tableId].y1;
+      blk1->EyMax = envelopes[blk1->tableId].y2;
+    }
+  }
+  delete[] envelopes;
+  delete[] ending_blocks;
+
+
+  /*  set extended bounding boxes of all other blocks
+   *  so that they extend in x without hitting neighbours
+   */
+  for (blk1 = blkList; blk1; blk1 = blk1->next) {
+    if (!blk1->tableId >= 0) {
+      double xMax = DBL_MAX;
+      double xMin = DBL_MIN;
+
+      for (blk2 = blkList; blk2; blk2 = blk2->next) {
+        if (blk2 == blk1)
+           continue;
+
+        if (blk1->yMin <= blk2->yMax && blk1->yMax >= blk2->yMin) {
+          if (blk2->xMin < xMax && blk2->xMin > blk1->xMax)
+            xMax = blk2->xMin;
+
+          if (blk2->xMax > xMin && blk2->xMax < blk1->xMin)
+            xMin = blk2->xMax;
+        }
+      }
+
+      for (blk2 = blkList; blk2; blk2 = blk2->next) {
+        if (blk2 == blk1)
+           continue;
+
+        if (blk2->xMax > blk1->ExMax &&
+            blk2->xMax <= xMax &&
+            blk2->yMin >= blk1->yMax) {
+          blk1->ExMax = blk2->xMax;
+        }
+
+        if (blk2->xMin < blk1->ExMin &&
+            blk2->xMin >= xMin &&
+            blk2->yMin >= blk1->yMax)
+          blk1->ExMin = blk2->xMin;
+      }
+    }
+  }
+
+  i = -1;
+  for (blk1 = blkList; blk1; blk1 = blk1->next) {
+    i++;
+    sortPos = blk1->visitDepthFirst(blkList, i, blocks, sortPos, visited);
+  }
+  if (visited) {
+    gfree(visited);
+  }
+
+#if 0 // for debugging
+  printf("*** blocks, after ro sort ***\n");
   for (i = 0; i < nBlocks; ++i) {
     blk = blocks[i];
     printf("block: rot=%d x=%.2f..%.2f y=%.2f..%.2f space=%.2f..%.2f\n",
@@ -2876,44 +3311,34 @@ void TextPage::coalesce(GBool physLayout, GBool doHTML) {
     }
   }
   printf("\n");
+  fflush(stdout);
 #endif
 
   // build the flows
   //~ this needs to be adjusted for writing mode (vertical text)
   //~ this also needs to account for right-to-left column ordering
-  blkArray = (TextBlock **)gmallocn(nBlocks, sizeof(TextBlock *));
-  memcpy(blkArray, blocks, nBlocks * sizeof(TextBlock *));
+  flow = NULL;
   while (flows) {
     flow = flows;
     flows = flows->next;
     delete flow;
   }
   flows = lastFlow = NULL;
-  firstBlkIdx = 0;
-  nBlocksLeft = nBlocks;
-  while (nBlocksLeft > 0) {
-
-    // find the upper-left-most block
-    for (; !blkArray[firstBlkIdx]; ++firstBlkIdx) ;
-    i = firstBlkIdx;
-    blk = blkArray[i];
-    for (j = firstBlkIdx + 1; j < nBlocks; ++j) {
-      blk1 = blkArray[j];
-      if (blk1) {
-	if (blk && blk->secondaryDelta(blk1) > 0) {
-	  break;
-	}
-	if (blk1->primaryCmp(blk) < 0) {
-	  i = j;
-	  blk = blk1;
-	}
+  // assume blocks are already in reading order,
+  // and construct flows accordingly.
+  for (i = 0; i < nBlocks; i++) {
+    blk = blocks[i];
+    blk->next = NULL;
+    if (flow) {
+      blk1 = blocks[i - 1];
+      blkSpace = maxBlockSpacing * blk1->lines->words->fontSize;
+      if (blk1->secondaryDelta(blk) <= blkSpace &&
+	  blk->isBelow(blk1) &&
+	  flow->blockFits(blk, blk1)) {
+	flow->addBlock(blk);
+	continue;
       }
     }
-    blkArray[i] = NULL;
-    --nBlocksLeft;
-    blk->next = NULL;
-
-    // create a new flow, starting with the upper-left-most block
     flow = new TextFlow(this, blk);
     if (lastFlow) {
       lastFlow->next = flow;
@@ -2921,56 +3346,7 @@ void TextPage::coalesce(GBool physLayout, GBool doHTML) {
       flows = flow;
     }
     lastFlow = flow;
-    fontSize = blk->lines->words->fontSize;
-
-    // push the upper-left-most block on the stack
-    blk->stackNext = NULL;
-    blkStack = blk;
-
-    // find the other blocks in this flow
-    while (blkStack) {
-
-      // find the upper-left-most block under (but within
-      // maxBlockSpacing of) the top block on the stack
-      blkSpace = maxBlockSpacing * blkStack->lines->words->fontSize;
-      blk = NULL;
-      i = -1;
-      for (j = firstBlkIdx; j < nBlocks; ++j) {
-	blk1 = blkArray[j];
-	if (blk1) {
-	  if (blkStack->secondaryDelta(blk1) > blkSpace) {
-	    break;
-	  }
-	  if (blk && blk->secondaryDelta(blk1) > 0) {
-	    break;
-	  }
-	  if (blk1->isBelow(blkStack) &&
-	      (!blk || blk1->primaryCmp(blk) < 0)) {
-	    i = j;
-	    blk = blk1;
-	  }
-	}
-      }
-
-      // if a suitable block was found, add it to the flow and push it
-      // onto the stack
-      if (blk && flow->blockFits(blk, blkStack)) {
-	blkArray[i] = NULL;
-	--nBlocksLeft;
-	blk->next = NULL;
-	flow->addBlock(blk);
-	fontSize = blk->lines->words->fontSize;
-	blk->stackNext = blkStack;
-	blkStack = blk;
-
-      // otherwise (if there is no block under the top block or the
-      // block is not suitable), pop the stack
-      } else {
-	blkStack = blkStack->stackNext;
-      }
-    }
   }
-  gfree(blkArray);
 
 #if 0 // for debugging
   printf("*** flows ***\n");
@@ -2980,7 +3356,7 @@ void TextPage::coalesce(GBool physLayout, GBool doHTML) {
 	   flow->priMin, flow->priMax);
     for (blk = flow->blocks; blk; blk = blk->next) {
       printf("  block: rot=%d x=%.2f..%.2f y=%.2f..%.2f pri=%.2f..%.2f\n",
-	     blk->rot, blk->xMin, blk->xMax, blk->yMin, blk->yMax,
+	     blk->rot, blk->ExMin, blk->ExMax, blk->EyMin, blk->EyMax,
 	     blk->priMin, blk->priMax);
       for (line = blk->lines; line; line = line->next) {
 	printf("    line:\n");
@@ -3230,14 +3606,30 @@ GooString *TextPage::getText(double xMin, double yMin,
 
   s = new GooString();
 
-  if (rawOrder) {
-    return s;
-  }
-
   // get the output encoding
   if (!(uMap = globalParams->getTextEncoding())) {
     return s;
   }
+
+  if (rawOrder) {
+    TextWord*  word;
+    char mbc[16];
+    int  mbc_len;
+
+    for (word = rawWords; word && word <= rawLastWord; word = word->next) {
+      for (j = 0; j < word->getLength(); ++j) {
+        double gXMin, gXMax, gYMin, gYMax;
+        word->getCharBBox(j, &gXMin, &gYMin, &gXMax, &gYMax);
+        if (xMin <= gXMin && gXMax <= xMax && yMin <= gYMin && gYMax <= yMax)
+        {
+          mbc_len = uMap->mapUnicode( *(word->getChar(j)), mbc, sizeof(mbc) );
+          s->append(mbc, mbc_len);
+        }
+      }
+    }
+    return s;
+  }
+
   isUnicode = uMap->isUnicode();
   spaceLen = uMap->mapUnicode(0x20, space, sizeof(space));
   eolLen = 0; // make gcc happy
@@ -3521,14 +3913,18 @@ void TextSelectionDumper::visitLine (TextLine *line,
 
 GooString *TextSelectionDumper::getText (void)
 {
-  GBool oneRot = gTrue;
   GooString *s;
   TextLineFrag *frag;
-  int i, col;
+  int i, j;
   GBool multiLine;
   UnicodeMap *uMap;
   char space[8], eol[16];
   int spaceLen, eolLen;
+  GooList *strings = NULL;
+  int actual_table = -1;
+  int actual_line = -1;
+  int last_length = 0;
+  TextBlock *actual_block = NULL;
 
   s = new GooString();
 
@@ -3541,46 +3937,88 @@ GooString *TextSelectionDumper::getText (void)
   eolLen = uMap->mapUnicode(0x0a, eol, sizeof(eol));
 
   if (nFrags > 0) {
-    for (i = 0; i < nFrags; ++i) {
-      frags[i].computeCoords(oneRot);
-    }
-    page->assignColumns(frags, nFrags, oneRot);
-
-    // if all lines in the region have the same rotation, use it;
-    // otherwise, use the page's primary rotation
-    if (oneRot) {
-      qsort(frags, nFrags, sizeof(TextLineFrag),
-	    &TextLineFrag::cmpYXLineRot);
-    } else {
-      qsort(frags, nFrags, sizeof(TextLineFrag),
-	    &TextLineFrag::cmpYXPrimaryRot);
-    }
-
-    col = 0;
     multiLine = gFalse;
     for (i = 0; i < nFrags; ++i) {
       frag = &frags[i];
 
-      // insert a return
-      if (frag->col < col ||
-	  (i > 0 && fabs(frag->base - frags[i-1].base) >
-	              maxIntraLineDelta * frags[i-1].line->words->fontSize)) {
-	  s->append(eol, eolLen);
-	col = 0;
-	multiLine = gTrue;
+      if (actual_table >= 0 && frag->line->blk->tableId < 0) {
+        for (j = 0; j < strings->getLength (); j++) {
+          s->append ((GooString*) strings->get (j));
+          s->append (eol, eolLen);
+          delete ((GooString*) strings->get (j));
+        }
+        delete strings;
+        strings = NULL;
+        actual_table = -1;
+        actual_line = -1;
+        actual_block = NULL;
       }
 
-      // column alignment
-      for (; col < frag->col; ++col) {
-	s->append(space, spaceLen);
-      }
+      // a table
+      if (frag->line->blk->tableId >= 0) {
+        if (actual_table == -1) {
+          strings = new GooList();
+          actual_table = frag->line->blk->tableId;
+          actual_block = frag->line->blk;
+          actual_line = -1;
+        }
 
-      // get the fragment text
-      col += page->dumpFragment(frag->line->text + frag->start, frag->len, uMap, s);
+        // the same block
+        if (actual_block == frag->line->blk) {
+          actual_line++;
+          if (actual_line >= strings->getLength ()) {
+            GooString *t = new GooString ();
+            // add some spaces to have this block correctly aligned
+            if (actual_line > 0)
+              for (j = 0; j < ((GooString*) (strings->get (actual_line - 1)))->getLength() - last_length - 1; j++)
+                t->append (space, spaceLen);
+            strings->append (t);
+          }
+        }
+        // another block
+        else {
+          // previous block ended its row
+          if (actual_block->tableEnd) {
+            for (j = 0; j < strings->getLength (); j++) {
+              s->append ((GooString*) strings->get (j));
+              s->append (eol, eolLen);
+              delete ((GooString*) strings->get (j));
+            }
+            delete strings;
+
+            strings = new GooList();
+            GooString *t = new GooString ();
+            strings->append (t);
+          }
+          actual_block = frag->line->blk;
+          actual_line = 0;
+        }
+
+        page->dumpFragment(frag->line->text + frag->start, frag->len, uMap, ((GooString*) strings->get (actual_line)));
+        last_length = frag->len;
+
+        if (!frag->line->blk->tableEnd) {
+          ((GooString*) strings->get (actual_line))->append (space, spaceLen);
+        }
+      }
+      // not a table
+      else {
+        page->dumpFragment (frag->line->text + frag->start, frag->len, uMap, s);
+        s->append (eol, eolLen);
+      }
     }
 
-    if (multiLine) {
-      s->append(eol, eolLen);
+    if (strings != NULL) {
+      for (j = 0; j < strings->getLength (); j++) {
+        s->append((GooString*) strings->get (j));
+        s->append(eol, eolLen);
+        delete ((GooString*) strings->get (j));
+      }
+      delete strings;
+      strings = NULL;
+      actual_table = -1;
+      actual_line = -1;
+      actual_block = NULL;
     }
   }
 
@@ -3810,14 +4248,28 @@ void TextLine::visitSelection(TextSelectionVisitor *visitor,
   end = NULL;
   current = NULL;
   for (p = words; p != NULL; p = p->next) {
-    if ((selection->x1 < p->xMax && selection->y1 < p->yMax) ||
-	(selection->x2 < p->xMax && selection->y2 < p->yMax))
-      if (begin == NULL) 
-	begin = p;
-    if (((selection->x1 > p->xMin && selection->y1 > p->yMin) ||
-	 (selection->x2 > p->xMin && selection->y2 > p->yMin)) && (begin != NULL)) {
-      end = p->next;
-      current = p;
+    if (blk->page->primaryLR) {
+      if ((selection->x1 < p->xMax && selection->y1 < p->yMax) ||
+	  (selection->x2 < p->xMax && selection->y2 < p->yMax))
+        if (begin == NULL) 
+	  begin = p;
+
+      if (((selection->x1 > p->xMin && selection->y1 > p->yMin) ||
+	   (selection->x2 > p->xMin && selection->y2 > p->yMin)) && (begin != NULL)) {
+        end = p->next;
+        current = p;
+      }
+    } else {
+      if ((selection->x1 > p->xMin && selection->y1 < p->yMax) ||
+	  (selection->x2 > p->xMin && selection->y2 < p->yMax))
+        if (begin == NULL) 
+	  begin = p;
+
+      if (((selection->x1 < p->xMax && selection->y1 > p->yMin) ||
+	   (selection->x2 < p->xMax && selection->y2 > p->yMin)) && (begin != NULL)) {
+        end = p->next;
+        current = p;
+      }
     }
   }
 
@@ -3859,75 +4311,112 @@ void TextLine::visitSelection(TextSelectionVisitor *visitor,
 void TextBlock::visitSelection(TextSelectionVisitor *visitor,
 			       PDFRectangle *selection,
 			       SelectionStyle style) {
-  TextLine *p, *begin, *end;
   PDFRectangle child_selection;
-  double start_x, start_y, stop_x, stop_y;
+  double x[2], y[2], d, best_d[2];
+  TextLine *p, *best_line[2];
+  int i, count = 0, best_count[2], start, stop;
+  GBool all[2];
 
-  begin = NULL;
-  end = NULL;
-  start_x = selection->x1;
-  start_y = selection->y1;
-  stop_x = selection->x2;
-  stop_y = selection->y2;
-  
-  for (p = lines; p != NULL; p = p->next) {
-    if (selection->x1 < p->xMax && selection->y1 < p->yMax && 
-	selection->x2 < p->xMax && selection->y2 < p->yMax && begin == NULL) {
-      begin = p;
-      if (selection->x1 < selection->x2) {
-	start_x = selection->x1;
-	start_y = selection->y1;
-	stop_x = selection->x2;
-	stop_y = selection->y2;
+  x[0] = selection->x1;
+  y[0] = selection->y1;
+  x[1] = selection->x2;
+  y[1] = selection->y2;
+
+  for (i = 0; i < 2; i++) {
+    // the first/last lines are often not nearest
+    // the corners, so we have to force them to be
+    // selected when the selection runs outside this
+    // block.
+    if (page->primaryLR) {
+      all[i] = x[i] >= this->xMax && y[i] >= this->yMax;
+      if (x[i] <= this->xMin && y[i] <= this->yMin) {
+	best_line[i] = this->lines;
+	best_count[i] = 1;
       } else {
-	start_x = selection->x2;
-	start_y = selection->y2;
-	stop_x = selection->x1;
-	stop_y = selection->y1;
+	best_line[i] = NULL;
+	best_count[i] = 0;
       }
-    } else if (selection->x1 < p->xMax && selection->y1 < p->yMax && begin == NULL) {
-      begin = p;
-      start_x = selection->x1;
-      start_y = selection->y1;
-      stop_x = selection->x2;
-      stop_y = selection->y2;
-    } else if (selection->x2 < p->xMax && selection->y2 < p->yMax && begin == NULL) {
-      begin = p;
-      start_x = selection->x2;
-      start_y = selection->y2;
-      stop_x = selection->x1;
-      stop_y = selection->y1;
+    } else {
+      all[i] = x[i] <= this->xMin && y[i] >= this->yMax;
+      if (x[i] >= this->xMax && y[i] <= this->yMin) {
+	best_line[i] = this->lines;
+	best_count[i] = 1;
+      } else {
+	best_line[i] = NULL;
+	best_count[i] = 0;
+      }
     }
-
-    if (((selection->x1 > p->xMin && selection->y1 > p->yMin) ||
-	 (selection->x2 > p->xMin && selection->y2 > p->yMin))
-	&& (begin != NULL))
-      end = p->next;
+    best_d[i] = 0;
   }
 
-  /* Skip empty selection. */
-  if (end == begin)
+  // find the nearest line to the selection points
+  // using the manhattan distance.
+  for (p = this->lines; p; p = p->next) {
+    count++;
+    for (i = 0; i < 2; i++) {
+      d = fmax(p->xMin - x[i], 0.0) +
+	fmax(x[i] - p->xMax, 0.0) +
+	fmax(p->yMin - y[i], 0.0) +
+	fmax(y[i] - p->yMax, 0.0);
+      if (!best_line[i] || all[i] ||
+	  d < best_d[i]) {
+	best_line[i] = p;
+	best_count[i] = count;
+	best_d[i] = d;
+      }
+    }
+  }
+  // assert: best is always set.
+  if (!best_line[0] || !best_line[1]) {
     return;
+  }
 
-  visitor->visitBlock (this, begin, end, selection);
+  // Now decide which point was first.
+  if (best_count[0] < best_count[1] ||
+      (best_count[0] == best_count[1] &&
+       y[0] < y[1])) {
+    start = 0;
+    stop = 1;
+  } else {
+    start = 1;
+    stop = 0;
+  }
 
-  for (p = begin; p != end; p = p->next) {
-    if (p == begin && style != selectionStyleLine) {
-      child_selection.x1 = start_x;
-      child_selection.y1 = start_y;
+  visitor->visitBlock(this, best_line[start], best_line[stop], selection);
+
+  for (p = best_line[start]; p; p = p->next) {
+    if (page->primaryLR) {
+      child_selection.x1 = p->xMin;
+      child_selection.x2 = p->xMax;
     } else {
-      child_selection.x1 = 0;
-      child_selection.y1 = 0;
+      child_selection.x1 = p->xMax;
+      child_selection.x2 = p->xMin;
     }
-    if (p->next == end && style != selectionStyleLine) {
-      child_selection.x2 = stop_x;
-      child_selection.y2 = stop_y;
+    child_selection.y1 = p->yMin;
+    child_selection.y2 = p->yMax;
+    if (style == selectionStyleLine) {
+      if (p == best_line[start]) {
+	child_selection.x1 = 0;
+	child_selection.y1 = 0;
+      }
+      if (p == best_line[stop]) {
+	child_selection.x2 = page->pageWidth;
+	child_selection.y2 = page->pageHeight;
+      }
     } else {
-      child_selection.x2 = page->pageWidth;
-      child_selection.y2 = page->pageHeight;
+      if (p == best_line[start]) {
+	child_selection.x1 = fmax(p->xMin, fmin(p->xMax, x[start]));
+	child_selection.y1 = fmax(p->yMin, fmin(p->yMax, y[start]));
+      }
+      if (p == best_line[stop]) {
+	child_selection.x2 = fmax(p->xMin, fmin(p->xMax, x[stop]));
+	child_selection.y2 = fmax(p->yMin, fmin(p->yMax, y[stop]));
+      }
     }
-
     p->visitSelection(visitor, &child_selection, style);
+    if (p == best_line[stop]) {
+      return;
+    }
   }
 }
 
@@ -3935,73 +4424,122 @@ void TextPage::visitSelection(TextSelectionVisitor *visitor,
 			      PDFRectangle *selection,
 			      SelectionStyle style)
 {
-  int i, begin, end;
   PDFRectangle child_selection;
-  double start_x, start_y, stop_x, stop_y;
-  TextBlock *b;
+  double x[2], y[2], d, best_d[2];
+  double xMin, yMin, xMax, yMax;
+  TextFlow *flow, *best_flow[2];
+  TextBlock *blk, *best_block[2];
+  int i, count = 0, best_count[2], start, stop;
 
-  begin = nBlocks;
-  end = 0;
-  start_x = selection->x1;
-  start_y = selection->y1;
-  stop_x = selection->x2;
-  stop_y = selection->y2;
+  if (!flows)
+    return;
 
-  for (i = 0; i < nBlocks; i++) {
-    b = blocks[i];
+  x[0] = selection->x1;
+  y[0] = selection->y1;
+  x[1] = selection->x2;
+  y[1] = selection->y2;
 
-    if (selection->x1 < b->xMax && selection->y1 < b->yMax &&
-	selection->x2 < b->xMax && selection->y2 < b->yMax && i < begin) {
-      begin = i;
-      if (selection->y1 < selection->y2) {
-	start_x = selection->x1;
-	start_y = selection->y1;
-	stop_x = selection->x2;
-	stop_y = selection->y2;
-      } else {
-	start_x = selection->x2;
-	start_y = selection->y2;
-	stop_x = selection->x1;
-	stop_y = selection->y1;
-      }
-    } else if (selection->x1 < b->xMax && selection->y1 < b->yMax && i < begin) {
-      begin = i;
-      start_x = selection->x1;
-      start_y = selection->y1;
-      stop_x = selection->x2;
-      stop_y = selection->y2;
-    } else if (selection->x2 < b->xMax && selection->y2 < b->yMax && i < begin) {
-      begin = i;
-      start_x = selection->x2;
-      start_y = selection->y2;
-      stop_x = selection->x1;
-      stop_y = selection->y1;
-    }
+  xMin = pageWidth;
+  yMin = pageHeight;
+  xMax = 0.0;
+  yMax = 0.0;
 
-    if ((selection->x1 > b->xMin && selection->y1 > b->yMin) ||
-	(selection->x2 > b->xMin && selection->y2 > b->yMin))
-      end = i + 1;
+  for (i = 0; i < 2; i++) {
+    best_block[i] = NULL;
+    best_flow[i] = NULL;
+    best_count[i] = 0;
+    best_d[i] = 0;
   }
 
-  for (i = begin; i < end; i++) {
-    if (blocks[i]->xMin < start_x && start_x < blocks[i]->xMax &&
-	blocks[i]->yMin < start_y && start_y < blocks[i]->yMax) {
-      child_selection.x1 = start_x;
-      child_selection.y1 = start_y;
-    } else {
-      child_selection.x1 = 0;
-      child_selection.y1 = 0;
+  // find the nearest blocks to the selection points
+  // using the manhattan distance.
+  for (flow = flows; flow; flow = flow->next) {
+    for (blk = flow->blocks; blk; blk = blk->next) {
+      count++;
+      // the first/last blocks in reading order are
+      // often not the closest to the page corners;
+      // track the corners, force those blocks to
+      // be selected if the selection runs across
+      // multiple pages.
+      xMin = fmin(xMin, blk->xMin);
+      yMin = fmin(yMin, blk->yMin);
+      xMax = fmax(xMax, blk->xMax);
+      yMax = fmax(yMax, blk->yMax);
+      for (i = 0; i < 2; i++) {
+	d = fmax(blk->xMin - x[i], 0.0) +
+	  fmax(x[i] - blk->xMax, 0.0) +
+	  fmax(blk->yMin - y[i], 0.0) +
+	  fmax(y[i] - blk->yMax, 0.0);
+	if (!best_block[i] ||
+	    d < best_d[i] ||
+	    (!blk->next && !flow->next &&
+	     x[i] > xMax && y[i] > yMax)) {
+	  best_block[i] = blk;
+	  best_flow[i] = flow;
+	  best_count[i] = count;
+	  best_d[i] = d;
+	}
+      }
     }
-    if (blocks[i]->xMin < stop_x && stop_x < blocks[i]->xMax &&
-	blocks[i]->yMin < stop_y && stop_y < blocks[i]->yMax) {
-      child_selection.x2 = stop_x;
-      child_selection.y2 = stop_y;
+  }
+  for (i = 0; i < 2; i++) {
+    if (primaryLR) {
+      if (x[i] < xMin && y[i] < yMin) {
+	best_block[i] = flows->blocks;
+	best_flow[i] = flows;
+	best_count[i] = 1;
+      }
     } else {
-      child_selection.x2 = pageWidth;
-      child_selection.y2 = pageHeight;
+      if (x[i] > xMax && y[i] < yMin) {
+	best_block[i] = flows->blocks;
+	best_flow[i] = flows;
+	best_count[i] = 1;
+      }
     }
+  }
+  // assert: best is always set.
+  if (!best_block[0] || !best_block[1]) {
+    return;
+  }
 
-    blocks[i]->visitSelection(visitor, &child_selection, style);
+  // Now decide which point was first.
+  if (best_count[0] < best_count[1] ||
+      (best_count[0] == best_count[1] && y[0] < y[1])) {
+    start = 0;
+    stop = 1;
+  } else {
+    start = 1;
+    stop = 0;
+  }
+
+  for (flow = best_flow[start]; flow; flow = flow->next) {
+    if (flow == best_flow[start]) {
+      blk = best_block[start];
+    } else {
+      blk = flow->blocks;
+    }
+    for (; blk; blk = blk->next) {
+      if (primaryLR) {
+	child_selection.x1 = blk->xMin;
+	child_selection.x2 = blk->xMax;
+      } else {
+	child_selection.x1 = blk->xMax;
+	child_selection.x2 = blk->xMin;
+      }
+      child_selection.y1 = blk->yMin;
+      child_selection.y2 = blk->yMax;
+      if (blk == best_block[start]) {
+	child_selection.x1 = fmax(blk->xMin, fmin(blk->xMax, x[start]));
+	child_selection.y1 = fmax(blk->yMin, fmin(blk->yMax, y[start]));
+      }
+      if (blk == best_block[stop]) {
+	child_selection.x2 = fmax(blk->xMin, fmin(blk->xMax, x[stop]));
+	child_selection.y2 = fmax(blk->yMin, fmin(blk->yMax, y[stop]));
+	blk->visitSelection(visitor, &child_selection, style);
+	return;
+      }
+      blk->visitSelection(visitor, &child_selection, style);
+    }
   }
 }
 
@@ -4286,23 +4824,12 @@ void TextPage::dump(void *outputStream, TextOutputFunc outputFunc,
 	  dumpFragment(line->text, n, uMap, s);
 	  (*outputFunc)(outputStream, s->getCString(), s->getLength());
 	  delete s;
-	  if (!line->hyphenated) {
-	    if (line->next) {
-	      (*outputFunc)(outputStream, space, spaceLen);
-	    } else if (blk->next) {
-	      //~ this is a bit of a kludge - we should really do a more
-	      //~ intelligent determination of paragraphs
-	      if (blk->next->lines->words->fontSize ==
-		  blk->lines->words->fontSize) {
-		(*outputFunc)(outputStream, space, spaceLen);
-	      } else {
-		(*outputFunc)(outputStream, eol, eolLen);
-	      }
-	    }
+	  // output a newline when a hyphen is not suppressed
+	  if (n == line->len) {
+	    (*outputFunc)(outputStream, eol, eolLen);
 	  }
 	}
       }
-      (*outputFunc)(outputStream, eol, eolLen);
       (*outputFunc)(outputStream, eol, eolLen);
     }
   }
@@ -4641,6 +5168,7 @@ TextOutputDev::TextOutputDev(char *fileName, GBool physLayoutA,
     } else {
       error(-1, "Couldn't open text file '%s'", fileName);
       ok = gFalse;
+      actualText = NULL;
       return;
     }
     outputFunc = &TextOutputDev_outputToFile;

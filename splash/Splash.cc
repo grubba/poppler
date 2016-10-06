@@ -29,6 +29,7 @@
 #include <string.h>
 #include <limits.h>
 #include "goo/gmem.h"
+#include "goo/GooLikely.h"
 #include "SplashErrorCodes.h"
 #include "SplashMath.h"
 #include "SplashBitmap.h"
@@ -646,6 +647,9 @@ inline void Splash::pipeIncX(SplashPipe *pipe) {
 }
 
 inline void Splash::drawPixel(SplashPipe *pipe, int x, int y, GBool noClip) {
+  if (unlikely(y < 0))
+    return;
+
   if (noClip || state->clip->test(x, y)) {
     pipeSetXY(pipe, x, y);
     pipeRun(pipe);
@@ -3109,10 +3113,19 @@ void Splash::compositeBackground(SplashColorPtr color) {
       q = &bitmap->alpha[y * bitmap->width];
       for (x = 0; x < bitmap->width; ++x) {
 	alpha = *q++;
-	alpha1 = 255 - alpha;
-	p[0] = div255(alpha1 * color0 + alpha * p[0]);
-	p[1] = div255(alpha1 * color1 + alpha * p[1]);
-	p[2] = div255(alpha1 * color2 + alpha * p[2]);
+	if (alpha == 0)
+	{
+	  p[0] = color0;
+	  p[1] = color1;
+	  p[2] = color2;
+	}
+	else if (alpha != 255)
+	{
+	  alpha1 = 255 - alpha;
+	  p[0] = div255(alpha1 * color0 + alpha * p[0]);
+	  p[1] = div255(alpha1 * color1 + alpha * p[1]);
+	  p[2] = div255(alpha1 * color2 + alpha * p[2]);
+	}
 	p += 3;
       }
     }
@@ -3126,10 +3139,19 @@ void Splash::compositeBackground(SplashColorPtr color) {
       q = &bitmap->alpha[y * bitmap->width];
       for (x = 0; x < bitmap->width; ++x) {
 	alpha = *q++;
-	alpha1 = 255 - alpha;
-	p[0] = div255(alpha1 * color0 + alpha * p[0]);
-	p[1] = div255(alpha1 * color1 + alpha * p[1]);
-	p[2] = div255(alpha1 * color2 + alpha * p[2]);
+	if (alpha == 0)
+	{
+	  p[0] = color0;
+	  p[1] = color1;
+	  p[2] = color2;
+	}
+	else if (alpha != 255)
+	{
+	  alpha1 = 255 - alpha;
+	  p[0] = div255(alpha1 * color0 + alpha * p[0]);
+	  p[1] = div255(alpha1 * color1 + alpha * p[1]);
+	  p[2] = div255(alpha1 * color2 + alpha * p[2]);
+	}
 	p[3] = 255;
 	p += 4;
       }
@@ -3243,9 +3265,7 @@ SplashError Splash::blitTransparent(SplashBitmap *src, int xSrc, int ySrc,
   if (bitmap->alpha) {
     for (y = 0; y < h; ++y) {
       q = &bitmap->alpha[(yDest + y) * bitmap->width + xDest];
-      for (x = 0; x < w; ++x) {
-	*q++ = 0x00;
-      }
+      memset(q, 0x00, w);
     }
   }
 

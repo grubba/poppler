@@ -1,6 +1,7 @@
 /* poppler-link.h: qt interface to poppler
  * Copyright (C) 2006, Albert Astals Cid <aacid@kde.org>
- * Copyright (C) 2007-2008, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2007-2008, 2010, Pino Toscano <pino@kde.org>
+ * Copyright (C) 2010, Guillermo Amaral <gamaral@kdab.com>
  * Adapting code from
  *   Copyright (C) 2004 by Enrico Ros <eros.kde@email.it>
  *
@@ -357,7 +358,9 @@ class POPPLER_QT4_EXPORT LinkAction : public Link
 		                  EndPresentation = 9,
 		                  Find = 10,
 		                  GoToPage = 11,
-		                  Close = 12 };
+		                  Close = 12,
+		                  Print = 13    ///< \since 0.16
+		};
 
 		/**
 		 * The action of the current LinkAction

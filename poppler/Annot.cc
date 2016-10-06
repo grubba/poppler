@@ -15,8 +15,8 @@
 //
 // Copyright (C) 2006 Scott Turner <scotty1024@mac.com>
 // Copyright (C) 2007, 2008 Julien Rebetez <julienr@svn.gnome.org>
-// Copyright (C) 2007-2009 Albert Astals Cid <aacid@kde.org>
-// Copyright (C) 2007-2009 Carlos Garcia Campos <carlosgc@gnome.org>
+// Copyright (C) 2007-2010 Albert Astals Cid <aacid@kde.org>
+// Copyright (C) 2007-2010 Carlos Garcia Campos <carlosgc@gnome.org>
 // Copyright (C) 2007, 2008 Iñigo Martínez <inigomartinez@gmail.com>
 // Copyright (C) 2007 Jeff Muizelaar <jeff@infidigm.net>
 // Copyright (C) 2008 Pino Toscano <pino@kde.org>
@@ -59,6 +59,7 @@
 #include "Sound.h"
 #include "FileSpec.h"
 #include "DateInfo.h"
+#include "Link.h"
 #include <string.h>
 
 #define fieldFlagReadOnly           0x00000001
@@ -88,6 +89,10 @@
 // distance of Bezier control point from center for circle approximation
 // = (4 * (sqrt(2) - 1) / 3) * r
 #define bezierCircle 0.55228475
+
+// Ensures that x is between the limits set by low and high.
+// If low is greater than high the result is undefined.
+#define CLAMP(x, low, high)  (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
 
 AnnotLineEndingStyle parseAnnotLineEndingStyle(GooString *string) {
   if (string != NULL) {
@@ -319,37 +324,37 @@ AnnotQuadrilaterals::AnnotQuadrilaterals(Array *array, PDFRectangle *rect) {
   quadrilateralsLength = 0;
 
   if ((arrayLength % 8) == 0) {
-    int i = 0;
+    int i;
 
     quadsLength = arrayLength / 8;
     quads = (AnnotQuadrilateral **) gmallocn
         ((quadsLength), sizeof(AnnotQuadrilateral *));
     memset(quads, 0, quadsLength * sizeof(AnnotQuadrilateral *));
 
-    while (i < (quadsLength) && correct) {
-      for (int j = 0; j < 8 && correct; j++) {
+    for (i = 0; i < quadsLength; i++) {
+      for (int j = 0; j < 8; j++) {
         Object obj;
         if (array->get(i * 8 + j, &obj)->isNum()) {
-          quadArray[j] = obj.getNum();
-          if (j % 2 == 1) {
-              if (quadArray[j] < rect->y1 || quadArray[j] > rect->y2)
-                  correct = gFalse;
-          } else {
-              if (quadArray[j] < rect->x1 || quadArray[j] > rect->x2)
-                  correct = gFalse;
-          }
+          if (j % 2 == 1)
+	    quadArray[j] = CLAMP (obj.getNum(), rect->y1, rect->y2);
+          else
+	    quadArray[j] = CLAMP (obj.getNum(), rect->x1, rect->x2);
         } else {
             correct = gFalse;
+	    obj.free();
+	    error (-1, "Invalid QuadPoint in annot");
+	    break;
         }
         obj.free();
       }
 
-      if (correct)
-        quads[i] = new AnnotQuadrilateral(quadArray[0], quadArray[1],
-                                          quadArray[2], quadArray[3],
-                                          quadArray[4], quadArray[5],
-                                          quadArray[6], quadArray[7]);
-      i++;
+      if (!correct)
+        break;
+
+      quads[i] = new AnnotQuadrilateral(quadArray[0], quadArray[1],
+					quadArray[2], quadArray[3],
+					quadArray[4], quadArray[5],
+					quadArray[6], quadArray[7]);
     }
 
     if (correct) {
@@ -941,15 +946,14 @@ void Annot::initialize(XRef *xrefA, Dict *dict, Catalog *catalog) {
   }
   obj1.free();
 
-  /* TODO: Page Object indirect reference (should be parsed ?) */
-  pageDict = NULL;
-  /*if (dict->lookup("P", &obj1)->isDict()) {
-    pageDict = NULL;
+  if (dict->lookupNF("P", &obj1)->isRef()) {
+    Ref ref = obj1.getRef();
+
+    page = catalog ? catalog->findPage (ref.num, ref.gen) : -1;
   } else {
-    pageDict = NULL;
+    page = 0;
   }
   obj1.free();
-  */
 
   if (dict->lookup("NM", &obj1)->isString()) {
     name = obj1.getString()->copy();
@@ -1094,6 +1098,15 @@ void Annot::setColor(AnnotColor *new_color) {
   }
 }
 
+void Annot::setPage(Ref *pageRef, int pageIndex)
+{
+  Object obj1;
+
+  obj1.initRef(pageRef->num, pageRef->gen);
+  update("P", &obj1);
+  page = pageIndex;
+}
+
 double Annot::getXMin() {
   return rect->x1;
 }
@@ -1122,9 +1135,6 @@ Annot::~Annot() {
   
   if (contents)
     delete contents;
-
-  if (pageDict)
-    delete pageDict;
 
   if (name)
     delete name;
@@ -1245,6 +1255,57 @@ void Annot::drawCircleBottomRight(double cx, double cy, double r) {
   appearBuf->append("S\n");
 }
 
+void Annot::createForm(double *bbox, GBool transparencyGroup, Object *resDict, Object *aStream) {
+  Object obj1, obj2;
+  Object appearDict;
+
+  appearDict.initDict(xref);
+  appearDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
+  appearDict.dictSet("Subtype", obj1.initName("Form"));
+  obj1.initArray(xref);
+  obj1.arrayAdd(obj2.initReal(bbox[0]));
+  obj1.arrayAdd(obj2.initReal(bbox[1]));
+  obj1.arrayAdd(obj2.initReal(bbox[2]));
+  obj1.arrayAdd(obj2.initReal(bbox[3]));
+  appearDict.dictSet("BBox", &obj1);
+  if (transparencyGroup) {
+    Object transDict;
+    transDict.initDict(xref);
+    transDict.dictSet("S", obj1.initName("Transparency"));
+    appearDict.dictSet("Group", &transDict);
+  }
+  if (resDict)
+    appearDict.dictSet("Resources", resDict);
+
+  MemStream *mStream = new MemStream(copyString(appearBuf->getCString()), 0,
+				     appearBuf->getLength(), &appearDict);
+  mStream->setNeedFree(gTrue);
+  aStream->initStream(mStream);
+}
+
+void Annot::createResourcesDict(char *formName, Object *formStream,
+				char *stateName,
+				double opacity,	char *blendMode,
+				Object *resDict) {
+  Object gsDict, stateDict, formDict, obj1;
+
+  gsDict.initDict(xref);
+  if (opacity != 1) {
+    gsDict.dictSet("CA", obj1.initReal(opacity));
+    gsDict.dictSet("ca", obj1.initReal(opacity));
+  }
+  if (blendMode)
+    gsDict.dictSet("BM", obj1.initName(blendMode));
+  stateDict.initDict(xref);
+  stateDict.dictSet(stateName, &gsDict);
+  formDict.initDict(xref);
+  formDict.dictSet(formName, formStream);
+
+  resDict->initDict(xref);
+  resDict->dictSet("ExtGState", &stateDict);
+  resDict->dictSet("XObject", &formDict);
+}
+
 GBool Annot::isVisible(GBool printing) {
   // check the flags
   if ((flags & flagHidden) ||
@@ -1270,7 +1331,7 @@ void Annot::draw(Gfx *gfx, GBool printing) {
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
-  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color, 1,
+  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color,
       rect->x1, rect->y1, rect->x2, rect->y2);
   obj.free();
 }
@@ -1464,6 +1525,14 @@ void AnnotMarkup::setPopup(AnnotPopup *new_popup) {
   } else {
     popup = NULL;
   }
+}
+
+void AnnotMarkup::setOpacity(double opacityA) {
+  Object obj1;
+
+  opacity = opacityA;
+  obj1.initReal(opacity);
+  update ("CA", &obj1);
 }
 
 //------------------------------------------------------------------------
@@ -1850,6 +1919,8 @@ void AnnotText::draw(Gfx *gfx, GBool printing) {
   if (!isVisible (printing))
     return;
 
+  double rectx2 = rect->x2;
+  double recty2 = rect->y2;
   if (appearance.isNull()) {
     ca = opacity;
 
@@ -1880,29 +1951,31 @@ void AnnotText::draw(Gfx *gfx, GBool printing) {
       appearBuf->append (ANNOT_TEXT_AP_CIRCLE);
     appearBuf->append ("Q\n");
 
-    Object appearDict, obj1, obj2;
+    double bbox[4];
+    bbox[0] = bbox[1] = 0;
+    bbox[2] = bbox[3] = 24;
+    if (ca == 1) {
+      createForm(bbox, gFalse, NULL, &appearance);
+    } else {
+      Object aStream, resDict;
 
-    appearDict.initDict(xref);
-    appearDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
-    appearDict.dictSet("Subtype", obj1.initName("Form"));
-    obj1.initArray(xref);
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(24));
-    obj1.arrayAdd(obj2.initReal(24));
-    appearDict.dictSet("BBox", &obj1);
+      createForm(bbox, gTrue, NULL, &aStream);
+      delete appearBuf;
 
-    MemStream *appearStream = new MemStream(copyString(appearBuf->getCString()), 0,
-					    appearBuf->getLength(), &appearDict);
-    appearStream->setNeedFree(gTrue);
-    appearance.initStream(appearStream);
+      appearBuf = new GooString ("/GS0 gs\n/Fm0 Do");
+      createResourcesDict("Fm0", &aStream, "GS0", ca, NULL, &resDict);
+      createForm(bbox, gFalse, &resDict, &appearance);
+    }
     delete appearBuf;
+
+    rectx2 = rect->x1 + 24;
+    recty2 = rect->y1 + 24;
   }
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
-  gfx->drawAnnot(&obj, border, color, ca,
-		 rect->x1, rect->y1, rect->x2, rect->y2);
+  gfx->drawAnnot(&obj, border, color,
+		 rect->x1, rect->y1, rectx2, recty2);
   obj.free();
 }
 
@@ -1993,7 +2066,7 @@ void AnnotLink::draw(Gfx *gfx, GBool printing) {
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
-  gfx->drawAnnot(&obj, border, color, 1,
+  gfx->drawAnnot(&obj, border, color,
 		 rect->x1, rect->y1, rect->x2, rect->y2);
   obj.free();
 }
@@ -2319,6 +2392,16 @@ void AnnotLine::draw(Gfx *gfx, GBool printing) {
   if (!isVisible (printing))
     return;
 
+  /* Some documents like pdf_commenting_new.pdf,
+   * have y1 = y2 but line_width > 0, acroread
+   * renders the lines in such cases even though
+   * the annot bbox is empty. We adjust the bbox here
+   * to avoid having an empty bbox so that lines
+   * are rendered
+   */
+  if (rect->y1 == rect->y2)
+    rect->y2 += border ? border->getWidth() : 1;
+
   if (appearance.isNull()) {
     ca = opacity;
 
@@ -2352,28 +2435,28 @@ void AnnotLine::draw(Gfx *gfx, GBool printing) {
     appearBuf->append ("S\n");
     appearBuf->append ("Q\n");
 
-    Object appearDict, obj1, obj2;
+    double bbox[4];
+    bbox[0] = bbox[1] = 0;
+    bbox[2] = rect->x2 - rect->x1;
+    bbox[3] = rect->y2 - rect->y1;
+    if (ca == 1) {
+      createForm(bbox, gFalse, NULL, &appearance);
+    } else {
+      Object aStream, resDict;
 
-    appearDict.initDict(xref);
-    appearDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
-    appearDict.dictSet("Subtype", obj1.initName("Form"));
-    obj1.initArray(xref);
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(rect->x2 - rect->x1));
-    obj1.arrayAdd(obj2.initReal(rect->y2 - rect->y1));
-    appearDict.dictSet("BBox", &obj1);
+      createForm(bbox, gTrue, NULL, &aStream);
+      delete appearBuf;
 
-    MemStream *appearStream = new MemStream(copyString(appearBuf->getCString()), 0,
-					      appearBuf->getLength(), &appearDict);
-    appearStream->setNeedFree(gTrue);
-    appearance.initStream(appearStream);
+      appearBuf = new GooString ("/GS0 gs\n/Fm0 Do");
+      createResourcesDict("Fm0", &aStream, "GS0", ca, NULL, &resDict);
+      createForm(bbox, gFalse, &resDict, &appearance);
+    }
     delete appearBuf;
   }
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
-  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color, ca,
+  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color,
 		 rect->x1, rect->y1, rect->x2, rect->y2);
   obj.free();
 }
@@ -2464,13 +2547,13 @@ AnnotTextMarkup::~AnnotTextMarkup() {
   }
 }
 
+
+
 void AnnotTextMarkup::draw(Gfx *gfx, GBool printing) {
   Object obj;
   double ca = 1;
   int i;
   Object obj1, obj2;
-  Object formDict, resDict;
-  MemStream *mStream;
 
   if (!isVisible (printing))
     return;
@@ -2565,100 +2648,35 @@ void AnnotTextMarkup::draw(Gfx *gfx, GBool printing) {
 	appearBuf->append ("f\n");
       }
 
-      Object appearDict;
-      appearDict.initDict(xref);
-      appearDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
-      appearDict.dictSet("Subtype", obj1.initName("Form"));
-      obj1.initArray(xref);
-      obj1.arrayAdd(obj2.initReal(rect->x1));
-      obj1.arrayAdd(obj2.initReal(rect->y1));
-      obj1.arrayAdd(obj2.initReal(rect->x2));
-      obj1.arrayAdd(obj2.initReal(rect->y2));
-      appearDict.dictSet("BBox", &obj1);
-      obj1.initArray(xref);
-      obj1.arrayAdd(obj2.initReal(1));
-      obj1.arrayAdd(obj2.initReal(0));
-      obj1.arrayAdd(obj2.initReal(0));
-      obj1.arrayAdd(obj2.initReal(1));
-      obj1.arrayAdd(obj2.initReal(-rect->x1));
-      obj1.arrayAdd(obj2.initReal(-rect->y1));
-      appearDict.dictSet("Matrix", &obj1);
-
-      Object aStream;
-      mStream = new MemStream(copyString(appearBuf->getCString()), 0,
-			      appearBuf->getLength(), &appearDict);
-      mStream->setNeedFree(gTrue);
-      aStream.initStream(mStream);
+      Object aStream, resDict;
+      double bbox[4];
+      bbox[0] = rect->x1;
+      bbox[1] = rect->y1;
+      bbox[2] = rect->x2;
+      bbox[3] = rect->y2;
+      createForm(bbox, gTrue, NULL, &aStream);
       delete appearBuf;
 
-      Object transDict;
-      formDict.initDict(xref);
-      formDict.dictSet ("Form", &aStream);
-      resDict.initDict(xref);
-      resDict.dictSet ("XObject", &formDict);
+      appearBuf = new GooString ("/GS0 gs\n/Fm0 Do");
+      createResourcesDict("Fm0", &aStream, "GS0", 1, "Multiply", &resDict);
+      if (ca == 1) {
+        createForm(bbox, gFalse, &resDict, &appearance);
+      } else {
+        createForm(bbox, gTrue, &resDict, &aStream);
+	delete appearBuf;
 
-      transDict.initDict(xref);
-      transDict.dictSet ("S", obj1.initName("Transparency"));
-
-      appearBuf = new GooString ("/Form Do");
-
-      formDict.initDict(xref);
-      formDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
-      formDict.dictSet("Subtype", obj1.initName("Form"));
-      formDict.dictSet("Group", &transDict);
-      formDict.dictSet("Resources", &resDict);
-      obj1.initArray(xref);
-      obj1.arrayAdd(obj2.initReal(0));
-      obj1.arrayAdd(obj2.initReal(0));
-      obj1.arrayAdd(obj2.initReal(rect->x2 - rect->x1));
-      obj1.arrayAdd(obj2.initReal(rect->y2 - rect->y1));
-      formDict.dictSet("BBox", &obj1);
-
-      mStream = new MemStream(copyString(appearBuf->getCString()), 0,
-			      appearBuf->getLength(), &formDict);
-      mStream->setNeedFree(gTrue);
-      aStream.initStream(mStream);
+	appearBuf = new GooString ("/GS0 gs\n/Fm0 Do");
+	createResourcesDict("Fm0", &aStream, "GS0", ca, NULL, &resDict);
+	createForm(bbox, gFalse, &resDict, &appearance);
+      }
       delete appearBuf;
-
-      Object stateDict;
-
-      formDict.initDict(xref);
-      formDict.dictSet ("HAForm", &aStream);
-      transDict.initDict(xref);
-      transDict.dictSet ("BM", obj1.initName("Multiply"));
-      stateDict.initDict(xref);
-      stateDict.dictSet ("R0", &transDict);
-      resDict.initDict(xref);
-      resDict.dictSet ("XObject", &formDict);
-      resDict.dictSet ("ExtGState", &stateDict);
-
-      appearBuf = new GooString ("/R0 gs\n/HAForm Do");
-
       break;
     }
-
-    formDict.initDict(xref);
-    formDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
-    formDict.dictSet("Subtype", obj1.initName("Form"));
-    if (type == typeHighlight)
-      formDict.dictSet("Resources", &resDict);
-    obj1.initArray(xref);
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(rect->x2 - rect->x1));
-    obj1.arrayAdd(obj2.initReal(rect->y2 - rect->y1));
-    formDict.dictSet("BBox", &obj1);
-
-    mStream = new MemStream(copyString(appearBuf->getCString()), 0,
-			    appearBuf->getLength(), &formDict);
-    mStream->setNeedFree(gTrue);
-    appearance.initStream(mStream);
-    delete appearBuf;
   }
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
-  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color, ca,
+  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color,
 		 rect->x1, rect->y1, rect->x2, rect->y2);
   obj.free();
 }
@@ -3382,7 +3400,7 @@ void AnnotWidget::drawText(GooString *text, GooString *da, GfxFontDict *fontDict
 // Draw the variable text or caption for a field.
 void AnnotWidget::drawListBox(GooString **text, GBool *selection,
 			      int nOptions, int topIdx,
-			      GooString *da, GfxFontDict *fontDict, GBool quadding) {
+			      GooString *da, GfxFontDict *fontDict, int quadding) {
   GooList *daToks;
   GooString *tok, *convertedText;
   GfxFont *font;
@@ -4020,7 +4038,7 @@ void AnnotWidget::draw(Gfx *gfx, GBool printing) {
     gfx->pushResources(dict);
     delete dict;
   }
-  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color, 1,
+  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color,
 		 rect->x1, rect->y1, rect->x2, rect->y2);
   if (addDingbatsResource) {
     gfx->popResources();
@@ -4049,21 +4067,12 @@ AnnotMovie::AnnotMovie(XRef *xrefA, Dict *dict, Catalog *catalog, Object *obj) :
   Annot(xrefA, dict, catalog, obj) {
   type = typeMovie;
   initialize(xrefA, catalog, dict);
-
-  movie = new Movie();
-  movie->parseAnnotMovie(this);
 }
 
 AnnotMovie::~AnnotMovie() {
   if (title)
     delete title;
-  if (fileName)
-    delete fileName;
   delete movie;
-
-  if (posterStream && (!posterStream->decRef())) {
-    delete posterStream;
-  }
 }
 
 void AnnotMovie::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
@@ -4077,239 +4086,116 @@ void AnnotMovie::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
   obj1.free();
 
   Object movieDict;
-  Object aDict;
-
-  // default values
-  fileName = NULL;
-  width = 0;
-  height = 0;
-  rotationAngle = 0;
-  rate = 1.0;
-  volume = 1.0;
-  showControls = false;
-  repeatMode = repeatModeOnce;
-  synchronousPlay = false;
-  
-  hasFloatingWindow = false;
-  isFullscreen = false;
-  FWScaleNum = 1;
-  FWScaleDenum = 1;
-  FWPosX = 0.5;
-  FWPosY = 0.5;
-
   if (dict->lookup("Movie", &movieDict)->isDict()) {
     Object obj2;
-    if (getFileSpecNameForPlatform(movieDict.dictLookup("F", &obj1), &obj2)) {
-      fileName = obj2.getString()->copy();
-      obj2.free();
+    dict->lookup("A", &obj2);
+    if (obj2.isDict())
+      movie = new Movie (&movieDict, &obj2);
+    else
+      movie = new Movie (&movieDict);
+    if (!movie->isOk()) {
+      delete movie;
+      movie = NULL;
+      ok = gFalse;
     }
-    obj1.free();
-
-    if (movieDict.dictLookup("Aspect", &obj1)->isArray()) {
-      Array* aspect = obj1.getArray();
-      if (aspect->getLength() >= 2) {
-	Object tmp;
-	if( aspect->get(0, &tmp)->isNum() ) {
-	  width = (int)floor( aspect->get(0, &tmp)->getNum() + 0.5 );
-	}
-	tmp.free();
-	if( aspect->get(1, &tmp)->isNum() ) {
-	  height = (int)floor( aspect->get(1, &tmp)->getNum() + 0.5 );
-	}
-	tmp.free();
-      }
-    }
-    obj1.free();
-
-    if (movieDict.dictLookup("Rotate", &obj1)->isInt()) {
-      // round up to 90°
-      rotationAngle = (((obj1.getInt() + 360) % 360) % 90) * 90;
-    }
-    obj1.free();
-
-    //
-    // movie poster
-    //
-    posterType = posterTypeNone;
-    posterStream = NULL;
-    if (!movieDict.dictLookup("Poster", &obj1)->isNone()) {
-      if (obj1.isBool()) {
-	GBool v = obj1.getBool();
-	if (v)
-	  posterType = posterTypeFromMovie;
-      }
-      
-      if (obj1.isStream()) {
-	posterType = posterTypeStream;
-	
-	// "copy" stream
-	posterStream = obj1.getStream();
-	posterStream->incRef();
-      }
-
-      obj1.free();
-    }
-
+    obj2.free();
+  } else {
+    error(-1, "Bad Annot Movie");
+    ok = gFalse;
   }
   movieDict.free();
+}
 
+void AnnotMovie::draw(Gfx *gfx, GBool printing) {
+  Object obj;
 
-  // activation dictionary parsing ...
+  if (!isVisible (printing))
+    return;
 
-  if (dict->lookup("A", &aDict)->isDict()) {
-    if (!aDict.dictLookup("Start", &obj1)->isNone()) {
-      if (obj1.isInt()) {
-	// If it is representable as an integer (subject to the implementation limit for
-	// integers, as described in Appendix C), it should be specified as such.
+  if (appearance.isNull() && movie->getShowPoster()) {
+    int width, height;
+    Object poster;
+    movie->getPoster(&poster);
+    movie->getAspect(&width, &height);
 
-	start.units = obj1.getInt();
-      }
-      if (obj1.isString()) {
-	// If it is not representable as an integer, it should be specified as an 8-byte
-	// string representing a 64-bit twos-complement integer, most significant
-	// byte first.
+    if (width != -1 && height != -1 && !poster.isNone()) {
+      MemStream *mStream;
 
-	// UNSUPPORTED
-      }
+      appearBuf = new GooString ();
+      appearBuf->append ("q\n");
+      appearBuf->appendf ("{0:d} 0 0 {1:d} 0 0 cm\n", width, height);
+      appearBuf->append ("/MImg Do\n");
+      appearBuf->append ("Q\n");
 
-      if (obj1.isArray()) {
-	Array* a = obj1.getArray();
+      Object imgDict;
+      imgDict.initDict(xref);
+      imgDict.dictSet ("MImg", &poster);
 
-	Object tmp;
-	a->get(0, &tmp);
-	if (tmp.isInt()) {
-	  start.units = tmp.getInt();
-	}
-	if (tmp.isString()) {
-	  // UNSUPPORTED
-	}
-	tmp.free();
+      Object resDict;
+      resDict.initDict(xref);
+      resDict.dictSet ("XObject", &imgDict);
 
-	a->get(1, &tmp);
-	if (tmp.isInt()) {
-	  start.units_per_second = tmp.getInt();
-	}
-	tmp.free();
-      }
+      Object formDict, obj1, obj2;
+      formDict.initDict(xref);
+      formDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
+      formDict.dictSet("Subtype", obj1.initName("Form"));
+      formDict.dictSet("Name", obj1.initName("FRM"));
+      obj1.initArray(xref);
+      obj1.arrayAdd(obj2.initInt(0));
+      obj1.arrayAdd(obj2.initInt(0));
+      obj1.arrayAdd(obj2.initInt(width));
+      obj1.arrayAdd(obj2.initInt(height));
+      formDict.dictSet("BBox", &obj1);
+      obj1.initArray(xref);
+      obj1.arrayAdd(obj2.initInt(1));
+      obj1.arrayAdd(obj2.initInt(0));
+      obj1.arrayAdd(obj2.initInt(0));
+      obj1.arrayAdd(obj2.initInt(1));
+      obj1.arrayAdd(obj2.initInt(-width / 2));
+      obj1.arrayAdd(obj2.initInt(-height / 2));
+      formDict.dictSet("Matrix", &obj1);
+      formDict.dictSet("Resources", &resDict);
+
+      Object aStream;
+      mStream = new MemStream(copyString(appearBuf->getCString()), 0,
+			      appearBuf->getLength(), &formDict);
+      mStream->setNeedFree(gTrue);
+      aStream.initStream(mStream);
+      delete appearBuf;
+
+      Object objDict;
+      objDict.initDict(xref);
+      objDict.dictSet ("FRM", &aStream);
+
+      resDict.initDict(xref);
+      resDict.dictSet ("XObject", &objDict);
+
+      appearBuf = new GooString ();
+      appearBuf->append ("q\n");
+      appearBuf->appendf ("0 0 {0:d} {1:d} re W n\n", width, height);
+      appearBuf->append ("q\n");
+      appearBuf->appendf ("0 0 {0:d} {1:d} re W n\n", width, height);
+      appearBuf->appendf ("1 0 0 1 {0:d} {1:d} cm\n", width / 2, height / 2);
+      appearBuf->append ("/FRM Do\n");
+      appearBuf->append ("Q\n");
+      appearBuf->append ("Q\n");
+
+      double bbox[4];
+      bbox[0] = bbox[1] = 0;
+      bbox[2] = width;
+      bbox[3] = height;
+      createForm(bbox, gFalse, &resDict, &appearance);
+      delete appearBuf;
     }
-    obj1.free();
-
-    if (!aDict.dictLookup("Duration", &obj1)->isNone()) {
-      if (obj1.isInt()) {
-	duration.units = obj1.getInt();
-      }
-      if (obj1.isString()) {
-	// UNSUPPORTED
-      }
-
-      if (obj1.isArray()) {
-	Array* a = obj1.getArray();
-
-	Object tmp;
-	a->get(0, &tmp);
-	if (tmp.isInt()) {
-	  duration.units = tmp.getInt();
-	}
-	if (tmp.isString()) {
-	  // UNSUPPORTED
-	}
-	tmp.free();
-
-	a->get(1, &tmp);
-	if (tmp.isInt()) {
-	  duration.units_per_second = tmp.getInt();
-	}
-	tmp.free();
-      }
-    }
-    obj1.free();
-
-    if (aDict.dictLookup("Rate", &obj1)->isNum()) {
-      rate = obj1.getNum();
-    }
-    obj1.free();
-
-    if (aDict.dictLookup("Volume", &obj1)->isNum()) {
-      volume = obj1.getNum();
-    }
-    obj1.free();
-
-    if (aDict.dictLookup("ShowControls", &obj1)->isBool()) {
-      showControls = obj1.getBool();
-    }
-    obj1.free();
-
-    if (aDict.dictLookup("Synchronous", &obj1)->isBool()) {
-      synchronousPlay = obj1.getBool();
-    }
-    obj1.free();
-
-    if (aDict.dictLookup("Mode", &obj1)->isName()) {
-      char* name = obj1.getName();
-      if (!strcmp(name, "Once"))
-	repeatMode = repeatModeOnce;
-      if (!strcmp(name, "Open"))
-	repeatMode = repeatModeOpen;
-      if (!strcmp(name, "Repeat"))
-	repeatMode = repeatModeRepeat;
-      if (!strcmp(name,"Palindrome"))
-	repeatMode = repeatModePalindrome;
-    }
-    obj1.free();
-
-    if (aDict.dictLookup("FWScale", &obj1)->isArray()) {
-      // the presence of that entry implies that the movie is to be played
-      // in a floating window
-      hasFloatingWindow = true;
-
-      Array* scale = obj1.getArray();
-      if (scale->getLength() >= 2) {
-	Object tmp;
-	if (scale->get(0, &tmp)->isInt()) {
-	  FWScaleNum = tmp.getInt();
-	}
-	tmp.free();
-	if (scale->get(1, &tmp)->isInt()) {
-	  FWScaleDenum = tmp.getInt();
-	}
-	tmp.free();
-      }
-
-      // detect fullscreen mode
-      if ((FWScaleNum == 999) && (FWScaleDenum == 1)) {
-	isFullscreen = true;
-      }
-    }
-    obj1.free();
-
-    if (aDict.dictLookup("FWPosition", &obj1)->isArray()) {
-      Array* pos = obj1.getArray();
-      if (pos->getLength() >= 2) {
-	Object tmp;
-	if (pos->get(0, &tmp)->isNum()) {
-	  FWPosX = tmp.getNum();
-	}
-	tmp.free();
-	if (pos->get(1, &tmp)->isNum()) {
-	  FWPosY = tmp.getNum();
-	}
-	tmp.free();
-      }
-    }
+    poster.free();
   }
-  aDict.free();
-}
 
-void AnnotMovie::getMovieSize(int& width, int& height) {
-  width = this->width;
-  height = this->height;
+  // draw the appearance stream
+  appearance.fetch(xref, &obj);
+  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color,
+		 rect->x1, rect->y1, rect->x2, rect->y2);
+  obj.free();
 }
-
-void AnnotMovie::getZoomFactor(int& num, int& denum) {
-  num = FWScaleNum;
-  denum = FWScaleDenum;
-}
-
 
 //------------------------------------------------------------------------
 // AnnotScreen
@@ -4335,8 +4221,9 @@ AnnotScreen::~AnnotScreen() {
     delete title;
   if (appearCharacs)
     delete appearCharacs;
+  if (action)
+    delete action;
 
-  action.free();
   additionAction.free();
 }
 
@@ -4349,7 +4236,16 @@ void AnnotScreen::initialize(XRef *xrefA, Catalog *catalog, Dict* dict) {
   }
   obj1.free();
 
-  dict->lookup("A", &action);
+  action = NULL;
+  if (dict->lookup("A", &obj1)->isDict()) {
+    action = LinkAction::parseAction(&obj1, catalog->getBaseURI());
+    if (action->getKind() == actionRendition && page == 0) {
+      error (-1, "Invalid Rendition action: associated screen annotation without P");
+      delete action;
+      action = NULL;
+      ok = gFalse;
+    }
+  }
 
   dict->lookup("AA", &additionAction);
 
@@ -4482,6 +4378,7 @@ void AnnotGeometry::draw(Gfx *gfx, GBool printing) {
     if (border) {
       int i, dashLength;
       double *dash;
+      double borderWidth = border->getWidth();
 
       switch (border->getStyle()) {
       case AnnotBorder::borderDashed:
@@ -4496,94 +4393,95 @@ void AnnotGeometry::draw(Gfx *gfx, GBool printing) {
         appearBuf->append("[] 0 d\n");
         break;
       }
-      appearBuf->appendf("{0:.2f} w\n", border->getWidth());
+      appearBuf->appendf("{0:.2f} w\n", borderWidth);
+
+      if (interiorColor)
+        setColor(interiorColor, gTrue);
+
+      if (type == typeSquare) {
+        appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} re\n",
+			    borderWidth / 2.0, borderWidth / 2.0,
+			    (rect->x2 - rect->x1) - borderWidth,
+			    (rect->y2 - rect->y1) - borderWidth);
+      } else {
+        double width, height;
+	double b;
+	double x1, y1, x2, y2, x3, y3;
+
+	width = rect->x2 - rect->x1;
+	height = rect->y2 - rect->y1;
+	b = borderWidth / 2.0;
+
+	x1 = b;
+	y1 = height / 2.0;
+	appearBuf->appendf ("{0:.2f} {1:.2f} m\n", x1, y1);
+
+	y1 += height / 4.0;
+	x2 = width / 4.0;
+	y2 = height - b;
+	x3 = width / 2.0;
+	y3 = y2;
+	appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
+			    x1, y1, x2, y2, x3, y3);
+	x2 = width - b;
+	y2 = y1;
+	x1 = x3 + (width / 4.0);
+	y1 = y3;
+	x3 = x2;
+	y3 = height / 2.0;
+	appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
+			    x1, y1, x2, y2, x3, y3);
+
+	x2 = x1;
+	y2 = b;
+	x1 = x3;
+	y1 = height / 4.0;
+	x3 = width / 2.0;
+	y3 = b;
+	appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
+			    x1, y1, x2, y2, x3, y3);
+
+	x2 = b;
+	y2 = y1;
+	x1 = width / 4.0;
+	y1 = b;
+	x3 = b;
+	y3 = height / 2.0;
+	appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
+			    x1, y1, x2, y2, x3, y3);
+
+      }
+
+      if (interiorColor)
+        appearBuf->append ("b\n");
+      else
+        appearBuf->append ("S\n");
     }
-
-    if (interiorColor)
-      setColor(interiorColor, gTrue);
-
-    if (type == typeSquare) {
-      appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} re\n",
-			  border->getWidth() / 2.0, border->getWidth() / 2.0,
-			  (rect->x2 - rect->x1) - border->getWidth(),
-			  (rect->y2 - rect->y1) - border->getWidth());
-    } else {
-      double width, height;
-      double b;
-      double x1, y1, x2, y2, x3, y3;
-
-      width = rect->x2 - rect->x1;
-      height = rect->y2 - rect->y1;
-      b = border->getWidth() / 2.0;
-
-      x1 = b;
-      y1 = height / 2.0;
-      appearBuf->appendf ("{0:.2f} {1:.2f} m\n", x1, y1);
-
-      y1 += height / 4.0;
-      x2 = width / 4.0;
-      y2 = height - b;
-      x3 = width / 2.0;
-      y3 = y2;
-      appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
-			  x1, y1, x2, y2, x3, y3);
-      x2 = width - b;
-      y2 = y1;
-      x1 = x3 + (width / 4.0);
-      y1 = y3;
-      x3 = x2;
-      y3 = height / 2.0;
-      appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
-			  x1, y1, x2, y2, x3, y3);
-
-      x2 = x1;
-      y2 = b;
-      x1 = x3;
-      y1 = height / 4.0;
-      x3 = width / 2.0;
-      y3 = b;
-      appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
-			  x1, y1, x2, y2, x3, y3);
-
-      x2 = b;
-      y2 = y1;
-      x1 = width / 4.0;
-      y1 = b;
-      x3 = b;
-      y3 = height / 2.0;
-      appearBuf->appendf ("{0:.2f} {1:.2f} {2:.2f} {3:.2f} {4:.2f} {5:.2f} c\n",
-			  x1, y1, x2, y2, x3, y3);
-
-    }
-
-    if (interiorColor)
-      appearBuf->append ("b\n");
-    else
-      appearBuf->append ("S\n");
     appearBuf->append ("Q\n");
 
-    Object appearDict, obj1, obj2;
+    double bbox[4];
+    bbox[0] = bbox[1] = 0;
+    bbox[2] = rect->x2 - rect->x1;
+    bbox[3] = rect->y2 - rect->y1;
+    if (ca == 1) {
+      createForm(bbox, gFalse, NULL, &appearance);
+    } else {
+      Object aStream;
 
-    appearDict.initDict(xref);
-    appearDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
-    appearDict.dictSet("Subtype", obj1.initName("Form"));
-    obj1.initArray(xref);
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(rect->x2 - rect->x1));
-    obj1.arrayAdd(obj2.initReal(rect->y2 - rect->y1));
-    appearDict.dictSet("BBox", &obj1);
+      createForm(bbox, gTrue, NULL, &aStream);
+      delete appearBuf;
 
-    MemStream *appearStream = new MemStream(copyString(appearBuf->getCString()), 0,
-					    appearBuf->getLength(), &appearDict);
-    appearStream->setNeedFree(gTrue);
-    appearance.initStream(appearStream);
+      Object resDict;
+      appearBuf = new GooString ("/GS0 gs\n/Fm0 Do");
+      createResourcesDict("Fm0", &aStream, "GS0", ca, NULL, &resDict);
+      createForm(bbox, gFalse, &resDict, &appearance);
+    }
     delete appearBuf;
   }
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
-  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color, ca,
+  gfx->drawAnnot(&obj, (AnnotBorder *)NULL, color,
 		 rect->x1, rect->y1, rect->x2, rect->y2);
   obj.free();
 }
@@ -5018,28 +4916,28 @@ void AnnotFileAttachment::draw(Gfx *gfx, GBool printing) {
       appearBuf->append (ANNOT_FILE_ATTACHMENT_AP_TAG);
     appearBuf->append ("Q\n");
 
-    Object appearDict, obj1, obj2;
+    double bbox[4];
+    bbox[0] = bbox[1] = 0;
+    bbox[2] = bbox[3] = 24;
+    if (ca == 1) {
+      createForm (bbox, gFalse, NULL, &appearance);
+    } else {
+      Object aStream;
 
-    appearDict.initDict(xref);
-    appearDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
-    appearDict.dictSet("Subtype", obj1.initName("Form"));
-    obj1.initArray(xref);
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(24));
-    obj1.arrayAdd(obj2.initReal(24));
-    appearDict.dictSet("BBox", &obj1);
+      createForm (bbox, gTrue, NULL, &aStream);
+      delete appearBuf;
 
-    MemStream *appearStream = new MemStream(copyString(appearBuf->getCString()), 0,
-					    appearBuf->getLength(), &appearDict);
-    appearStream->setNeedFree(gTrue);
-    appearance.initStream(appearStream);
+      Object resDict;
+      appearBuf = new GooString ("/GS0 gs\n/Fm0 Do");
+      createResourcesDict("Fm0", &aStream, "GS0", ca, NULL, &resDict);
+      createForm(bbox, gFalse, &resDict, &appearance);
+    }
     delete appearBuf;
   }
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
-  gfx->drawAnnot(&obj, border, color, ca,
+  gfx->drawAnnot(&obj, border, color,
 		 rect->x1, rect->y1, rect->x2, rect->y2);
   obj.free();
 }
@@ -5180,28 +5078,27 @@ void AnnotSound::draw(Gfx *gfx, GBool printing) {
       appearBuf->append (ANNOT_SOUND_AP_MIC);
     appearBuf->append ("Q\n");
 
-    Object appearDict, obj1, obj2;
+    double bbox[4];
+    bbox[0] = bbox[1] = 0;
+    bbox[2] = bbox[3] = 24;
+    if (ca == 1) {
+      createForm(bbox, gFalse, NULL, &appearance);
+    } else {
+      Object aStream, resDict;
 
-    appearDict.initDict(xref);
-    appearDict.dictSet("Length", obj1.initInt(appearBuf->getLength()));
-    appearDict.dictSet("Subtype", obj1.initName("Form"));
-    obj1.initArray(xref);
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(0));
-    obj1.arrayAdd(obj2.initReal(24));
-    obj1.arrayAdd(obj2.initReal(24));
-    appearDict.dictSet("BBox", &obj1);
+      createForm(bbox, gTrue, NULL, &aStream);
+      delete appearBuf;
 
-    MemStream *appearStream = new MemStream(copyString(appearBuf->getCString()), 0,
-					    appearBuf->getLength(), &appearDict);
-    appearStream->setNeedFree(gTrue);
-    appearance.initStream(appearStream);
+      appearBuf = new GooString ("/GS0 gs\n/Fm0 Do");
+      createResourcesDict("Fm0", &aStream, "GS0", ca, NULL, &resDict);
+      createForm(bbox, gFalse, &resDict, &appearance);
+    }
     delete appearBuf;
   }
 
   // draw the appearance stream
   appearance.fetch(xref, &obj);
-  gfx->drawAnnot(&obj, border, color, ca,
+  gfx->drawAnnot(&obj, border, color,
 		 rect->x1, rect->y1, rect->x2, rect->y2);
   obj.free();
 }
