@@ -4,6 +4,8 @@ AM_CPPFLAGS =					\
 	-I$(top_srcdir)				\
 	-I$(top_srcdir)/poppler
 
+LDADD = $(win32_libs)
+
 noinst_PROGRAMS = pdf-fullrewrite
 
 if BUILD_GTK_TEST
