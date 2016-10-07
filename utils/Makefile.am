@@ -25,7 +25,7 @@ bin_PROGRAMS =					\
 	pdfseparate				\
 	pdfunite
 
-UTILS_LIBS =
+UTILS_LIBS = $(win32_libs)
 
 if BUILD_NSS
 bin_PROGRAMS += pdfsig
