@@ -55,6 +55,10 @@ case "$host_os" in
     # Use mingw's ansi stdio extensions
     CXXFLAGS="$CXXFLAGS -D__USE_MINGW_ANSI_STDIO=1"
   ;;
+  windows*)
+    os_win32=yes
+    win32_libs="-lgdi32 -lwinspool -lcomdlg32 -ladvapi32"
+  ;;
 esac
 
 AC_SUBST(win32_libs)
