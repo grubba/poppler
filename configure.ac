@@ -884,6 +884,13 @@ fi
 AM_CONDITIONAL(USE_CMS, test x$enable_cms = xyes)
 AM_CONDITIONAL(USE_LCMS1, test x$lcms1 = xyes)
 
+AH_VERBATIM([AC_MSC_VER], [
+/* MS defined snprintf as deprecated but then added it in Visual Studio 2015. */
+#if defined(_MSC_VER) && _MSC_VER < 1900
+#define snprintf _snprintf
+#endif
+])
+
 AC_ARG_WITH([testdatadir],
    [AS_HELP_STRING([--with-testdatadir=/path/to/testdatadir],
                    [Specify test data dir])],
